@@ -12,6 +12,44 @@ from pathlib import Path
 from typing import Tuple, List, Optional, Set, Dict, Any
 
 # ============================================================================
+# 0. UTF-8 STREAM HARDENING (Windows cp1252 defence)
+# ============================================================================
+# WHY THIS EXISTS:
+#   hooks.json launches this guard as `python scripts/srp-validator.py`. On
+#   Windows a bare `python` does NOT enable UTF-8: measured on this host,
+#   sys.stdin/sys.stdout/sys.stderr all default to cp1252 and
+#   sys.flags.utf8_mode == 0, while the harness writes its JSON payload as
+#   UTF-8 bytes. Two failures followed from that single mismatch:
+#     1. Lossy decode. Any payload carrying non-ASCII text (e.g. a Turkish
+#        path) was decoded as cp1252 and reinterpreted as mojibake
+#        ("Propogandasının söylem" -> "PropogandasÄ±nÄ±n sÃ¶ylem"). The guard
+#        then asked the filesystem about a path that does not exist and
+#        silently lost the target file's real content.
+#     2. Hard crash. Characters absent from cp1252 (U+201D, the typographic
+#        right double quote Word inserts automatically; also U+200D) decode to
+#        lone surrogates, so ast.parse() raised UnicodeEncodeError and the
+#        process exited 1 with EMPTY stdout.
+#   A crashed hook does not block the write: the harness received no decision
+#   at all, so the guard failed OPEN and the write went through unguarded.
+#   Reconfiguring the streams here makes the guard correct regardless of how it
+#   is invoked, instead of depending on a launcher flag that lives outside
+#   version control.
+def _harden_streams_to_utf8() -> None:
+    """Forces stdin/stdout/stderr to UTF-8 with replacement (never raises)."""
+    for stream_name in ("stdin", "stdout", "stderr"):
+        try:
+            getattr(sys, stream_name).reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError, LookupError):
+            # Python < 3.7, a detached/closed stream, or a stream object without
+            # reconfigure(). Best-effort by design: a guard must never fail
+            # because of its own hardening step, so skip the unusable stream.
+            continue
+
+
+_harden_streams_to_utf8()
+
+
+# ============================================================================
 # 1. LOGGING & AUDIT STREAM (srp_guardian_live.json)
 # ============================================================================
 
@@ -182,6 +220,39 @@ def redact_token(token: str) -> str:
         return "***"
     return f"{token[:4]}****...****{token[-3:]}"
 
+# PEM govdesini baslik ile bitis arasinda yakalar.
+_PEM_BODY_RE = re.compile(
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----(.*?)-----END [A-Z ]*PRIVATE KEY-----",
+    re.DOTALL,
+)
+
+
+def is_elided_pem_fixture(added_text: str, start: int, span: int = 400) -> bool:
+    """Tekil Sorumluluk: PEM basliginin test/dokuman ornegi oldugunu belirlemek.
+
+    Gercek bir ozel anahtarin govdesi YUZLERCE base64 karakteridir ve icinde
+    '.' BULUNAMaz (nokta base64 alfabesinde yoktur). Bu yuzden elips ('...')
+    veya cok kisa bir govde, degerin canli anahtar degil ornek veri oldugunun
+    KESIN kanitidir.
+
+    Bu kontrol olmadan, icinde ornek PEM blogu bulunan bir test veya dokuman
+    yazmak G0 tarafindan BLOKLANIR — koruma mesru is akisini engeller hale
+    gelir. Esik bilerek cok dusuktur: en kisa gercek anahtar bile ~64 base64
+    karakterdir, bu yuzden gercek bir anahtarin atlanmasi beklenmez.
+    """
+    window = added_text[start:start + span]
+    if "..." in window or "\u2026" in window:
+        return True
+
+    body_match = _PEM_BODY_RE.match(window)
+    if body_match:
+        b64_chars = re.findall(r"[A-Za-z0-9+/=]", body_match.group(1))
+        if len(b64_chars) < 48:
+            return True
+
+    return False
+
+
 def check_g0_secret_leak(added_text: str) -> Tuple[bool, str, Optional[str]]:
     """
     Guards against secret, API key, and credential leaks in newly added code lines.
@@ -194,7 +265,7 @@ def check_g0_secret_leak(added_text: str) -> Tuple[bool, str, Optional[str]]:
     # 1. HIGH-CONFIDENCE BLOCK RULES
     # A) Private Keys (PEM / OpenSSH)
     pk_match = re.search(r"-----BEGIN (?:RSA |EC |OPENSSH |PGP |DSA )?PRIVATE KEY-----", added_text)
-    if pk_match:
+    if pk_match and not is_elided_pem_fixture(added_text, pk_match.start()):
         return True, "Özel anahtar (Private Key) başlığı tespit edildi. Private key'ler asla depoya commit edilemez!", None
 
     # B) GitHub Tokens (ghp_, github_pat_, gho_, ghu_, ghs_, ghr_)
@@ -811,6 +882,18 @@ def analyze_python_srp(content: str, file_path: str = "") -> Tuple[bool, str]:
         tree = ast.parse(content)
     except SyntaxError:
         return analyze_python_srp_regex_fallback(content, file_path)
+    except Exception:
+        # Defensive backstop: ast.parse may fail with things other than
+        # SyntaxError. UnicodeEncodeError in particular (lone surrogates in the
+        # content) is a ValueError and previously escaped this handler, killing
+        # the whole guard process; a crashed hook yields no decision, which lets
+        # the write through UNGUARDED. Falling back to the regex path keeps the
+        # guard alive and still enforcing. Re-raised inside the fallback so the
+        # underlying defect stays visible instead of being silently absorbed.
+        try:
+            return analyze_python_srp_regex_fallback(content, file_path)
+        except Exception:
+            raise
 
     has_ui_imports = False
     has_net_imports = False

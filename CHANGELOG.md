@@ -5,6 +5,41 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.6] - 2026-09-21
+
+### Fixed
+- **Non-ASCII Paths Were Corrupted, and One Class of Them Crashed the Guard Open (Windows)**:
+  - `hooks.json` launches the guard as a bare `python scripts/srp-validator.py`. On Windows that does **not** enable UTF-8: measured on the affected host, `sys.flags.utf8_mode == 0` and `stdin`/`stdout`/`stderr` all default to `cp1252`, while the harness writes its JSON payload as **UTF-8 bytes**. Three distinct harms followed from that single mismatch:
+    1. **Lossy decode.** Non-ASCII paths were reinterpreted as mojibake — the live audit log literally contained `PropogandasÄ±nÄ±n sÃ¶ylem` instead of `Propogandasının söylem`. The guard then queried a path that does not exist and silently lost the target file's real content, degrading the T1/T3 evidence checks.
+    2. **A bogus directory tree inside the user's project.** Because `get_runtime_dir()` creates its directories with `mkdir(parents=True, exist_ok=True)`, the corrupted path did not merely misread — the guard *created* a mojibake-named folder next to the real one.
+    3. **Hard crash → FAIL-OPEN.** Characters absent from cp1252 decode to lone surrogates, so `ast.parse()` raised `UnicodeEncodeError` (`ast.parse` was the only unguarded call site; the other two already used `except Exception`). The process exited 1 with **empty stdout**. A hook that returns no decision does not block the write, so **the guard was bypassed silently** — a security-boundary failure, not a cosmetic logging bug.
+  - Measured crashing inputs: `U+201D` (the typographic right double quote that Word inserts automatically) and `ZWJ U+200D`. Twenty-six other tested non-ASCII characters, including every Turkish letter, were safe.
+  - **Proof of fail-open:** a probe file containing `U+201D` was written to disk with **zero** audit entries; an ASCII control probe produced 2 entries.
+  - Fix: both entry points (`gravity-validator.py`, `async_runner.py`) now force `stdin`/`stdout`/`stderr` to UTF-8 with `errors="replace"` at import time, so the guard is correct regardless of how it is launched instead of depending on a launcher flag that lives outside version control. The sole unguarded `ast.parse` gained a defensive fallback to the regex path, re-raising inside the fallback so the underlying defect stays visible.
+
+- **G0 Denied Legitimate Files Containing Sample Private Key Blocks**:
+  - The G0 PEM rule (`check_g0_secret_leak`) matched `-----BEGIN ... PRIVATE KEY-----` and denied immediately, **without ever inspecting the body**. Every neighbouring rule (GitHub, Anthropic, OpenAI, Gemini, Slack) guarded itself with `if not is_placeholder(...)`; the PEM rule alone did not. The inconsistency was the defect.
+  - Consequence: any test or documentation file containing a sample key block could not be written at all. Measured occurrence: `engine/test_gravity_validator.py` — GravityGuard's **own G0 test** — caused the commit-time secret scanner to reject a legitimate commit (`[KRITIK GUVENLIK ENGELI] ... engine/test_gravity_validator.py`). The project could not commit its own tests.
+  - Fix: PEM matches are now classified as fixtures when the body is provably non-live. A real key body is hundreds of base64 characters and **cannot contain `.`** (not in the base64 alphabet), so an ellipsis or a body under 48 base64 characters is conclusive evidence of sample data. The same check was added to the standalone commit-time scanner (`~/.git-template/hooks/guard/secret_checker.py`) and propagated to all 12 repository hook copies (MD5-verified, zero remaining drift).
+  - **This is a deliberate, narrow relaxation of a security control, and the threshold is a judgement call — not a standard.** Justification for the size of risk: an elided key is unusable, because base64 decoding fails and no partial key can be reconstructed from a truncated body. The margin is conservative: a real RSA key body is ~1600 characters and an EC key ~230, while the shortest possible real PEM still exceeds 64. Verified end-to-end against the live hook: **8/8** cases behaved correctly, including full-length RSA, EC, OPENSSH, PGP **and** DSA keys, which are all still denied.
+  - `test_g0_block_private_key` was **not** weakened to accommodate this: it was re-pointed at a real-length body so the exemption cannot mask a genuine key. A companion test (`test_g0_allows_elided_pem_fixture`) covers the fixture case. Both the test bodies and headers are assembled at runtime, so the test file contains no literal PEM block that would trip the scanners it is testing.
+- **`ROADMAP.md` had 25 corrupted lines**: a botched patch left a literal `+` prefix on every line of §3.6 and §3.7, so the `### 3.6.` heading rendered as `+### 3.6.`. Prefixes stripped; the file went 145 → 144 lines.
+
+### Added
+- **`TestWindowsEncodingRegression`** (3 tests): the typographic quote must yield a valid decision rather than kill the process; the guard must leave an audit entry (silence would mean it failed open); and a Turkish path must cross the stdin boundary verbatim.
+- **`run_validator_raw_bytes()`** test helper: writes the payload as raw UTF-8 bytes with `ensure_ascii=False` and deliberately does **not** pass `-X utf8`, mirroring `hooks.json` exactly.
+- The pre-existing `run_validator()` used `text=True` and `json.dumps`' default `ensure_ascii=True`, so its payload was **pure ASCII** — the one configuration immune to this bug. That is precisely why 89 green tests coexisted with a guard that was broken in production; the suite could not have observed the defect.
+- **PEM fixture regression tests** (`guard_test.py`, 3 tests) covering both directions: sample blocks allowed, full-length real keys still blocked, so the control cannot silently weaken.
+
+### Changed
+- Test Count: **93/93 passing** (was 89/89; +3 encoding, +1 elided-PEM fixture). The 3 encoding tests were confirmed **non-vacuous**: they fail 3/3 against the pre-fix validator and pass 3/3 after it.
+- `guard_test.py` (commit-time scanner suite): 9/9 passing (was 6/6; +3 PEM).
+- Anti-bloat invariant intact: in-memory guard logic measured avg **0.051–0.069 ms**, p99 **0.175–0.995 ms** (bound < 10 ms).
+
+### Notes
+- **Scope limit:** this fixes encoding and the G0 false positive, not the T1 policy. `T1_MISSING_RELATED_TEST` is `WARN ONLY` (returns `decision: allow`) and still fires on the affected project, because that project genuinely contains zero test files. Silencing it requires either adding tests or a `.gravityguard.json` exemption — a separate, deliberate choice.
+- Nothing was deleted from the user's project: the two mojibake folders removed were guard-generated empty shells containing a single `debounce_state.json`, and the real 251-file project folder was verified intact afterwards.
+
 ## [1.2.5] - 2026-09-20
 
 ### Added

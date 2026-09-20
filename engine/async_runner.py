@@ -20,6 +20,30 @@ from typing import Dict, Any, List, Optional
 
 
 # ============================================================================
+# UTF-8 STREAM HARDENING (Windows cp1252 defence)
+# ============================================================================
+# Mirrors the hardening in gravity-validator.py. This runner receives a file
+# path from the hook, so a cp1252 default (the Windows behaviour of a bare
+# `python`) would make it operate on a mojibake path — and, because
+# get_runtime_dir() creates its directories with mkdir(parents=True), that
+# failure mode does not merely misread: it CREATES a bogus directory tree
+# inside the user's project. Keeping both entry points on UTF-8 removes the
+# entire class of failure. Reference: see the longer note in gravity-validator.py.
+def _harden_streams_to_utf8() -> None:
+    """Forces stdin/stdout/stderr to UTF-8 with replacement (never raises)."""
+    for stream_name in ("stdin", "stdout", "stderr"):
+        try:
+            getattr(sys, stream_name).reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError, LookupError):
+            # Best-effort by design: a background lint runner must never die
+            # because of its own hardening step, so skip the unusable stream.
+            continue
+
+
+_harden_streams_to_utf8()
+
+
+# ============================================================================
 # HIDDEN SUBPROCESS POLICY (Single Source of Truth)
 # ============================================================================
 # On Windows a background-spawned console program (npx -> cmd.exe -> node,

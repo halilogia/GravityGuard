@@ -67,6 +67,57 @@ def run_validator(payload: dict) -> Tuple[dict, float]:
         )
     return res, elapsed_ms
 
+
+def run_validator_raw_bytes(payload: dict, log_dir: str = None) -> Tuple[int, dict, str]:
+    """Runs the hook the way the REAL harness does.
+
+    Two details matter, and run_validator() above exercises neither:
+      * the payload is written to stdin as RAW UTF-8 BYTES (run_validator uses
+        text=True, which encodes with the locale codec);
+      * json.dumps runs with ensure_ascii=False (run_validator leaves the default
+        True), so non-ASCII text actually reaches the child process.
+
+    Those two are the only conditions under which a cp1252/UTF-8 mismatch can
+    produce any symptom at all. That is precisely why 89 green tests coexisted
+    with a guard that was broken in production: the suite was feeding the hook
+    pure ASCII and therefore could not observe the defect.
+
+    No `-X utf8` flag is passed, deliberately: this mirrors hooks.json and keeps
+    sys.flags.utf8_mode == 0 in the child, which is the buggy configuration.
+
+    Returns (exit_code, parsed_response, stderr_text).
+    """
+    raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    env = dict(os.environ)
+    if log_dir:
+        env["GRAVITYGUARD_LOG_DIR"] = log_dir
+    proc = subprocess.Popen(
+        [sys.executable, VALIDATOR_PATH],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+    )
+    out_bytes, err_bytes = proc.communicate(input=raw)
+    stdout = out_bytes.decode("utf-8", "replace")
+    stderr = err_bytes.decode("utf-8", "replace")
+    try:
+        res = json.loads(stdout.strip())
+    except Exception as exc:
+        # Mirrors the real harness: a hook that dies yields NO decision.
+        res = {"error": str(exc), "stdout": stdout, "stderr": stderr}
+    return proc.returncode, res, stderr
+
+
+def audit_targets(log_dir: str) -> list:
+    """Returns the `target` values recorded in an isolated audit log."""
+    path = os.path.join(log_dir, "srp_guardian_live.json")
+    if not os.path.exists(path):
+        return []
+    with open(path, "r", encoding="utf-8") as fh:
+        return [e.get("target", "") for e in json.load(fh).get("events", [])]
+
+
 class TestGravityGuardPhase1(unittest.TestCase):
 
     def test_syntax(self):
@@ -536,20 +587,60 @@ class TestGravityGuardPhase1(unittest.TestCase):
     # --- G0: SECRET LEAK GUARD TESTS ---
 
     def test_g0_block_private_key(self):
-        """Private key header in added lines must be BLOCKED"""
+        """GERCEK govdeli private key blogu BLOCK edilmeli.
+
+        Govde ve baslik PARCA PARCA uretilir: bu dosyada literal bir PEM blogu
+        bulunursa, test ettigi commit-zamani sir tarayicisini kendisi tetikler
+        ve mesru commit'ler bloklanir. Govde uzunlugu gercek bir anahtarla
+        ayni mertebede tutulur ki G0'in 'kisaltilmis govde' muafiyeti bu testi
+        zayiflatmasin (asil amac gercek anahtarin yakalanmasi).
+        """
+        hdr = "-" * 5 + "BEGIN RSA PRIVATE" + " KEY" + "-" * 5
+        ftr = "-" * 5 + "END RSA PRIVATE" + " KEY" + "-" * 5
+        body = (
+            "MIIEowIBAAKCAQEAy8Dbv8prpJ0kKhlGeJYozo2t60EG8L0561g13R29LvMR5"
+            "vGZlGJpmn65A4xHXo96xLrHX3r8nCzYzZ9r1RkQ2mQ0zE9p1lS3n6J4X1c8Yb2t"
+            "Q0lR8ZQ2mVJ0qK7nJ5tY3wL9xP4rD6sA1bC2dE3fG4hI5jK6lM7nO8pQ9rS0tU"
+            "vW1xY2zA3bC4dE5fG6hI7jK8lM9nO0pQ1rS2tU3vW4xY5zA6bC7dE8fG9hI0jK"
+        )
         payload = {
             "toolCall": {
                 "name": "replace_file_content",
                 "args": {
                     "TargetFile": "C:/fake_project/src/auth.py",
                     "TargetContent": "# certs",
-                    "ReplacementContent": "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA0...\n-----END RSA PRIVATE KEY-----"
+                    "ReplacementContent": hdr + "\n" + body + "\n" + ftr
                 }
             }
         }
         res, _ = run_validator(payload)
         self.assertEqual(res.get("decision"), "deny")
         self.assertIn("G0_SECRET_LEAK", res.get("reason", ""))
+
+    def test_g0_allows_elided_pem_fixture(self):
+        """Kisaltilmis PEM govdesi (test/dokuman ornegi) bloklanmamali.
+
+        Boyle bir blok gercek anahtar olamaz: base64 alfabesinde '.' yoktur,
+        dolayisiyla elips canli bir anahtarda bulunamaz. Bu muafiyet olmadan
+        ornek PEM blogu iceren test/dokuman dosyalari yazilamaz hale gelir.
+        """
+        hdr = "-" * 5 + "BEGIN RSA PRIVATE" + " KEY" + "-" * 5
+        ftr = "-" * 5 + "END RSA PRIVATE" + " KEY" + "-" * 5
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/tests/test_auth.py",
+                    "TargetContent": "# certs",
+                    "ReplacementContent": hdr + "\nMIIEowIBAAKCAQEA0...\n" + ftr
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(
+            res.get("decision"), "allow",
+            f"ornek PEM blogu bloklandi (yanlis pozitif): {res.get('reason', '')[:200]}"
+        )
 
     def test_g0_block_github_pat(self):
         """GitHub Personal Access Token in added lines must be BLOCKED"""
@@ -2211,6 +2302,117 @@ class TestHookStdoutContract(unittest.TestCase):
         res, _ = run_validator(payload)
         self.assertEqual(res.get("decision"), "allow")
         self.assertLessEqual(set(res.keys()), SCHEMA_ALLOWED_KEYS)
+
+
+class TestWindowsEncodingRegression(unittest.TestCase):
+    """Regression guard for the Windows cp1252 defect.
+
+    A bare `python` on Windows does not enable UTF-8 (measured on the affected
+    host: sys.flags.utf8_mode == 0, stdin/stdout == cp1252) while the harness
+    writes its JSON payload as UTF-8 bytes. The measured consequences were:
+
+      1. Lossy decode. Non-ASCII paths were mis-decoded and logged as mojibake
+         ('Propogandasının söylem' -> 'PropogandasÄ±nÄ±n sÃ¶ylem'), so the guard
+         queried a path that does not exist and silently lost the target file's
+         real content.
+      2. Hard crash. U+201D — the typographic right double quote Word inserts
+         automatically — decoded to a lone surrogate and made ast.parse() raise
+         UnicodeEncodeError: exit 1 with EMPTY stdout.
+
+    (2) is the dangerous one. A hook that crashes returns no decision, and the
+    harness then proceeds, so the write landed UNGUARDED. That is a fail-open
+    hole in a security boundary, not a cosmetic logging bug.
+    """
+
+    def _assert_schema_valid(self, res: dict) -> None:
+        self.assertNotIn("error", res, f"hook produced no valid decision: {res}")
+        self.assertLessEqual(
+            set(res.keys()), SCHEMA_ALLOWED_KEYS,
+            f"illegal stdout key(s): {set(res.keys()) - SCHEMA_ALLOWED_KEYS}"
+        )
+
+    def test_typographic_quote_does_not_crash_hook(self):
+        """U+201D must yield a valid decision instead of killing the process."""
+        log_dir = tempfile.mkdtemp(prefix="gg_enc_")
+        try:
+            payload = {
+                "toolCall": {
+                    "name": "write_to_file",
+                    "args": {
+                        "TargetFile": "C:/fake_project/src/prod_module.py",
+                        "CodeContent": "# \u201d typographic right double quote\nx = 1\n",
+                    }
+                }
+            }
+            rc, res, stderr = run_validator_raw_bytes(payload, log_dir)
+            self.assertEqual(rc, 0, f"hook crashed (exit {rc}); stderr: {stderr[:400]}")
+            self._assert_schema_valid(res)
+            self.assertEqual(res.get("decision"), "allow")
+        finally:
+            shutil.rmtree(log_dir, ignore_errors=True)
+
+    def test_guard_stays_alive_so_it_cannot_fail_open(self):
+        """Silence means the guard was bypassed, so an audit entry is required.
+
+        This is the substantive regression. Before the fix the crashed hook wrote
+        NO audit entry, yet the file write still succeeded — the guard was
+        skipped invisibly. Requiring an event proves the guard survived and
+        actually evaluated the change.
+        """
+        log_dir = tempfile.mkdtemp(prefix="gg_enc_")
+        try:
+            payload = {
+                "toolCall": {
+                    "name": "write_to_file",
+                    "args": {
+                        "TargetFile": "C:/fake_project/src/prod_module.py",
+                        "CodeContent": "# \u201d quoted \u201c text\nx = 1\n",
+                    }
+                }
+            }
+            rc, res, stderr = run_validator_raw_bytes(payload, log_dir)
+            self.assertEqual(rc, 0, f"hook crashed; stderr: {stderr[:400]}")
+            self.assertTrue(
+                audit_targets(log_dir),
+                "guard recorded NOTHING: it crashed and therefore failed OPEN"
+            )
+        finally:
+            shutil.rmtree(log_dir, ignore_errors=True)
+
+    def test_turkish_path_is_logged_intact(self):
+        """A non-ASCII path must cross the stdin boundary unmangled."""
+        log_dir = tempfile.mkdtemp(prefix="gg_enc_")
+        proj_root = tempfile.mkdtemp(prefix="gg_tr_")
+        try:
+            # Deliberately Turkish: O-umlaut, dotless i, o-umlaut, s-cedilla.
+            tr_name = "Bildiri \u00d6devi Propogandas\u0131n\u0131n s\u00f6ylem"
+            target = os.path.join(proj_root, tr_name, "scripts", "generate_docs.py")
+            payload = {
+                "toolCall": {
+                    "name": "write_to_file",
+                    "args": {"TargetFile": target, "CodeContent": "x = 1\n"},
+                }
+            }
+            rc, res, stderr = run_validator_raw_bytes(payload, log_dir)
+            self.assertEqual(rc, 0, f"hook crashed; stderr: {stderr[:400]}")
+
+            targets = audit_targets(log_dir)
+            self.assertTrue(targets, "no audit event recorded")
+            recorded = " ".join(targets)
+
+            # These sequences are what a cp1252 mis-read produces.
+            for mojibake in ("\u00c3", "\u00c4", "\u00c5", "\u00e2\u0080"):
+                self.assertNotIn(
+                    mojibake, recorded,
+                    f"path was mis-decoded (cp1252 mojibake present): {recorded[:200]}"
+                )
+            self.assertIn(
+                tr_name, recorded,
+                f"Turkish path was not preserved verbatim: {recorded[:200]}"
+            )
+        finally:
+            shutil.rmtree(log_dir, ignore_errors=True)
+            shutil.rmtree(proj_root, ignore_errors=True)
 
 
 if __name__ == "__main__":

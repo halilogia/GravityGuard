@@ -4,7 +4,7 @@ This document outlines the strategic evolution, architectural milestones, and pl
 
 ---
 
-## Current Status: v1.2.5 (Phase 1, Phase 2 & Phase 2.5 Released & Frozen)
+## Current Status: v1.2.6 (Phase 1, Phase 2 & Phase 2.5 Released & Frozen)
 
 ### ✅ Phase 1: High-Confidence Integrity & Architecture Guards
 - [x] **Universal Rebranding & Setup**: Standalone repository under `GitHub/Public/GravityGuard` with full TypeScript IDE extension + Python Guard Engine.
@@ -38,7 +38,7 @@ This document outlines the strategic evolution, architectural milestones, and pl
   - Integrated 9Router local AI pipeline with sub-3s model failover.
 - [x] **Live Security Monitor Webview**:
   - Real-time Activity Bar panel streaming audit events from `~/.gemini/logs/srp_guardian_live.json`.
-- [x] **89/89 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`).
+- [x] **92/92 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`).
 
 ---
 
@@ -66,10 +66,12 @@ This document outlines the strategic evolution, architectural milestones, and pl
 
 
 ### 2.2. Intent-Aware Prompt Enhancer
-- [ ] Automated query classification:
-  - **Consulting / Brainstorming Mode**: Produces trade-off analyses, architectural choices, and risk pre-mortems.
-  - **Implementation Mode**: Produces strict, defensive, SRP-compliant implementation specifications.
-  - **Audit / Refactoring Mode**: Focuses on boundary compliance, dead code removal, and test integrity.
+- [~] Intent-aware enhancement — **partially implemented, and NOT automated**:
+  - The `systemPrompt` in `src/extension.ts` instructs the *downstream* model to classify intent itself. There is no local classifier, no keyword analysis and no programmatic routing in the extension, so the `[ ] Automated` label was overstated.
+  - [x] **Consulting / Brainstorming Mode** — present as directive A ("İSTİŞARE / FİKİR / BEYİN FIRTINASI"): demands options, trade-offs and over-engineering risks, and explicitly forbids issuing build orders.
+  - [x] **Implementation Mode** — present as directive B ("UYGULAMA / KODLAMA"): demands a defensive specification (purpose, architecture, SRP boundaries, error handling, tests).
+  - [ ] **Audit / Refactoring Mode** — **absent.** No directive covers boundary compliance, dead-code removal or test integrity.
+  - [ ] No verification that the classifier actually behaves as instructed; behaviour depends entirely on the model's compliance.
 
 ---
 
@@ -115,28 +117,28 @@ This document outlines the strategic evolution, architectural milestones, and pl
 - [x] **Global gitignore:** `core.excludesFile` was unset (no global protection at all). Created `~/.gitignore_global` covering `.env*`, `*.key`, `*.pem`, `credentials.json`, `secrets.*`, `id_rsa`, etc. This prevents secrets from being staged in the first place across all 55 repositories; the hook remains the detection layer for `git add -f` overrides.
 - [x] **Backup consolidation:** 105 scattered `.bak-before-*` files (161.5 KB) moved from hidden `.git/hooks` directories into `~/.git-hook-backups/`, tagged with their originating repository. Nothing deleted.
 - [ ] Scope note: of the 5 checks in `loss-guard`, only the secret check is relevant to Python projects; the other 4 (visual tags, React hooks, lazy placeholders, `components/` line balance) target web/React code.
-+
-+### 3.6. Repo ↔ Live Plugin Synchronization (P3-04)
-+> The guard engine exists as **two copies**: the repo source (`engine/gravity-validator.py`) and the live plugin copy (`~/.gemini/config/plugins/srp-swarm-guardian/scripts/srp-validator.py`). The plugin copy is renamed because `hooks.json` invokes `python scripts/srp-validator.py`. The two directories are separate deployment targets, so the duplicate cannot be eliminated — only kept in check.
-+
-+- [x] **Risk identified and closed with tooling.** No sync mechanism existed. This is the same failure mode as the earlier `lefthook` incident: one copy is edited, the other silently rots, and live protection degrades without any signal.
-+- [x] **Added `tools/sync_plugin.py`** — copies repo engine → live plugin:
-+  - `--check` reports drift only and exits `1` when copies differ (safe for pre-commit / CI).
-+  - `--dry-run` prints the plan without touching anything.
-+  - Default mode backs the old target up into `~/.git-hook-backups/plugin-sync/` before copying.
-+  - Validates the source with `ast.parse` **before** copying, so a broken file can never be pushed into the live hook.
-+  - Verifies the copy with MD5 **after** copying; a mismatch is reported as failure (exit `2`).
-+  - Files tracked: `engine/gravity-validator.py` → `scripts/srp-validator.py`, and `engine/async_runner.py` → `scripts/async_runner.py`.
-+- [x] **Verified by deliberate drift injection:** a synthetic 21-byte line was appended to the live plugin copy. `--check` correctly reported `FARKLI / drift` and exited `1`; the default mode restored the file and confirmed it by MD5 (`f1bbb2af…`). Test residue was removed afterwards.
-+- [x] **Now automated — `tools/autosync_plugin.py`**, wired into `.git/hooks/pre-commit` right after the secret scan. On every commit the repo engine is pushed to the live plugin, so the repo is the single source of truth at commit time.
-+  - **Design boundary (deliberate):** this is a convenience, not a security boundary. It never blocks the commit when the plugin directory is absent or a copy fails. It stops the commit **only** when a source file fails `ast.parse`, so a broken file can never reach the live hook.
-+  - Silent when there is no drift, so ordinary commits stay quiet.
-+  - Backs the previous plugin copy up into `~/.git-hook-backups/plugin-sync/` before overwriting.
-+- [x] **Verified end-to-end (three tests):** (1) no drift → silent, exit `0`; (2) injected drift → copied and MD5-confirmed, exit `0`; (3) deliberately broken source → exit `1` **and the live plugin remained intact** (`f1bbb2af…`). Also confirmed via a real `git commit`, where the hook fired and repaired the drift. All test residue and the temporary commit were reverted.
-+- [ ] **Open naming debt:** the same file is `gravity-validator.py` in the repo and `srp-validator.py` in the plugin. A search finds no cross-reference between the two names, so the relationship is invisible to anyone reading either side.
-+
-+### 3.7. Repository Hygiene (local cleanup, 2026-09-20)
-+- [x] Removed the `.kilo/worktrees/magnificent-earth` git worktree via `git worktree remove --force`. It was **not** a stale copy — it sat on the same commit (`2377035`) with identical line counts; the byte delta (1526 B) exactly matched the line count, i.e. a pure CRLF-vs-LF difference under `core.autocrlf=true`.
-+- [x] Removed `srp-validator.py.bak-v123` (63,454 B). Confirmed as a manual snapshot of `v1.2.3`: its size matches `git cat-file -s 8ad8bef:engine/gravity-validator.py` exactly, so it remains recoverable from history. (Its exact original location was not conclusively re-verified before deletion; the size match is the evidence that matters.)
-+- [x] **Found and archived:** the plugin's `skills/srp-modularizer/` folder contained five unrelated files — `SKILL (1).md` (SOLID Principles), `SKILL (2).md` (@json-render/solid), `SKILL(3).md` (Requesting Code Review), `solid.md`, and `solid-skills-main.zip`. Their word-overlap with the real `SKILL.md` was 7–10% (i.e. unrelated content), the `(1)`/`(2)` suffixes indicated browser download duplicates, and none was referenced by any other file. **Moved (not deleted) to `Desktop/GG-artik/`** on user instruction, leaving only `SKILL.md` and `Single-Responsibility-Principle.md` in the skill folder.
-+- [ ] **Note:** `.gravityguard/runtime/` empty directories regenerate on their own because the engine recreates them; deleting them is pointless.
+
+### 3.6. Repo ↔ Live Plugin Synchronization (P3-04)
+> The guard engine exists as **two copies**: the repo source (`engine/gravity-validator.py`) and the live plugin copy (`~/.gemini/config/plugins/srp-swarm-guardian/scripts/srp-validator.py`). The plugin copy is renamed because `hooks.json` invokes `python scripts/srp-validator.py`. The two directories are separate deployment targets, so the duplicate cannot be eliminated — only kept in check.
+
+- [x] **Risk identified and closed with tooling.** No sync mechanism existed. This is the same failure mode as the earlier `lefthook` incident: one copy is edited, the other silently rots, and live protection degrades without any signal.
+- [x] **Added `tools/sync_plugin.py`** — copies repo engine → live plugin:
+  - `--check` reports drift only and exits `1` when copies differ (safe for pre-commit / CI).
+  - `--dry-run` prints the plan without touching anything.
+  - Default mode backs the old target up into `~/.git-hook-backups/plugin-sync/` before copying.
+  - Validates the source with `ast.parse` **before** copying, so a broken file can never be pushed into the live hook.
+  - Verifies the copy with MD5 **after** copying; a mismatch is reported as failure (exit `2`).
+  - Files tracked: `engine/gravity-validator.py` → `scripts/srp-validator.py`, and `engine/async_runner.py` → `scripts/async_runner.py`.
+- [x] **Verified by deliberate drift injection:** a synthetic 21-byte line was appended to the live plugin copy. `--check` correctly reported `FARKLI / drift` and exited `1`; the default mode restored the file and confirmed it by MD5 (`f1bbb2af…`). Test residue was removed afterwards.
+- [x] **Now automated — `tools/autosync_plugin.py`**, wired into `.git/hooks/pre-commit` right after the secret scan. On every commit the repo engine is pushed to the live plugin, so the repo is the single source of truth at commit time.
+  - **Design boundary (deliberate):** this is a convenience, not a security boundary. It never blocks the commit when the plugin directory is absent or a copy fails. It stops the commit **only** when a source file fails `ast.parse`, so a broken file can never reach the live hook.
+  - Silent when there is no drift, so ordinary commits stay quiet.
+  - Backs the previous plugin copy up into `~/.git-hook-backups/plugin-sync/` before overwriting.
+- [x] **Verified end-to-end (three tests):** (1) no drift → silent, exit `0`; (2) injected drift → copied and MD5-confirmed, exit `0`; (3) deliberately broken source → exit `1` **and the live plugin remained intact** (`f1bbb2af…`). Also confirmed via a real `git commit`, where the hook fired and repaired the drift. All test residue and the temporary commit were reverted.
+- [ ] **Open naming debt:** the same file is `gravity-validator.py` in the repo and `srp-validator.py` in the plugin. A search finds no cross-reference between the two names, so the relationship is invisible to anyone reading either side.
+
+### 3.7. Repository Hygiene (local cleanup, 2026-09-20)
+- [x] Removed the `.kilo/worktrees/magnificent-earth` git worktree via `git worktree remove --force`. It was **not** a stale copy — it sat on the same commit (`2377035`) with identical line counts; the byte delta (1526 B) exactly matched the line count, i.e. a pure CRLF-vs-LF difference under `core.autocrlf=true`.
+- [x] Removed `srp-validator.py.bak-v123` (63,454 B). Confirmed as a manual snapshot of `v1.2.3`: its size matches `git cat-file -s 8ad8bef:engine/gravity-validator.py` exactly, so it remains recoverable from history. (Its exact original location was not conclusively re-verified before deletion; the size match is the evidence that matters.)
+- [x] **Found and archived:** the plugin's `skills/srp-modularizer/` folder contained five unrelated files — `SKILL (1).md` (SOLID Principles), `SKILL (2).md` (@json-render/solid), `SKILL(3).md` (Requesting Code Review), `solid.md`, and `solid-skills-main.zip`. Their word-overlap with the real `SKILL.md` was 7–10% (i.e. unrelated content), the `(1)`/`(2)` suffixes indicated browser download duplicates, and none was referenced by any other file. **Moved (not deleted) to `Desktop/GG-artik/`** on user instruction, leaving only `SKILL.md` and `Single-Responsibility-Principle.md` in the skill folder.
+- [ ] **Note:** `.gravityguard/runtime/` empty directories regenerate on their own because the engine recreates them; deleting them is pointless.
