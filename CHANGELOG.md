@@ -5,6 +5,20 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.3] - 2026-09-20
+
+### Fixed
+- **TSC Debounce Worker Lifecycle Deadlock**:
+  - `run_debounce_worker()` exited on the `max_lifetime` guard (120s) **without** clearing `worker_running` in `debounce_state.json`.
+  - Sequence: worker claims `worker_running = True` → an edit burst exceeds 120s → the guard fires → the process exits → the persisted flag stays `True` → `trigger_debounce_worker_if_needed()` sees an "active" worker forever and never spawns another one.
+  - The safety mechanism disabled the feature it was protecting: the TSC debounce silently stopped working with no error surfaced.
+  - The guard now clears `worker_running = False` before exiting, but only when the state file still exists — an absent state file is never re-created, so the deleted runtime directory tree is not resurrected.
+  - The project-root and state-file-missing exit paths were deliberately left unchanged.
+
+### Added
+- **Lifecycle Regression Tests**: `max_lifetime` expiry must release the claim (followed by a `should_spawn_worker()` consequence check proving a new trigger can claim again), plus a companion test asserting an absent state file is not re-created. Both use a mocked clock — no real 120s wait.
+- **Test Count**: 87/87 passing (was 85/85).
+
 ## [1.2.2] - 2026-09-20
 
 ### Fixed
@@ -17,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Regression Coverage for the New-File Path**: `target file initially absent → worker waits → file appears → lint called exactly once`, plus a companion test asserting a never-written file exits cleanly. Both use a mocked clock (`time.sleep` / `time.time` patched) — no real sleeps, no subprocesses.
-- **Test Count**: 85/85 passing (was 83/83).
+- **Test Count**: 87/87 passing (was 85/85). Added lifecycle regression tests for the `max_lifetime` claim release.
 
 ### Changed
 - `async_runner.py` pure helpers: added `should_wait_for_target_file()`; added `_await_target_file()` polling helper. No changes to the TS debounce behavior or governance guards (G0-G4, SRP, T1-T3, ARCH, OE).

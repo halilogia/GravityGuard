@@ -493,7 +493,11 @@ def run_debounce_worker(project_root: Path, idle_threshold: float = 3.0,
       1. Quiet window reached     -> run batch tsc once, then exit.
       2. Project root disappeared -> exit (nothing left to validate).
       3. Debounce state file gone -> exit (no pending edit to debounce).
-      4. max_lifetime exceeded    -> exit (hard upper bound).
+      4. max_lifetime exceeded    -> release the worker claim, then exit.
+
+    Every exit path that leaves a persisted state file behind must clear
+    worker_running. Otherwise the stale True blocks all future spawns in
+    trigger_debounce_worker_if_needed() and the TSC debounce silently deadlocks.
     """
     debounce_path = get_debounce_file_path(project_root)
     diag_path = get_diagnostics_file_path(project_root)
@@ -502,8 +506,16 @@ def run_debounce_worker(project_root: Path, idle_threshold: float = 3.0,
     while True:
         time.sleep(idle_threshold)
 
-        # Guard: hard upper bound on total worker lifetime.
+        # Guard: hard upper bound on total worker lifetime. The claim must be
+        # released first, otherwise the persisted worker_running=True would block
+        # every future spawn (a lifecycle deadlock). If the state file is already
+        # gone we exit directly and deliberately avoid re-creating the runtime
+        # directory tree.
         if (time.time() - started_at) > max_lifetime:
+            if debounce_path.exists():
+                expired_state = load_debounce_state(debounce_path)
+                expired_state["worker_running"] = False
+                save_debounce_state(debounce_path, expired_state)
             return
 
         # Guard: project root disappeared (e.g. temp workspace cleaned up).

@@ -178,6 +178,7 @@ Tool burst ends (3s idle) ──> tsc --noEmit across project
    - Records `last_edit_time = time.time()`.
    - Spawns a background worker process that sleeps in 3.0s idle intervals.
    - If an AI agent performs 5 edits in 2.5 seconds, the worker continually resets until a full 3.0s quiet window elapses, then fires `tsc --noEmit` once.
+   - **Claim-release invariant (v1.2.3)**: every exit path that leaves a state file behind must clear `worker_running` before returning. The `max_lifetime` guard previously exited without doing so, leaving a stale `True` that blocked all future spawns — the safety mechanism locked the feature it protected.
 4. **Per-File Lint Coalescing (`run_coalesced_file_lint_worker`)**:
    - Single-file linters (`ruff`, `eslint`, `godot`) use a 300ms quiet window. The first trigger claims the file in `debounce_state.json`; subsequent triggers inside the window only refresh the timestamp. This is **state-based duplicate suppression**, not a formally atomic mutex — concurrent `load → claim → save` sequences are not guarded by a lock.
    - **New-File Grace Period (v1.2.2)**: because GravityGuard is a `PreToolUse` hook, the worker spawns *before* the AI writes the file. After the quiet window, the worker polls for a **bounded 2.0s** grace period. If the file appears it is linted once; if it never appears the claim is released and the worker exits silently. `execute_single_file_lint()` keeps its own existence check as the final safety net.

@@ -2019,6 +2019,98 @@ class TestGravityGuardPhase2(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    # --- PHASE 2.5 HARDENING: DEBOUNCE WORKER LIFECYCLE ---
+    def test_max_lifetime_expiry_releases_worker_running_claim(self):
+        """Regression: max_lifetime expiry must clear the persisted worker_running flag.
+
+        The worker previously returned on the max_lifetime guard WITHOUT setting
+        worker_running = False. A long edit burst (>120s) therefore left a stale
+        worker_running = True in debounce_state.json, and every subsequent
+        trigger_debounce_worker_if_needed() saw an "active" worker and refused to
+        spawn one. The safety mechanism permanently deadlocked itself.
+
+        Uses a mocked clock: no real 120s wait, no subprocesses.
+        """
+        from pathlib import Path
+        sys.path.insert(0, os.path.dirname(VALIDATOR_PATH))
+        import async_runner
+
+        temp_dir = tempfile.mkdtemp(prefix="gg_lifetime_")
+        try:
+            project_root = Path(temp_dir)
+            debounce_path = async_runner.get_debounce_file_path(project_root)
+
+            # Worker is mid-flight: claimed, with an edit timestamp that never
+            # goes idle, so only the max_lifetime guard can end the loop.
+            async_runner.save_debounce_state(debounce_path, {
+                "last_edit_time": 1e9,
+                "worker_running": True,
+                "file_edits": {},
+                "active_lint_workers": {},
+            })
+
+            clock = {"now": 500.0, "sleeps": 0}
+
+            def fake_sleep(seconds):
+                clock["sleeps"] += 1
+                clock["now"] += seconds
+
+            with patch("async_runner.time.sleep", side_effect=fake_sleep), \
+                 patch("async_runner.time.time", side_effect=lambda: clock["now"]), \
+                 patch("async_runner.run_batch_tsc", side_effect=AssertionError(
+                     "max_lifetime expiry must NOT run tsc")):
+                async_runner.run_debounce_worker(
+                    project_root, idle_threshold=3.0, max_lifetime=120.0
+                )
+
+            # Bounded: the mocked loop must terminate without real waiting.
+            self.assertLessEqual(clock["sleeps"], 50,
+                                 "max_lifetime guard must bound the loop")
+
+            state = async_runner.load_debounce_state(debounce_path)
+            self.assertFalse(state.get("worker_running", True),
+                             "expired worker must release its claim or the TSC "
+                             "debounce deadlocks permanently")
+
+            # Consequence check: a later edit can claim a worker again.
+            self.assertTrue(async_runner.should_spawn_worker(state.get("worker_running", False)),
+                            "after expiry, a new trigger must be able to claim a worker")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_max_lifetime_expiry_without_state_file_does_not_recreate_runtime_dir(self):
+        """If the state file is already gone, expiry must exit without recreating it."""
+        from pathlib import Path
+        sys.path.insert(0, os.path.dirname(VALIDATOR_PATH))
+        import async_runner
+
+        temp_dir = tempfile.mkdtemp(prefix="gg_lifetime_nostate_")
+        try:
+            project_root = Path(temp_dir)
+            debounce_path = async_runner.get_debounce_file_path(project_root)
+            # No state file is written: get_debounce_file_path() only creates the
+            # runtime directory, so the path is legitimately absent here.
+            self.assertFalse(debounce_path.exists(), "precondition: no state file")
+
+            clock = {"now": 900.0, "sleeps": 0}
+
+            def fake_sleep(seconds):
+                clock["sleeps"] += 1
+                clock["now"] += seconds
+
+            with patch("async_runner.time.sleep", side_effect=fake_sleep), \
+                 patch("async_runner.time.time", side_effect=lambda: clock["now"]), \
+                 patch("async_runner.save_debounce_state",
+                       side_effect=AssertionError("must not persist state when none exists")):
+                async_runner.run_debounce_worker(
+                    project_root, idle_threshold=3.0, max_lifetime=120.0
+                )
+
+            self.assertFalse(debounce_path.exists(),
+                             "absent state file must not be re-created on expiry")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()
