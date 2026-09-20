@@ -42,12 +42,15 @@ This document serves as the persistent engineering knowledge repository for **Gr
 
 ## 2. Key Component Mechanics
 
-### 2.1. Rule Matrix Architecture
-The Python engine enforces checks through isolated rule evaluators:
-1. **`srp_boundary`**: Flags multi-responsibility anti-patterns (e.g., mixing raw UI widgets with HTTP/Network requests in a single file).
-2. **`layer_matrix`**: Prohibits prohibited import directions (e.g. `ui/` importing `network/` or `db/` without an intervening controller/mediator).
-3. **`test_sufficiency`**: Verifies whether code changes have matching test files or test functions.
-4. **`simplicity_guard`**: Detects premature abstraction (e.g., 3 interfaces for a single 15-line concrete class).
+### 2.1. Rule Matrix Pipeline Architecture
+The Python engine enforces checks through an ordered, high-to-low priority pipeline:
+1. **`G0_SECRET_LEAK` (P0 - BLOCK / WARN)**: Diff-safe secret and credential airbag. Scans strictly `added_text` for private keys, GitHub tokens, Claude/OpenAI/Gemini/Slack keys (BLOCK), and suspicious Bearer tokens / connection strings (WARN). Masks all evidence to prevent secondary log leaks.
+2. **`G1_SILENT_EXCEPTION` (P0 - BLOCK)**: Diff-safe exception integrity guard. Rejects newly added empty catch/except blocks (`except: pass`, `catch {}`).
+3. **`G2_TEST_INTEGRITY` (P0 - BLOCK / WARN)**: Test suite preservation. Rejects test case deletion across full files (`Counter`) and test disablers (`.skip()`, `xit()`). Allows `pytest.mark.xfail` and treats `.only()` as WARN.
+4. **`G3_COMPILER_BYPASS` (P1 - WARN ONLY)**: Flags newly introduced linter/compiler suppression pragmas (`# noqa`, `# type: ignore`, `@ts-ignore`).
+5. **`G4_IMPORT_MATRIX` (P0 - BLOCK)**: Enforces architecture boundaries (`.gravityguard.json`). Supports relative Python imports and TS side-effects with exact path-segment matching (no false substring collisions).
+6. **`OE_SPIKE` (P2 - WARN ONLY)**: Lightweight heuristic for premature abstraction spikes (< 50 LOC introducing 2+ classes/interfaces).
+7. **`SRP_BOUNDARY` (P0 - BLOCK)**: Flags multi-responsibility anti-patterns (e.g., mixing raw UI widgets with HTTP/Network requests in a single file).
 
 ### 2.2. Event Stream Protocol (`srp_guardian_live.json`)
 - The Python engine records all evaluations to `~/.gemini/logs/srp_guardian_live.json`.

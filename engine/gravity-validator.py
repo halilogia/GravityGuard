@@ -141,8 +141,100 @@ def extract_diff_and_projected(target_file: str, tool_name: str, args: dict) -> 
 
 
 # ============================================================================
-# 3. HIGH-CONFIDENCE GUARDS (Phase 1.1 Hardened)
+# 3. HIGH-CONFIDENCE GUARDS (Phase 1.1 Hardened + G0 Secret Leak)
 # ============================================================================
+
+# --- G0: SECRET LEAK GUARD (BLOCK / WARN) ---
+
+PLACEHOLDER_KEYWORDS = (
+    "example", "your_api_key", "your_token", "your-api-key", "your-key",
+    "placeholder", "dummy", "mock", "test_token", "changeme",
+    "insert_key", "sample", "replace_me", "xxxxxxxx", "00000000"
+)
+
+def is_placeholder(val: str) -> bool:
+    val_lower = val.lower()
+    if any(kw in val_lower for kw in PLACEHOLDER_KEYWORDS):
+        return True
+    if val_lower.startswith("<") or val_lower.endswith(">"):
+        return True
+    return False
+
+def redact_token(token: str) -> str:
+    token = token.strip()
+    if len(token) <= 8:
+        return "***"
+    return f"{token[:4]}****...****{token[-3:]}"
+
+def check_g0_secret_leak(added_text: str) -> Tuple[bool, str, Optional[str]]:
+    """
+    Guards against secret, API key, and credential leaks in newly added code lines.
+    Diff-safe: Only checks added_text.
+    Returns: (is_blocked, block_reason, warn_reason_or_None)
+    """
+    if not added_text.strip():
+        return False, "", None
+
+    # 1. HIGH-CONFIDENCE BLOCK RULES
+    # A) Private Keys (PEM / OpenSSH)
+    pk_match = re.search(r"-----BEGIN (?:RSA |EC |OPENSSH |PGP |DSA )?PRIVATE KEY-----", added_text)
+    if pk_match:
+        return True, "Özel anahtar (Private Key) başlığı tespit edildi. Private key'ler asla depoya commit edilemez!", None
+
+    # B) GitHub Tokens (ghp_, github_pat_, gho_, ghu_, ghs_, ghr_)
+    gh_match = re.search(r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[a-zA-Z0-9_]{16,}\b", added_text)
+    if gh_match:
+        raw_token = gh_match.group(0)
+        if not is_placeholder(raw_token):
+            return True, f"GitHub Personal Access / OAuth Token tespit edildi: {redact_token(raw_token)}. SecretStorage veya env kullanın.", None
+
+    # C) Anthropic / Claude API Keys (sk-ant-api..., sk-ant-admin...)
+    claude_match = re.search(r"\bsk-ant-(?:api|admin)[0-9]{0,2}-[a-zA-Z0-9_\-]{20,}\b", added_text)
+    if claude_match:
+        raw_token = claude_match.group(0)
+        if not is_placeholder(raw_token):
+            return True, f"Anthropic / Claude API anahtarı tespit edildi: {redact_token(raw_token)}. Ortam değişkeni kullanın.", None
+
+    # D) OpenAI Modern Keys (sk-proj-..., sk-svcacct-..., sk-admin-...)
+    openai_match = re.search(r"\bsk-(?:proj|svcacct|admin)-[a-zA-Z0-9_\-]{20,}\b", added_text)
+    if openai_match:
+        raw_token = openai_match.group(0)
+        if not is_placeholder(raw_token):
+            return True, f"OpenAI API anahtarı tespit edildi: {redact_token(raw_token)}. Ortam değişkeni kullanın.", None
+
+    # E) Google / Gemini API Keys (AIza...)
+    gemini_match = re.search(r"\bAIza[0-9A-Za-z\-_]{35,40}\b", added_text)
+    if gemini_match:
+        raw_token = gemini_match.group(0)
+        if not is_placeholder(raw_token):
+            return True, f"Google / Gemini API anahtarı tespit edildi: {redact_token(raw_token)}. Ortam değişkeni kullanın.", None
+
+    # F) Slack Tokens (xoxb-, xoxa-, xoxp-, xoxr-)
+    slack_match = re.search(r"\bxox[baprs]-[0-9a-zA-Z]{10,}\b", added_text)
+    if slack_match:
+        raw_token = slack_match.group(0)
+        if not is_placeholder(raw_token):
+            return True, f"Slack Token tespit edildi: {redact_token(raw_token)}. Ortam değişkeni kullanın.", None
+
+    # 2. MEDIUM-CONFIDENCE WARNING RULES (WARN ONLY, Never Blocks)
+    warn_reason: Optional[str] = None
+
+    # A) Generic Bearer Token in Added Code
+    bearer_match = re.search(r"['\"]?Authorization['\"]?\s*[:=]\s*['\"]Bearer\s+([a-zA-Z0-9_\-\.]{30,})['\"]", added_text, re.IGNORECASE)
+    if bearer_match:
+        raw_bearer = bearer_match.group(1)
+        if not is_placeholder(raw_bearer):
+            warn_reason = f"Şüpheli Bearer kimlik doğrulama belirteci tespit edildi ({redact_token(raw_bearer)}). Sabit token yerine oturum yönetimi kullanın."
+
+    # B) Connection URI with embedded password
+    db_uri_match = re.search(r"\b(?:postgres|postgresql|mysql|mongodb(?:\+srv)?):\/\/[^\s:]+:([^\s@]+)@[^\s]+", added_text, re.IGNORECASE)
+    if db_uri_match:
+        raw_pass = db_uri_match.group(1)
+        if not is_placeholder(raw_pass):
+            warn_reason = "Veritabanı bağlantı URI'sinde gömülü kimlik bilgisi tespit edildi. Parolaları connection string içinde saklamayın."
+
+    return False, "", warn_reason
+
 
 # --- G1: SILENT EXCEPTION (BLOCK) ---
 def check_g1_silent_exception(
@@ -623,6 +715,20 @@ def validate_gravityguard():
 
     is_python = file_lower.endswith(".py")
     is_ts = file_lower.endswith((".ts", ".tsx", ".js", ".jsx"))
+
+    # ========================================================================
+    # GUARD 0: G0 — SECRET LEAK GUARD (BLOCK / WARN)
+    # ========================================================================
+    g0_violated, g0_reason, g0_warn = check_g0_secret_leak(added_text)
+    if g0_warn:
+        log_event(tool_name, "WARNING", target_file, g0_warn, rule_id="G0_SECRET_LEAK")
+    if g0_violated:
+        log_event(tool_name, "BLOCKED", target_file, g0_reason, rule_id="G0_SECRET_LEAK")
+        print(json.dumps({
+            "decision": "deny",
+            "reason": f"🛑 [G0_SECRET_LEAK]: '{target_file}' - {g0_reason}"
+        }))
+        sys.exit(0)
 
     # ========================================================================
     # GUARD 1: G1 — SILENT EXCEPTION (BLOCK)

@@ -478,6 +478,195 @@ class TestGravityGuardPhase1(unittest.TestCase):
             if os.path.exists(cfg_path):
                 os.remove(cfg_path)
 
+    # --- G0: SECRET LEAK GUARD TESTS ---
+
+    def test_g0_block_private_key(self):
+        """Private key header in added lines must be BLOCKED"""
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/src/auth.py",
+                    "TargetContent": "# certs",
+                    "ReplacementContent": "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA0...\n-----END RSA PRIVATE KEY-----"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "deny")
+        self.assertIn("G0_SECRET_LEAK", res.get("reason", ""))
+
+    def test_g0_block_github_pat(self):
+        """GitHub Personal Access Token in added lines must be BLOCKED"""
+        token = "ghp_" + "1234567890abcdefghijklmnopqrstuvwxyz"
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/src/config.py",
+                    "TargetContent": "token = None",
+                    "ReplacementContent": f"token = '{token}'"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "deny")
+        self.assertIn("G0_SECRET_LEAK", res.get("reason", ""))
+
+    def test_g0_block_claude_api_key(self):
+        """Anthropic Claude API key in added lines must be BLOCKED"""
+        token = "sk-ant-api03-" + "abcdef1234567890_ABCDEF1234567890"
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/src/ai.py",
+                    "TargetContent": "key = None",
+                    "ReplacementContent": f"key = '{token}'"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "deny")
+        self.assertIn("G0_SECRET_LEAK", res.get("reason", ""))
+
+    def test_g0_block_openai_proj_key(self):
+        """OpenAI modern project key in added lines must be BLOCKED"""
+        token = "sk-proj-" + "abcdef1234567890_ABCDEF1234567890"
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/src/ai.py",
+                    "TargetContent": "key = None",
+                    "ReplacementContent": f"key = '{token}'"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "deny")
+        self.assertIn("G0_SECRET_LEAK", res.get("reason", ""))
+
+    def test_g0_block_gemini_api_key(self):
+        """Google Gemini API key in added lines must be BLOCKED"""
+        token = "AIza" + "SyD1234567890_abcdefghijklmnopqrstuv"
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/src/ai.py",
+                    "TargetContent": "key = None",
+                    "ReplacementContent": f"key = '{token}'"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "deny")
+        self.assertIn("G0_SECRET_LEAK", res.get("reason", ""))
+
+    def test_g0_allow_obvious_placeholder(self):
+        """Obvious placeholder values must be ALLOWED"""
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/src/ai.py",
+                    "TargetContent": "key = None",
+                    "ReplacementContent": "key = 'sk-proj-your-api-key-here-placeholder'"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+
+    def test_g0_warn_bearer_token(self):
+        """Generic Bearer token must generate WARNING log, but NOT block"""
+        bearer = "Bearer " + "eyJhGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.abcdef1234567890"
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/src/client.ts",
+                    "TargetContent": "headers: {}",
+                    "ReplacementContent": f"headers: {{ 'Authorization': '{bearer}' }}"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+
+    def test_g0_warn_db_connection_uri(self):
+        """Database connection URI with password must generate WARNING, but NOT block"""
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/src/db.ts",
+                    "TargetContent": "url = None",
+                    "ReplacementContent": "url = 'postgres://admin:SuperSecretPassword99@db.host.internal:5432/main'"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+
+    def test_g0_ignore_simple_password(self):
+        """Common variable assignment 'password = ...' must be IGNORED (not blocked)"""
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/src/user.py",
+                    "TargetContent": "password = None",
+                    "ReplacementContent": "password = 'user_input_string'"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+
+    def test_g0_existing_secret_unchanged(self):
+        """Existing secret in file on disk must NOT block unrelated changes"""
+        token = "ghp_" + "9999999999abcdefghijklmnopqrstuvwxyz"
+        temp_file = os.path.join(os.path.dirname(__file__), "temp_existing_secret.py")
+        try:
+            with open(temp_file, "w", encoding="utf-8") as f:
+                f.write(f"TOKEN = '{token}'\n\ndef add(a, b):\n    return a + b\n")
+
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": temp_file,
+                        "TargetContent": "return a + b",
+                        "ReplacementContent": "return a + b + 0"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "allow")
+        finally:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+
+    def test_g0_redaction_verified(self):
+        """Raw token must NEVER appear unredacted in deny reason"""
+        secret = "ghp_" + "SECRETTOKENVALUE1234567890SECRET"
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/src/leak.py",
+                    "TargetContent": "k = None",
+                    "ReplacementContent": f"k = '{secret}'"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "deny")
+        self.assertNotIn(secret, res.get("reason", ""))
+        self.assertIn("****", res.get("reason", ""))
+
     # --- PERFORMANCE BENCHMARKS (Core In-Memory vs Subprocess Hook) ---
 
     def test_core_in_memory_latency(self):
