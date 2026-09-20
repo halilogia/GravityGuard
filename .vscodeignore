@@ -1,0 +1,57 @@
+# GravityGuard — VSIX paketleme kapsamı
+#
+# Amac: yalnizca CALISTIRMAK icin gereken dosyalar pakete girsin.
+# Kaynak, dokuman, arastirma ve gelistirme araclari pakete girmez.
+
+# --- Gelistirme kaynagi (derlenmis hali dist/ icinde) ---
+src/
+tsconfig.json
+*.ts
+!*.d.ts
+
+# --- Testler ---
+engine/test_gravity_validator.py
+engine/__pycache__/
+**/__pycache__/
+**/*.pyc
+
+# --- Gelistirme araclari (bu depoya ozel; paketle ilgisi yok) ---
+tools/
+
+# --- Dokuman / arastirma ---
+brain/
+media/*.png
+media/*.jpg
+ARCHITECTURE.md
+CHANGELOG.md
+ROADMAP.md
+CONTRIBUTING.md
+
+# --- Bagimliliklar (paketleyici zaten haric tutar, acikca yaziyoruz) ---
+node_modules/
+.pnpm-store/
+
+# --- Kilit dosyalari ---
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# --- Yerel durum / log ---
+.gravityguard/
+*.log
+.env
+.env.*
+
+# --- Git / editor ---
+.git/
+.gitignore
+.gitattributes
+.github/
+.vscode/
+.idea/
+*.bak
+*.tmp
+
+# --- Kullaniciya GEREKLI olanlar (haric tutulmaz) ---
+# extension.js, engine/gravity-validator.py, engine/async_runner.py,
+# media/shield.svg, LICENSE, README.md, package.json

@@ -3,10 +3,18 @@
   "displayName": "GravityGuard — Architecture Airbag & Gatekeeper for AI Agents",
   "description": "Deterministic architectural gatekeeper, test sufficiency analyzer, and prompt engineering copilot for Antigravity IDE & AI Coding Agents.",
   "version": "1.2.5",
-  "publisher": "halilemre",
+  "publisher": "halilogia",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/halilogia/GravityGuard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/halilogia/GravityGuard/issues"
+  },
+  "homepage": "https://github.com/halilogia/GravityGuard#readme",
   "license": "GPL-3.0",
   "engines": {
-    "vscode": "^1.80.0"
+    "vscode": "^1.107.0"
   },
   "categories": [
     "Linters",
@@ -101,7 +109,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.19.43",
-    "@types/vscode": "^1.134.0",
+    "@types/vscode": "^1.107.0",
     "typescript": "^5.9.3"
   }
 }

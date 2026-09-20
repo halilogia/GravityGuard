@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.5] - 2026-09-20
 
+### Added
+- **Packaging support** — first `.vsix` build:
+  - Added `.vscodeignore`. Without it the packager bundles `node_modules/`, the test suite, `brain/` and `tools/` into the artifact. The resulting package carries 10 files (54.69 KB): the compiled extension, both engine modules, `media/shield.svg`, `LICENSE`, `README.md`, `package.json`.
+  - Added `repository`, `bugs` and `homepage` to `package.json`; the packager requires the repository field.
+  - Verified the packaged engine is byte-identical to the repo engine (`md5 b3eac45e…`), so a release artifact can never ship a stale guard.
+  - `*.vsix` is gitignored — build artifacts attach to the GitHub Release, they are not committed.
+
 ### Fixed
+- **`engines.vscode` and `@types/vscode` were inconsistent**, and `vsce package` refused to build:
+  - `@types/vscode` declared `^1.134.0` while `engines.vscode` advertised `^1.80.0`. The packager rejects a type package newer than the declared engine, because the extension could then reference APIs absent from the engine it claims to support.
+  - Both are now pinned to `^1.107.0`, matching the Antigravity IDE build actually running on this machine (`product.json` → `1.107.0`, quality `stable`). The previous `^1.80.0` figure was never verified against a real host.
+  - All 14 `vscode.*` APIs used by `src/extension.ts` exist in 1.107.0.
+- **Wrong GitHub account in install instructions:** `README.md` and `package.json` referenced `halilemre`, while the actual remote is `halilogia/GravityGuard`. The documented `git clone` command would have failed. Both now match the remote.
+
 - **Hook Stdout Violated the PreToolUse Schema — Silently Blocked Every File Write**:
   - On the WARN path the validator printed `{"decision": "allow", "warnings": [...], "warning_rule_ids": [...]}`.
   - The Antigravity hook contract permits only `decision`, `reason`, `permissionOverrides` and `overwrite`; payloads are protojson-encoded and protojson **rejects unknown fields**.

@@ -71,7 +71,7 @@ GravityGuard operates an ordered, zero-overhead pipeline before any file modific
 
 1. Clone or copy the repository into your Antigravity / VS Code extensions directory:
    ```bash
-   git clone https://github.com/halilemre/GravityGuard.git "C:\Users\<User>\.antigravity-ide\extensions\gravityguard"
+   git clone https://github.com/halilogia/GravityGuard.git "C:\Users\<User>\.antigravity-ide\extensions\gravityguard"
    ```
 2. Open the directory in a terminal and install build dependencies:
    ```bash
