@@ -4,7 +4,7 @@ This document outlines the strategic evolution, architectural milestones, and pl
 
 ---
 
-## Current Status: v1.1.0 (Phase 1 & Phase 2.1 Released)
+## Current Status: v1.2.0 (Phase 1, Phase 2 & Phase 2.5 Released)
 
 ### ✅ Phase 1: High-Confidence Integrity & Architecture Guards
 - [x] **Universal Rebranding & Setup**: Standalone repository under `GitHub/Public/GravityGuard` with full TypeScript IDE extension + Python Guard Engine.
@@ -38,18 +38,28 @@ This document outlines the strategic evolution, architectural milestones, and pl
   - Integrated 9Router local AI pipeline with sub-3s model failover.
 - [x] **Live Security Monitor Webview**:
   - Real-time Activity Bar panel streaming audit events from `~/.gemini/logs/srp_guardian_live.json`.
-- [x] **59/59 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`).
+- [x] **66/66 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`).
 
 ---
 
-## Phase 2: v1.1.0 — Test Evidence & Intent-Aware Enhancer
-
-*Status: 2.1 Released ✅ | 2.2 Target: Q4 2026*
-
-### 2.1. Test Evidence Analyzer (T1, T2, T3) — Released & Hardened ✅
+## ✅ Phase 2: Test Evidence & Intent-Aware Enhancer (v1.1.0)
 - [x] **T1 — Missing Related Test (WARN)**: Verifies that production code changes have an associated candidate test file on disk and recent modification window (`sessionWindowSeconds`, default 300s). Dynamically honors `sourceRoots` and `testRoots` from `.gravityguard.json`. Respects exemption allowlist (`types`, `constants`, `index`, `*.d.ts`, `migrations`, `config`, `schemas`).
 - [x] **T2 — Observable Assertion Verification (WARN)**: Case-level verification using AST/line-span tracking that modified/added test cases contain observable assertions (`assert`, `self.assert*`, `pytest.raises`, `expect()`, `.toBe()`, `.toEqual()`, `.toThrow()`). Catches body-only modifications without declarations, prevents assertion masking across multiple tests, and protects fixture/beforeEach/describe setups from false alarms.
 - [x] **T3 — Symbol-to-Test Link (WARN)**: Body-aware line-span verification that newly added or modified top-level functions, classes, and exported arrow functions are referenced by name in the candidate test file. Ignores scalar constants (`export const MAX = 3`). Emits grouped warning if any changed symbol is absent. Zero blocking.
+
+---
+
+## ✅ Phase 2.5: Static Validation & Architecture Guidance (v1.2.0)
+- [x] **ARCH_FILE_GROWTH Guard (WARN ONLY)**:
+  - Detects monolithic file accumulation: (1) Projected LOC >= 1000, (2) Single tool-call addition >= 180 LOC, (3) Creeping growth on 800+ LOC file with >= 80 LOC addition.
+  - Zero blocking — prompts AI toward modularity and SRP boundaries.
+- [x] **Tier 2 / Tier 3 Async Static Validation Architecture**:
+  - Preserved the **< 10 ms Fast Guard Invariant**: Pre-tool path strictly runs zero external compilers or linters.
+  - `engine/async_runner.py`: Executes changed-file Ruff (Python), ESLint (TS/JS), Godot check-only (GDScript), and debounced `tsc --noEmit` (TS batch).
+  - `.gravityguard/runtime/diagnostics.json`: Lightweight local state bridge.
+  - `STATIC_LINTER_DIAGNOSTIC (WARN)`: Injects recent background linter findings into AI context during subsequent pre-tool calls (< 0.5 ms).
+- [x] **Prompt Enhancer Architectural Guidance Preamble**:
+  - System prompt directives favoring cohesive modules over monolithic accumulation.
 
 
 ### 2.2. Intent-Aware Prompt Enhancer

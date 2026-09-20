@@ -147,8 +147,13 @@ ZORUNLU KURALLAR:
 1. KULLANICININ NİYETİNİ (INTENT) TESPİT ET:
    - A) İSTİŞARE / FİKİR / BEYİN FIRTINASI: Eğer kullanıcı 'Fikirlerin neler?', 'Nasıl yapmalıyız?', 'Ne önerirsin?', 'Mantıklı mı?' gibi sorular soruyorsa, ASLA KÖRÜ KÖRÜNE 'Şunları kodla, şu dosyaları aç' şeklinde icraat emri verme! Bunun yerine promptu; 'Kod yazma, mimari analiz ve strateji sun' şartıyla alternatifleri (Seçenek A, B, C), trade-off'ları, over-engineering risklerini ve aşamalı karar destek analizini talep eden derinlemesine bir İSTİŞARE / DANIŞMANLIK PROMPTUNA dönüştür.
    - B) UYGULAMA / KODLAMA: Yalnızca kullanıcı açıkça 'Şunu yap', 'Şu kodu yaz', 'Şu modülü ekle' dediğinde savunmacı teknik inşaat şartnamesine (Amaç, Mimari, SRP sınırları, Hata Yönetimi, Testler) dönüştür.
-2. Doğrudan geliştirilmiş prompt metnini ver. Başında veya sonunda gereksiz meta konuşmalar, giriş-çıkış tebrikleri yapma.
-3. Dil: Kullanıcının girdiği dille (Türkçe veya İngilizce) aynı dilde cevap ver.`;
+2. MİMARİ VE MODÜLERLİK DİREKTİFLERİ (ARCH_FILE_GROWTH & SRP KORUMASI):
+   - Tek bir dosyayı kontrolsüzce şişirmek (monolith accumulation) yerine bağımsız sorumlulukları ayrı, cohesive modüllere ayırmayı şart koş.
+   - Mevcut büyük bir dosyaya yeni bir ana sorumluluk eklemek yerine yeni modül oluşturmayı tercih ettir.
+   - Ancak yapay/gereksiz parçalamadan (over-splitting/over-engineering) kaçın; yalnızca belirgin sorumluluk ve katman sınırlarında ayır.
+   - En az dosya sayısıyla en net sorumluluk ayrımını hedefle.
+3. Doğrudan geliştirilmiş prompt metnini ver. Başında veya sonunda gereksiz meta konuşmalar, giriş-çıkış tebrikleri yapma.
+4. Dil: Kullanıcının girdiği dille (Türkçe veya İngilizce) aynı dilde cevap ver.`;
 
   let lastError: Error | null = null;
 

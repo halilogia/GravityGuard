@@ -518,6 +518,130 @@ def check_oe_spike(added_text: str) -> Tuple[bool, str]:
     return False, ""
 
 
+# --- ARCH_FILE_GROWTH: LARGE FILE & RAPID GROWTH DETECTION (WARN ONLY) ---
+def check_arch_file_growth(
+    target_file: str,
+    old_full_content: str,
+    projected_content: str,
+    added_lines: List[str],
+    is_test_file: bool = False
+) -> Tuple[bool, str]:
+    """
+    Lightweight heuristic to prevent monolithic file accumulation.
+    Never blocks; produces an informative warning to guide AI toward modularity.
+    Exempts test files, minified/vendor or explicitly exempted cohesive modules.
+
+    Criteria (any of the following):
+    A) projected_loc >= 1000
+    B) single tool-call additions >= 180 LOC
+    C) old_loc >= 800 AND added_lines >= 80 LOC
+    """
+    if is_test_file:
+        return False, ""
+
+    if is_cohesive_module_by_filename(target_file):
+        return False, ""
+
+    old_lines = [line for line in old_full_content.splitlines() if line.strip()]
+    proj_lines = [line for line in projected_content.splitlines() if line.strip()]
+    added_clean = [line for line in added_lines if line.strip() and not line.strip().startswith(("#", "//", "/*", "*"))]
+
+    old_loc = len(old_lines)
+    projected_loc = len(proj_lines)
+    added_count = len(added_clean)
+
+    reasons = []
+    if projected_loc >= 1000:
+        reasons.append(f"toplam satır sayısı 1000 sınırını aşıyor ({projected_loc} LOC)")
+    elif old_loc >= 800 and added_count >= 80:
+        reasons.append(f"800+ satırlık mevcut dosyaya belirgin ekleme yapıldı ({old_loc} -> {projected_loc} LOC, +{added_count} LOC)")
+    elif added_count >= 180:
+        reasons.append(f"tek seferde büyük kod bloğu eklendi (+{added_count} LOC)")
+
+    if reasons:
+        reason_str = "; ".join(reasons)
+        basename = os.path.basename(target_file) if target_file else "dosya"
+        return True, (
+            f"Modülerlik Uyarısı (ARCH_FILE_GROWTH): '{basename}' için {reason_str}. "
+            f"Yeni sorumlulukları aynı büyük dosyada biriktirmek yerine ilgili sorumlulukları "
+            f"bağımsız ve cohesive modüllere ayırmayı değerlendirin."
+        )
+
+    return False, ""
+
+
+# --- STATIC LINTER & COMPILER DIAGNOSTIC FEEDBACK (FAST PATH READER) ---
+def read_recent_diagnostics(target_file: str) -> List[Tuple[str, str]]:
+    """
+    Reads background static diagnostics (.gravityguard/runtime/diagnostics.json)
+    if available. Validates freshness against target file mtime / content hash.
+    Execution latency: < 0.5 ms.
+    Returns: List of (rule_id, warning_message)
+    """
+    if not target_file:
+        return []
+
+    diagnostics_path = None
+    try:
+        p = Path(target_file).resolve()
+        for parent in [p.parent] + list(p.parents):
+            cand = parent / ".gravityguard" / "runtime" / "diagnostics.json"
+            if cand.is_file():
+                diagnostics_path = cand
+                break
+    except (OSError, RuntimeError) as e:
+        return []
+
+    if not diagnostics_path or not diagnostics_path.exists():
+        return []
+
+    try:
+        with open(diagnostics_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        entries = data.get("entries", {})
+        norm_target = str(Path(target_file).resolve()).replace("\\", "/")
+
+        matched_entry = None
+        for path_key, entry in entries.items():
+            norm_key = str(Path(path_key).resolve()).replace("\\", "/") if os.path.isabs(path_key) else path_key
+            if norm_key == norm_target or norm_target.endswith(path_key.replace("\\", "/")):
+                matched_entry = entry
+                break
+
+        if not matched_entry:
+            return []
+
+        # Freshness check: timestamp must be within last 600s
+        entry_time = matched_entry.get("timestamp", 0)
+        if time.time() - entry_time > 600:
+            return []
+
+        # Stale check: if file on disk has mtime newer than entry by > 2 seconds, diagnostic is likely stale
+        if os.path.exists(target_file):
+            file_mtime = os.path.getmtime(target_file)
+            if file_mtime - entry_time > 2.0:
+                return []
+
+        tool = matched_entry.get("tool", "linter")
+        errors = matched_entry.get("errors", [])
+        if errors:
+            first_err = errors[0]
+            err_summary = first_err.get("message", "Lint issue")
+            rule = first_err.get("rule", "")
+            rule_disp = f" [{rule}]" if rule else ""
+            msg = (
+                f"Statik Doğrulama Uyarısı (STATIC_LINTER_DIAGNOSTIC): '{tool}' önceki yazımda "
+                f"{len(errors)} hata tespit etti{rule_disp}: {err_summary}"
+            )
+            return [("STATIC_LINTER_DIAGNOSTIC", msg)]
+    except (IOError, OSError, json.JSONDecodeError, ValueError) as e:
+        return []
+
+    return []
+
+
+
 # ============================================================================
 # 4. EXISTING SRP VALIDATION ENGINE (Cohesive Module & AST)
 # ============================================================================
@@ -1144,12 +1268,15 @@ def validate_gravityguard():
     is_python = file_lower.endswith(".py")
     is_ts = file_lower.endswith((".ts", ".tsx", ".js", ".jsx"))
 
+    all_warnings: List[Tuple[str, str]] = []
+
     # ========================================================================
     # GUARD 0: G0 — SECRET LEAK GUARD (BLOCK / WARN)
     # ========================================================================
     g0_violated, g0_reason, g0_warn = check_g0_secret_leak(added_text)
     if g0_warn:
         log_event(tool_name, "WARNING", target_file, g0_warn, rule_id="G0_SECRET_LEAK")
+        all_warnings.append(("G0_SECRET_LEAK", g0_warn))
     if g0_violated:
         log_event(tool_name, "BLOCKED", target_file, g0_reason, rule_id="G0_SECRET_LEAK")
         print(json.dumps({
@@ -1182,6 +1309,7 @@ def validate_gravityguard():
         )
         if g2_warn:
             log_event(tool_name, "WARNING", target_file, g2_warn, rule_id="G2_TEST_INTEGRITY")
+            all_warnings.append(("G2_TEST_INTEGRITY", g2_warn))
         if g2_violated:
             log_event(tool_name, "BLOCKED", target_file, g2_reason, rule_id="G2_TEST_INTEGRITY")
             print(json.dumps({
@@ -1197,6 +1325,7 @@ def validate_gravityguard():
     if g3_matches:
         warn_msg = f"Yeni linter/derleyici susturması eklendi ({', '.join(g3_matches)}). Hatanın kök nedenini çözmeyi değerlendirin."
         log_event(tool_name, "WARNING", target_file, warn_msg, rule_id="G3_COMPILER_BYPASS")
+        all_warnings.append(("G3_COMPILER_BYPASS", warn_msg))
 
     # ========================================================================
     # GUARD 4: G4 — IMPORT MATRIX (BLOCK)
@@ -1216,9 +1345,24 @@ def validate_gravityguard():
     oe_triggered, oe_msg = check_oe_spike(added_text)
     if oe_triggered:
         log_event(tool_name, "WARNING", target_file, oe_msg, rule_id="OE_SPIKE")
+        all_warnings.append(("OE_SPIKE", oe_msg))
 
     # ========================================================================
-    # GUARD 6: EXISTING SRP (Single Responsibility Principle)
+    # GUARD 6: ARCH_FILE_GROWTH — LARGE FILE & RAPID GROWTH (WARN ONLY)
+    # ========================================================================
+    arch_triggered, arch_msg = check_arch_file_growth(
+        target_file=target_file,
+        old_full_content=old_full_content,
+        projected_content=projected_content,
+        added_lines=added_lines,
+        is_test_file=is_test_file
+    )
+    if arch_triggered:
+        log_event(tool_name, "WARNING", target_file, arch_msg, rule_id="ARCH_FILE_GROWTH")
+        all_warnings.append(("ARCH_FILE_GROWTH", arch_msg))
+
+    # ========================================================================
+    # GUARD 7: EXISTING SRP (Single Responsibility Principle)
     # ========================================================================
     if not is_test_file:
         if is_python:
@@ -1248,7 +1392,7 @@ def validate_gravityguard():
                 sys.exit(0)
 
     # ========================================================================
-    # GUARD 7: PHASE 2 TEST EVIDENCE AIRBAG (T1, T2, T3) — WARN ONLY
+    # GUARD 8: PHASE 2 TEST EVIDENCE AIRBAG (T1, T2, T3) — WARN ONLY
     # ========================================================================
     cfg = load_gravityguard_config(target_file)
     test_evidence_warnings = evaluate_test_evidence(
@@ -1264,6 +1408,15 @@ def validate_gravityguard():
     )
     for rule_id, warn_msg in test_evidence_warnings:
         log_event(tool_name, "WARNING", target_file, warn_msg, rule_id=rule_id)
+        all_warnings.append((rule_id, warn_msg))
+
+    # ========================================================================
+    # GUARD 9: STATIC LINTER & COMPILER DIAGNOSTIC FEEDBACK (WARN ONLY)
+    # ========================================================================
+    diag_warnings = read_recent_diagnostics(target_file)
+    for d_rule, d_msg in diag_warnings:
+        log_event(tool_name, "WARNING", target_file, d_msg, rule_id=d_rule)
+        all_warnings.append((d_rule, d_msg))
 
     # ========================================================================
     # PASS / APPROVED
@@ -1271,9 +1424,9 @@ def validate_gravityguard():
     elapsed_ms = (time.perf_counter() - start_time) * 1000
     log_event(tool_name, "APPROVED", target_file, f"All Guards Passed ({elapsed_ms:.1f}ms)", rule_id="PASS")
     res_payload = {"decision": "allow"}
-    if test_evidence_warnings:
-        res_payload["warnings"] = [w[1] for w in test_evidence_warnings]
-        res_payload["warning_rule_ids"] = [w[0] for w in test_evidence_warnings]
+    if all_warnings:
+        res_payload["warnings"] = [w[1] for w in all_warnings]
+        res_payload["warning_rule_ids"] = [w[0] for w in all_warnings]
     print(json.dumps(res_payload))
     sys.exit(0)
 

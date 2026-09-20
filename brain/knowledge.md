@@ -57,12 +57,21 @@ The Python engine enforces checks through an ordered, high-to-low priority pipel
 5. **`G4_IMPORT_MATRIX` (P0 - BLOCK)**: Enforces architecture boundaries (`.gravityguard.json`). Supports relative Python imports and TS side-effects with exact path-segment matching (no false substring collisions).
 6. **`OE_SPIKE` (P2 - WARN ONLY)**: Lightweight heuristic for premature abstraction spikes (< 50 LOC introducing 2+ classes/interfaces).
 7. **`SRP_BOUNDARY` (P0 - BLOCK)**: Flags multi-responsibility anti-patterns (e.g., mixing raw UI widgets with HTTP/Network requests in a single file).
-8. **`TEST_EVIDENCE` (Phase 2 - WARN ONLY)**:
+8. **`ARCH_FILE_GROWTH` (P2 - WARN ONLY)**:
+   - **Philosophy**: Prevents the "creeping monolith" anti-pattern without blocking. AI agents tend to append small chunks (+40 LOC, +40 LOC) into a single 900+ LOC file, gradually turning it into an unmaintainable god-file.
+   - **Trigger Conditions**: (1) Projected LOC >= 1000, (2) Single tool-call additions >= 180 LOC, or (3) Creeping additions >= 80 LOC on an already large file (>= 800 LOC).
+   - **Exemptions**: Test files (`test_*.py`, `*.test.ts`) and configured cohesive modules are exempt.
+9. **`TEST_EVIDENCE` (Phase 2 - WARN ONLY)**:
    - **Philosophy**: Not a test coverage or mutation testing tool. Acts as a lightweight pre-tool "evidence airbag" to catch AI agents changing production behavior without test updates or writing empty assertionless stubs.
    - **Zero BLOCK Invariant**: Under no circumstance does T1, T2, or T3 block a tool call. All decisions return `decision: allow` with informative warnings.
    - **`T1_MISSING_RELATED_TEST`**: Triggers when production code changes without a candidate test file on disk or when candidate test file was untouched in the active session window. Exemption allowlist (`types`, `constants`, `index`, `*.d.ts`, `migrations`, `config`, `schemas`) prevents false alarms.
    - **`T2_NO_OBSERVABLE_ASSERTION`**: Triggers when newly added test cases (`def test_...`, `it(...)`, `test(...)`) contain no observable assertion pattern (`assert`, `self.assert*`, `pytest.raises`, `expect()`, `.toBe()`, `.toEqual()`, `.toThrow()`, etc.). Fixtures (`beforeEach`, `describe`, `setUp`) are exempt. Regex specifically avoids false matching on test titles starting with "should".
    - **`T3_SYMBOL_TO_TEST_LINK`**: Triggers when top-level/exported functions or classes added to production code do not appear by name in the candidate test file. Only runs when candidate test file exists (avoids warning spam when T1 already triggered).
+10. **`STATIC_LINTER_DIAGNOSTIC` (Tier 2/3 Bridge - WARN ONLY)**:
+   - **Philosophy**: The pre-tool fast path must stay `< 10ms`. Running `eslint`, `ruff`, or `tsc` synchronously inside pre-tool interceptors paralyzes the AI agent with 1–3s latency spikes.
+   - **Asynchronous Runner (`engine/async_runner.py`)**: Runs post-tool in the background on changed files only (Ruff for Python, ESLint for TS/JS, Godot for GDScript, and debounced `tsc --noEmit` across TS projects).
+   - **State Bridge (`.gravityguard/runtime/diagnostics.json`)**: Background tools output findings into this JSON file with timestamps.
+   - **Next-Hook Injection**: On the next tool-call, `gravity-validator.py` reads `diagnostics.json` in `< 0.5ms`, checks freshness (<600s and file not modified after diagnostic), and injects actionable warnings into the AI prompt.
 
 ### 2.2. Event Stream Protocol (`srp_guardian_live.json`)
 - The Python engine records all evaluations to `~/.gemini/logs/srp_guardian_live.json`.

@@ -1,11 +1,11 @@
-# GravityGuard — v1.1.0
+# GravityGuard — v1.2.0
 
 > Deterministic Architecture Airbag, Secret Leak Airbag & AI Agent Gatekeeper for Antigravity IDE.
 
 [English](#english) | [Türkçe](#türkçe)
 
 [![Antigravity Compatible](https://img.shields.io/badge/Antigravity%20IDE-Compatible-blue.svg)](https://antigravity.google/)
-[![Tests](https://img.shields.io/badge/Tests-59%20Passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-66%20Passing-brightgreen.svg)]()
 [![Core Evaluator](https://img.shields.io/badge/Core%20Latency-%3C%200.05ms-blue.svg)]()
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9%20%7C%20ES2022-blue.svg)](https://www.typescriptlang.org/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B%20%7C%20Zero%20Dependencies-brightgreen.svg)](https://www.python.org/)
@@ -31,9 +31,11 @@ GravityGuard operates an ordered, zero-overhead pipeline before any file modific
 | **`G4`** | **Import Matrix Guard** | **BLOCK** | Enforces layer boundaries defined in `.gravityguard.json` (e.g. `ui` forbidden from importing `database`). Supports relative imports and TS side-effects. |
 | **`SRP`** | **Single Responsibility** | **BLOCK** | Blocks files mixing raw UI components with HTTP/network calls, or accumulating 4+ major business classes in a god-file. |
 | **`OE`** | **Over-Engineering Spike** | **WARN ONLY** | Heuristic warning when small production changes (< 50 LOC) introduce a disproportionate abstraction spike (2+ classes/interfaces). |
+| **`ARCH`**| **File Growth Radar** | **WARN ONLY** | Early warning against monolithic file accumulation: triggers on projected LOC >= 1000, additions >= 180 LOC, or creeping growth on 800+ LOC files. Zero blocking. |
 | **`T1`** | **Missing Related Test** | **WARN ONLY** | Warns when production code changes without a candidate test file on disk or when candidate test was untouched during the active session. Exemption allowlist for `types`, `constants`, `migrations`, etc. |
 | **`T2`** | **Observable Assertion** | **WARN ONLY** | Verifies newly added test cases (`def test_...`, `it(...)`) contain observable assertions (`assert`, `self.assert*`, `pytest.raises`, `expect()`, `.toBe()`, `.toEqual()`). |
 | **`T3`** | **Symbol-to-Test Link** | **WARN ONLY** | Verifies that newly added top-level/exported functions or classes appear by name in the candidate test file. Never double-warns if test is absent. |
+| **`LINT`**| **Diagnostic Feedback** | **WARN ONLY** | Non-blocking Tier 2 background linters (Ruff, ESLint, Godot) write findings to `.gravityguard/runtime/diagnostics.json`, surfaced on subsequent pre-tool calls (<0.5ms). |
 
 ## Key Features
 
@@ -105,9 +107,11 @@ GravityGuard, herhangi bir dosya değiştirme aracı çalıştırılmadan önce 
 | **`G4`** | **Katman İthalat Matrisi (Import Matrix)** | **ENGELLE (BLOCK)** | `.gravityguard.json` dosyasında tanımlanan mimari sınırları zorunlu kılar (örn: `ui` doğrudan `database` import edemez). Relative ve side-effect importları destekler. |
 | **`SRP`** | **Tek Sorumluluk Koruması (SRP Boundary)** | **ENGELLE (BLOCK)** | Aynı dosyada UI bileşenleri ile Network/HTTP çağrılarının karıştırılmasını veya bir dosyaya 4'ten fazla ana sınıf yığılmasını engeller. |
 | **`OE`** | **Aşırı Soyutlama Tespiti (Over-Engineering)** | **YALNIZCA UYAR** | Küçük değişikliklerde (< 50 satır) orantısız biçimde 2 veya daha fazla yeni soyutlama (sınıf/arayüz) eklenmesine karşı YAGNI uyarısı verir. |
+| **`ARCH`**| **Dosya Büyüme Radarı (File Growth)** | **YALNIZCA UYAR** | Monolitik dosya birikimine karşı erken uyarı: dosya >= 1000 satır olduğunda, tek seferde >= 180 satır eklendiğinde veya 800+ satırlık dosyaya >= 80 satır eklendiğinde uyarır. Asla engellemez. |
 | **`T1`** | **Eksik İlişkili Test (Missing Related Test)** | **YALNIZCA UYAR** | Üretim kodu değiştiğinde diskte aday test dosyası yoksa veya bu oturumda teste dokunulmamışsa uyarır (`types`, `constants`, `migrations` muaf). |
 | **`T2`** | **Gözlemlenebilir Assertion (Observable Assertion)**| **YALNIZCA UYAR** | Yeni eklenen test case'lerinin (`def test_...`, `it(...)`) en az bir assertion (`assert`, `self.assert*`, `expect()`, `.toBe()`, `pytest.raises`) içerdiğini doğrular. |
 | **`T3`** | **Sembol-Test İlişkisi (Symbol-to-Test Link)** | **YALNIZCA UYAR** | Eklenen/değişen fonksiyon veya sınıf isimlerinin ilgili test dosyasında adıyla geçip geçmediğini kontrol eder. Test yoksa T1 önceliklidir. |
+| **`LINT`**| **Statik Linter Bildirimi (Diagnostics)** | **YALNIZCA UYAR** | Arka planda çalışan linter'lar (Ruff, ESLint, Godot) bulgularını `.gravityguard/runtime/diagnostics.json` dosyasına yazar; bir sonraki hook çağrısında yapay zekaya bağlamsal uyarı verilir (<0.5ms). |
 
 ## Temel Özellikler
 

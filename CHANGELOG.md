@@ -5,6 +5,26 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-09-20
+
+### Added
+- **ARCH_FILE_GROWTH Guard (Fast Guard — WARN ONLY)**:
+  - Multi-condition heuristic radar detecting uncontrolled monolithic code accumulation without blocking the AI agent.
+  - Triggers on: (1) Projected lines >= 1000, (2) Single tool-call addition >= 180 LOC, or (3) Creeping growth on 800+ LOC files with >= 80 LOC additions.
+  - Exemption rules for test files (`test_*.py`, `*.test.ts`, `*.spec.ts`) and configured cohesive modules.
+- **Tier 2 / Tier 3 Async Background Validation & Diagnostics Pipeline**:
+  - Preserved the **< 10 ms Fast Guard Invariant**: Pre-tool interceptor strictly runs zero external compilers or linters.
+  - Added `engine/async_runner.py`: Lightweight asynchronous runner executing Ruff (Python), ESLint (TS/JS), Godot check-only (GDScript), and debounced `tsc --noEmit` (TypeScript batch).
+  - Added persistent state bridge `.gravityguard/runtime/diagnostics.json` with timestamp and file staleness validation.
+  - Added `STATIC_LINTER_DIAGNOSTIC (WARN)`: Sub-millisecond (< 0.5 ms) pre-tool diagnostic reader seamlessly surfacing previous background linter findings directly into AI context.
+- **Prompt Enhancer Architectural Guidance Preamble**:
+  - Updated `src/extension.ts` prompt enhancement system prompt with explicit directives favoring cohesive modules over monolithic accumulation while discouraging artificial over-splitting.
+- **Automated Test Suite Expansion**:
+  - Expanded test suite from 59 to **66 automated unit tests** (`engine/test_gravity_validator.py`), 66/66 passing.
+  - In-memory logic latency measured at **~0.039 ms** (core) and **~0.014 ms** (Phase 2 evaluator).
+
+---
+
 ## [1.1.0] - 2026-09-20
 
 ### Added

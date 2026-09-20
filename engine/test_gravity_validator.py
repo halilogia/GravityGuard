@@ -1273,6 +1273,210 @@ class TestGravityGuardPhase2(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    # ========================================================================
+    # PHASE 2.5 TESTS: ARCH_FILE_GROWTH & STATIC LINTER DIAGNOSTICS
+    # ========================================================================
+
+    def test_arch_file_growth_over_1000_loc_triggers_warn(self):
+        """When projected content exceeds 1000 non-empty lines, ARCH_FILE_GROWTH warns without blocking"""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            prod_file = os.path.join(temp_dir, "large_service.py")
+            # 950 lines initial
+            initial_lines = [f"def func_{i}():\n    return {i}\n" for i in range(475)]
+            with open(prod_file, "w", encoding="utf-8") as f:
+                f.writelines(initial_lines)
+
+            # Add 80 more lines (total ~1030 lines)
+            added_content = "\n".join([f"def new_func_{i}():\n    return {i}" for i in range(40)])
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": prod_file,
+                        "TargetContent": "def func_0():\n    return 0\n",
+                        "ReplacementContent": "def func_0():\n    return 0\n\n" + added_content
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "allow", "ARCH_FILE_GROWTH must never block")
+            rule_ids = res.get("warning_rule_ids", [])
+            self.assertIn("ARCH_FILE_GROWTH", rule_ids)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_arch_file_growth_single_addition_over_180_loc_triggers_warn(self):
+        """When a single tool-call adds 180+ clean lines, ARCH_FILE_GROWTH warns"""
+        big_block = "\n".join([f"var_{i} = {i}" for i in range(200)])
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": "C:/fake_project/src/new_monolith.py",
+                    "CodeContent": big_block
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+        self.assertIn("ARCH_FILE_GROWTH", res.get("warning_rule_ids", []))
+
+    def test_arch_file_growth_creeping_growth_800_plus_80_triggers_warn(self):
+        """When an 800+ LOC file receives 80+ lines, ARCH_FILE_GROWTH warns"""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            prod_file = os.path.join(temp_dir, "creeping_module.py")
+            # 820 lines initial
+            initial_lines = [f"line_{i} = {i}\n" for i in range(820)]
+            with open(prod_file, "w", encoding="utf-8") as f:
+                f.writelines(initial_lines)
+
+            # Add 85 lines
+            added_content = "\n".join([f"extra_line_{i} = {i}" for i in range(85)])
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": prod_file,
+                        "TargetContent": "line_0 = 0\n",
+                        "ReplacementContent": "line_0 = 0\n" + added_content + "\n"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "allow")
+            self.assertIn("ARCH_FILE_GROWTH", res.get("warning_rule_ids", []))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_arch_file_growth_exempt_for_test_files(self):
+        """Test files (e.g. test_suite.py) are exempt from ARCH_FILE_GROWTH even with 1000+ lines"""
+        big_test = "\n".join([f"def test_case_{i}(): assert True" for i in range(1100)])
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": "C:/fake_project/tests/test_huge_suite.py",
+                    "CodeContent": big_test
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+        rule_ids = res.get("warning_rule_ids", [])
+        self.assertNotIn("ARCH_FILE_GROWTH", rule_ids)
+
+    def test_arch_file_growth_normal_small_edit_no_warning(self):
+        """Normal small modification to a small file produces NO ARCH_FILE_GROWTH warning"""
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": "C:/fake_project/src/small_service.py",
+                    "CodeContent": "def greet(name: str) -> str:\n    return f'Hello, {name}'\n"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+        rule_ids = res.get("warning_rule_ids", [])
+        self.assertNotIn("ARCH_FILE_GROWTH", rule_ids)
+
+    def test_static_linter_diagnostics_fresh_read(self):
+        """When diagnostics.json has a fresh entry for the target file, validator emits STATIC_LINTER_DIAGNOSTIC"""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            runtime_dir = os.path.join(temp_dir, ".gravityguard", "runtime")
+            os.makedirs(runtime_dir, exist_ok=True)
+            diag_file = os.path.join(runtime_dir, "diagnostics.json")
+
+            target_file = os.path.join(temp_dir, "src", "payment.py")
+            os.makedirs(os.path.dirname(target_file), exist_ok=True)
+            with open(target_file, "w", encoding="utf-8") as f:
+                f.write("def pay(): pass\n")
+
+            diag_payload = {
+                "version": 1,
+                "lastUpdated": time.time(),
+                "entries": {
+                    target_file: {
+                        "tool": "ruff",
+                        "timestamp": time.time(),
+                        "errors": [
+                            {"line": 1, "rule": "F841", "message": "Local variable 'x' is assigned to but never used"}
+                        ]
+                    }
+                }
+            }
+            with open(diag_file, "w", encoding="utf-8") as f:
+                json.dump(diag_payload, f)
+
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": target_file,
+                        "TargetContent": "def pay(): pass",
+                        "ReplacementContent": "def pay():\n    return True\n"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "allow")
+            rule_ids = res.get("warning_rule_ids", [])
+            self.assertIn("STATIC_LINTER_DIAGNOSTIC", rule_ids)
+            warnings = res.get("warnings", [])
+            self.assertTrue(any("ruff" in w and "F841" in w for w in warnings))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_static_linter_diagnostics_stale_skipped(self):
+        """When diagnostics.json entry is older than 600s, it is treated as stale and skipped"""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            runtime_dir = os.path.join(temp_dir, ".gravityguard", "runtime")
+            os.makedirs(runtime_dir, exist_ok=True)
+            diag_file = os.path.join(runtime_dir, "diagnostics.json")
+
+            target_file = os.path.join(temp_dir, "src", "payment.py")
+            os.makedirs(os.path.dirname(target_file), exist_ok=True)
+            with open(target_file, "w", encoding="utf-8") as f:
+                f.write("def pay(): pass\n")
+
+            diag_payload = {
+                "version": 1,
+                "lastUpdated": time.time() - 700,
+                "entries": {
+                    target_file: {
+                        "tool": "ruff",
+                        "timestamp": time.time() - 700,  # 700 seconds old
+                        "errors": [
+                            {"line": 1, "rule": "F841", "message": "Old error"}
+                        ]
+                    }
+                }
+            }
+            with open(diag_file, "w", encoding="utf-8") as f:
+                json.dump(diag_payload, f)
+
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": target_file,
+                        "TargetContent": "def pay(): pass",
+                        "ReplacementContent": "def pay():\n    return True\n"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "allow")
+            rule_ids = res.get("warning_rule_ids", [])
+            self.assertNotIn("STATIC_LINTER_DIAGNOSTIC", rule_ids)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

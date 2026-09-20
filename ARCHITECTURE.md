@@ -125,33 +125,53 @@ Write to System Clipboard (Ctrl+V Ready)
 Display Success Notification with "Yeni Belgede Aç" Action
 ```
 
-### 3.2. Guard Gatekeeper Event Lifecycle
+### 3.2. Tiered Guard Gatekeeper & Diagnostics Lifecycle
 ```text
-AI Agent Tool Call / File Mutation Triggered
+AI Agent Tool Call Triggered
        │
        ▼
-gravity-validator.py Executes (Target File / Buffer)
+[TIER 1: FAST GUARD (<10ms, In-Memory)]
+   ├── Check G0 (Secret Leaks) ─────────────> BLOCK / WARN
+   ├── Check G1 (Silent Exceptions) ────────> BLOCK
+   ├── Check G2 (Test Silencing & Deletion) ─> BLOCK / WARN
+   ├── Check G3 (Compiler Bypass) ──────────> WARN
+   ├── Check G4 (Import Matrix) ────────────> BLOCK
+   ├── Check OE_SPIKE (Over-Engineering) ───> WARN
+   ├── Check ARCH_FILE_GROWTH (Monolith) ───> WARN
+   ├── Check SRP Boundaries ────────────────> BLOCK
+   ├── Check T1-T3 (Test Evidence) ─────────> WARN
+   └── Read diagnostics.json (<0.5ms) ──────> Surface previous Linter findings (WARN)
        │
        ▼
-Evaluate Rule Matrix (< 50ms execution)
-   ├── Violation Found ──> Verdict = BLOCKED (Exit code 1)
-   └── Clean Code      ──> Verdict = APPROVED (Exit code 0)
+All Blocking Rules Passed?
+   ├── No  ──> Output { decision: "deny", reason: "..." } -> Exit 0
+   └── Yes ──> Output { decision: "allow", warnings: [...] } -> Exit 0
        │
        ▼
-Append Event to ~/.gemini/logs/srp_guardian_live.json
+Tool Execution Completes
        │
        ▼
-Extension Watcher Detects Change
+[TIER 2: ASYNC STATIC VALIDATION (Background Runner)]
+Changed file triggers engine/async_runner.py in background:
+   ├── Python     ──> Ruff check
+   ├── TypeScript ──> ESLint check
+   └── GDScript   ──> Godot check-only
        │
        ▼
-Update Live Monitor Webview & Counter Badges
+Writes findings to .gravityguard/runtime/diagnostics.json
+       │
+       ▼
+[TIER 3: BATCH COMPILER CHECK (Debounced)]
+Tool burst ends (3s idle) ──> tsc --noEmit across project
 ```
 
 ---
 
 ## 4. Key Engineering Invariants
 
-1. **Sub-50ms Guard Execution**: The Python guard must never stall an AI agent tool pipeline. Heavy symbol analysis is strictly prohibited.
+1. **Sub-10ms Fast Guard Execution**: The synchronous pre-tool interceptor must never stall the AI agent. Heavy external CLI tools (linters, compilers, package managers) are strictly forbidden in Tier 1.
 2. **Deterministic & Offline-First**: Both the guard engine and prompt enhancer function fully offline against local AI models (9Router, Ollama, LM Studio).
-3. **Lossless Failure Handling**: If 9Router or the log file is temporarily unavailable, the extension displays friendly notifications without crashing or throwing unhandled promise rejections.
+3. **Lossless Failure Handling**: If 9Router or diagnostic files are temporarily unavailable, the extension displays friendly notifications without crashing or throwing unhandled exceptions.
 4. **Zero Host File Patching**: No files in the host IDE installation are modified; all integration is handled through officially supported VS Code extension interfaces.
+5. **Architectural Airbag Principle**: GravityGuard acts as a deterministic seatbelt; it prevents secret leaks and silent errors with BLOCK, while guiding architecture and test evidence through informative WARN signals without paralyzing developer velocity.
+
