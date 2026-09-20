@@ -12,9 +12,11 @@ This document outlines the strategic evolution, architectural milestones, and pl
   - Detects newly added empty exception handlers (`except: pass`, `except: ...`, `catch {}`).
   - Strict diff-based evaluation (existing unchanged handlers are preserved without false alarms).
   - Permits recovery fallbacks (`return None`, `return []`).
-- [x] **G2 — Test Integrity Guard (BLOCK)**:
-  - Blocks newly added test disabling tricks (`.skip()`, `.only()`, `xit()`, `xdescribe()`, `@pytest.mark.skip`, `@unittest.skip`).
-  - Blocks outright deletion of existing test cases (`def test_...` / `it(...)`).
+- [x] **G2 — Test Integrity Guard (BLOCK / WARN)**:
+  - Blocks newly added test disabling tricks (`.skip()`, `xit()`, `xdescribe()`, `@pytest.mark.skip`, `@unittest.skip`).
+  - Warns on focused tests (`.only()`).
+  - Permits test expected failures (`@pytest.mark.xfail`).
+  - Blocks outright deletion of existing test cases (`def test_...` / `it(...)`) using full-file frequency counters (`collections.Counter`).
   - Allows normal test body refactoring without false positives.
 - [x] **G3 — Compiler & Linter Bypass Guard (WARN)**:
   - Detects newly added `# noqa`, `# type: ignore`, `@ts-ignore`, `@ts-nocheck`, `eslint-disable`.
@@ -30,18 +32,18 @@ This document outlines the strategic evolution, architectural milestones, and pl
   - Integrated 9Router local AI pipeline with sub-3s model failover.
 - [x] **Live Security Monitor Webview**:
   - Real-time Activity Bar panel streaming audit events from `~/.gemini/logs/srp_guardian_live.json`.
-- [x] **13/13 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`).
+- [x] **52/52 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`).
 
 ---
 
 ## Phase 2: v1.1.0 — Test Evidence & Intent-Aware Enhancer
 
-*Target: Q4 2026*
+*Status: 2.1 Released | 2.2 Target: Q4 2026*
 
-### 2.1. Test Evidence Analyzer (T1, T2, T3)
-- [ ] **T1 — Missing Related Test**: When production behavior changes in `core/` or `agent/`, verify whether an associated test file was touched (WARN).
-- [ ] **T2 — Observable Assertion Verification**: Verify that modified test files contain at least one observable assertion (`assert`, `expect`, `toEqual`).
-- [ ] **T3 — Symbol-to-Test Link**: Lightweight verification that modified production function names appear inside the candidate test file.
+### 2.1. Test Evidence Analyzer (T1, T2, T3) — Released ✅
+- [x] **T1 — Missing Related Test (WARN)**: Verifies that production code changes have an associated candidate test file on disk and active session touch footprint. Respects exemption allowlist (`types`, `constants`, `index`, `*.d.ts`, `migrations`, `config`, `schemas`).
+- [x] **T2 — Observable Assertion Verification (WARN)**: Lightweight verification that newly added/modified test cases (`def test_...`, `it(...)`, `test(...)`) contain observable assertions (`assert`, `self.assert*`, `pytest.raises`, `expect()`, `.toBe()`, `.toEqual()`, `.toThrow()`). Protects fixture/beforeEach/describe setups from false alarms.
+- [x] **T3 — Symbol-to-Test Link (WARN)**: Verifies that newly added/modified top-level or exported production symbols (functions, classes) are referenced by name in the candidate test file. Never double-warns if test file is absent (T1 precedence). Zero blocking.
 
 ### 2.2. Intent-Aware Prompt Enhancer
 - [ ] Automated query classification:

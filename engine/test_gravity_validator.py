@@ -4,6 +4,8 @@ import json
 import time
 import os
 import sys
+import tempfile
+import shutil
 from typing import Tuple
 
 VALIDATOR_PATH = os.path.join(os.path.dirname(__file__), "gravity-validator.py")
@@ -709,5 +711,350 @@ class TestGravityGuardPhase1(unittest.TestCase):
         print(f"\n[BENCHMARK - CORE EVALUATOR] Average in-memory logic execution: {avg_core_ms:.3f} ms")
         self.assertLess(avg_core_ms, 10.0, "Core in-memory rule evaluator must execute in < 10ms")
 
+class TestGravityGuardPhase2(unittest.TestCase):
+    """
+    Phase 2: Test Evidence Analyzer Tests (T1, T2, T3)
+    Invariants:
+    - Never BLOCKS (decision must always be 'allow').
+    - Emits informative warnings when evidence is lacking.
+    - Exempts constants, types, configs, and declarations.
+    """
+
+    # --- T1: MISSING_RELATED_TEST ---
+
+    def test_t1_exempt_constants_and_types(self):
+        """Changes to constants.py or types.ts must NOT trigger T1 warning"""
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/src/constants.py",
+                    "TargetContent": "TIMEOUT = 10",
+                    "ReplacementContent": "TIMEOUT = 30"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+        rule_ids = res.get("warning_rule_ids", [])
+        self.assertNotIn("T1_MISSING_RELATED_TEST", rule_ids)
+
+    def test_t1_exempt_declarations_and_migrations(self):
+        """Changes to .d.ts or migrations must NOT trigger T1 warning"""
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/src/types/api.d.ts",
+                    "TargetContent": "export interface User { id: string; }",
+                    "ReplacementContent": "export interface User { id: string; name: string; }"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+        rule_ids = res.get("warning_rule_ids", [])
+        self.assertNotIn("T1_MISSING_RELATED_TEST", rule_ids)
+
+    def test_t1_warn_when_candidate_test_absent(self):
+        """When production code changes and no test file exists on disk, T1 must WARN (not block)"""
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/src/billing_service.py",
+                    "TargetContent": "def pay(): return True",
+                    "ReplacementContent": "def pay():\n    validate_card()\n    return True"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow", "T1 must never block production changes")
+        rule_ids = res.get("warning_rule_ids", [])
+        self.assertIn("T1_MISSING_RELATED_TEST", rule_ids)
+
+    def test_t1_allow_when_candidate_test_recently_touched(self):
+        """When candidate test file exists and was touched in this session, T1 must NOT warn"""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            src_dir = os.path.join(temp_dir, "src")
+            tests_dir = os.path.join(temp_dir, "tests")
+            os.makedirs(src_dir, exist_ok=True)
+            os.makedirs(tests_dir, exist_ok=True)
+
+            prod_file = os.path.join(src_dir, "order.py")
+            test_file = os.path.join(tests_dir, "test_order.py")
+
+            with open(prod_file, "w", encoding="utf-8") as f:
+                f.write("def create_order():\n    return {'id': 1}\n")
+            with open(test_file, "w", encoding="utf-8") as f:
+                f.write("def test_create_order():\n    assert True\n")
+
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": prod_file,
+                        "TargetContent": "return {'id': 1}",
+                        "ReplacementContent": "return {'id': 2}"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "allow")
+            rule_ids = res.get("warning_rule_ids", [])
+            self.assertNotIn("T1_MISSING_RELATED_TEST", rule_ids)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_t1_warn_when_candidate_test_untouched_in_session(self):
+        """When candidate test file exists but was not touched in session window, T1 must WARN"""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            src_dir = os.path.join(temp_dir, "src")
+            tests_dir = os.path.join(temp_dir, "tests")
+            os.makedirs(src_dir, exist_ok=True)
+            os.makedirs(tests_dir, exist_ok=True)
+
+            prod_file = os.path.join(src_dir, "order.py")
+            test_file = os.path.join(tests_dir, "test_order.py")
+
+            with open(prod_file, "w", encoding="utf-8") as f:
+                f.write("def create_order():\n    return {'id': 1}\n")
+            with open(test_file, "w", encoding="utf-8") as f:
+                f.write("def test_create_order():\n    assert True\n")
+
+            past_time = time.time() - 1000
+            os.utime(test_file, (past_time, past_time))
+
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": prod_file,
+                        "TargetContent": "return {'id': 1}",
+                        "ReplacementContent": "return {'id': 2}"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "allow")
+            rule_ids = res.get("warning_rule_ids", [])
+            self.assertIn("T1_MISSING_RELATED_TEST", rule_ids)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    # --- T2: NO_OBSERVABLE_ASSERTION ---
+
+    def test_t2_warn_empty_python_test_no_assertion(self):
+        """Python test case added without any assertion must trigger T2 warning (not block)"""
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/tests/test_auth.py",
+                    "TargetContent": "# placeholder",
+                    "ReplacementContent": "def test_login_flow():\n    token = get_token()\n    print(token)"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+        rule_ids = res.get("warning_rule_ids", [])
+        self.assertIn("T2_NO_OBSERVABLE_ASSERTION", rule_ids)
+
+    def test_t2_allow_python_test_with_assert(self):
+        """Python test case with standard assert must NOT trigger T2 warning"""
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/tests/test_auth.py",
+                    "TargetContent": "# placeholder",
+                    "ReplacementContent": "def test_login_flow():\n    token = get_token()\n    assert token is not None"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+        rule_ids = res.get("warning_rule_ids", [])
+        self.assertNotIn("T2_NO_OBSERVABLE_ASSERTION", rule_ids)
+
+    def test_t2_allow_python_test_with_pytest_raises(self):
+        """Python test case using pytest.raises must NOT trigger T2 warning"""
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/tests/test_auth.py",
+                    "TargetContent": "# placeholder",
+                    "ReplacementContent": "def test_login_invalid():\n    with pytest.raises(ValueError):\n        login('')"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+        rule_ids = res.get("warning_rule_ids", [])
+        self.assertNotIn("T2_NO_OBSERVABLE_ASSERTION", rule_ids)
+
+    def test_t2_warn_empty_ts_test_no_assertion(self):
+        """TS test case added without any assertion must trigger T2 warning (not block)"""
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/tests/auth.test.ts",
+                    "TargetContent": "// placeholder",
+                    "ReplacementContent": "it('should authenticate user', () => {\n  const user = authenticate();\n});"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+        rule_ids = res.get("warning_rule_ids", [])
+        self.assertIn("T2_NO_OBSERVABLE_ASSERTION", rule_ids)
+
+    def test_t2_allow_ts_test_with_expect(self):
+        """TS test case with expect(...).toBe(...) must NOT trigger T2 warning"""
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/tests/auth.test.ts",
+                    "TargetContent": "// placeholder",
+                    "ReplacementContent": "it('should authenticate user', () => {\n  const user = authenticate();\n  expect(user.role).toBe('admin');\n});"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+        rule_ids = res.get("warning_rule_ids", [])
+        self.assertNotIn("T2_NO_OBSERVABLE_ASSERTION", rule_ids)
+
+    def test_t2_ignore_describe_and_before_each(self):
+        """Modifying only describe or beforeEach blocks must NOT trigger T2 warning"""
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/tests/suite.test.ts",
+                    "TargetContent": "// suite",
+                    "ReplacementContent": "describe('AuthService', () => {\n  beforeEach(() => {\n    clearSession();\n  });\n});"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+        rule_ids = res.get("warning_rule_ids", [])
+        self.assertNotIn("T2_NO_OBSERVABLE_ASSERTION", rule_ids)
+
+    # --- T3: SYMBOL_TO_TEST_LINK ---
+
+    def test_t3_allow_when_symbol_referenced_in_test(self):
+        """When modified production symbol appears in candidate test, T3 must NOT warn"""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            src_dir = os.path.join(temp_dir, "src")
+            tests_dir = os.path.join(temp_dir, "tests")
+            os.makedirs(src_dir, exist_ok=True)
+            os.makedirs(tests_dir, exist_ok=True)
+
+            prod_file = os.path.join(src_dir, "calc.py")
+            test_file = os.path.join(tests_dir, "test_calc.py")
+
+            with open(prod_file, "w", encoding="utf-8") as f:
+                f.write("def old(): pass\n")
+            with open(test_file, "w", encoding="utf-8") as f:
+                f.write("def test_calc():\n    assert calculate_total([1]) == 1\n")
+
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": prod_file,
+                        "TargetContent": "def old(): pass",
+                        "ReplacementContent": "def calculate_total(items):\n    return sum(items)\n"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "allow")
+            rule_ids = res.get("warning_rule_ids", [])
+            self.assertNotIn("T3_SYMBOL_TO_TEST_LINK", rule_ids)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_t3_warn_when_symbol_absent_in_test(self):
+        """When modified production symbol does not appear in candidate test, T3 must WARN"""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            src_dir = os.path.join(temp_dir, "src")
+            tests_dir = os.path.join(temp_dir, "tests")
+            os.makedirs(src_dir, exist_ok=True)
+            os.makedirs(tests_dir, exist_ok=True)
+
+            prod_file = os.path.join(src_dir, "calc.py")
+            test_file = os.path.join(tests_dir, "test_calc.py")
+
+            with open(prod_file, "w", encoding="utf-8") as f:
+                f.write("def old(): pass\n")
+            with open(test_file, "w", encoding="utf-8") as f:
+                f.write("def test_legacy():\n    assert True\n")
+
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": prod_file,
+                        "TargetContent": "def old(): pass",
+                        "ReplacementContent": "def compute_untested_formula(x):\n    return x * 42\n"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "allow")
+            rule_ids = res.get("warning_rule_ids", [])
+            self.assertIn("T3_SYMBOL_TO_TEST_LINK", rule_ids)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_phase2_never_blocks(self):
+        """Verify that multiple simultaneous Phase 2 warnings NEVER produce a deny decision"""
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/src/untested_service.py",
+                    "TargetContent": "# empty",
+                    "ReplacementContent": "def process_payment(amount):\n    return amount > 0\n"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow", "Phase 2 must NEVER block changes under any circumstance")
+
+    def test_phase2_in_memory_latency(self):
+        """Directly benchmarks Phase 2 Test Evidence evaluator in-memory execution (< 5ms)"""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("gravity_validator", VALIDATOR_PATH)
+        gv = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gv)
+
+        added_lines = ["def test_order():\n", "    assert calculate_total([1]) == 1\n"]
+        added_text = "".join(added_lines)
+
+        timings = []
+        for _ in range(100):
+            t0 = time.perf_counter()
+            gv.check_t2_observable_assertion(added_lines, added_text, True, False)
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            timings.append(elapsed_ms)
+
+        avg_ms = sum(timings) / len(timings)
+        print(f"\n[BENCHMARK - PHASE 2 EVALUATOR] Average in-memory logic execution: {avg_ms:.3f} ms")
+        self.assertLess(avg_ms, 5.0, "Phase 2 in-memory evaluator must execute in < 5ms")
+
+
 if __name__ == "__main__":
     unittest.main()
+

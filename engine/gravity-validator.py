@@ -665,7 +665,295 @@ def analyze_python_srp_regex_fallback(content: str, file_path: str = "") -> Tupl
 
 
 # ============================================================================
-# 5. MAIN DISPATCHER & RULE ORCHESTRATOR
+# 5. PHASE 2: TEST EVIDENCE AIRBAG (T1, T2, T3) — WARN ONLY
+# ============================================================================
+
+DEFAULT_EXEMPT_PATTERNS: List[str] = [
+    "types", "constants", "index", ".d.ts", "config", "interfaces", "schemas",
+    "migration", "migrations", "fixtures", "mock", "mocks"
+]
+
+def is_exempt_from_test_evidence(target_file: str, cfg: Optional[dict] = None) -> bool:
+    """
+    Checks if a target file is exempt from test evidence verification (e.g. types, constants, configs).
+    """
+    normalized = target_file.replace("\\", "/").lower()
+    basename = Path(normalized).name.lower()
+
+    exempt_patterns = DEFAULT_EXEMPT_PATTERNS
+    if cfg and isinstance(cfg, dict):
+        te_cfg = cfg.get("testEvidence", {})
+        if "exemptPatterns" in te_cfg and isinstance(te_cfg["exemptPatterns"], list):
+            exempt_patterns = [p.lower() for p in te_cfg["exemptPatterns"]]
+
+    for pat in exempt_patterns:
+        if pat in basename or f"/{pat}/" in normalized:
+            return True
+
+    if normalized.endswith(".d.ts"):
+        return True
+    if not normalized.endswith((".py", ".ts", ".tsx", ".js", ".jsx")):
+        return True
+
+    return False
+
+
+def resolve_candidate_test_file(target_file: str, cfg: Optional[dict] = None) -> Tuple[Optional[str], str]:
+    """
+    Given a production file, searches for its candidate test file using standard naming conventions.
+    Returns: (found_path_or_None, primary_expected_name)
+    """
+    normalized = target_file.replace("\\", "/")
+    target_path = Path(normalized)
+    stem = target_path.stem
+    suffix = target_path.suffix.lower()
+    parent_dir = target_path.parent
+
+    # Candidate file names
+    candidate_names = []
+    if suffix == ".py":
+        candidate_names = [f"test_{stem}.py", f"{stem}_test.py"]
+    elif suffix in [".ts", ".tsx", ".js", ".jsx"]:
+        candidate_names = [f"{stem}.test{suffix}", f"{stem}.spec{suffix}"]
+    else:
+        candidate_names = [f"test_{stem}{suffix}"]
+
+    primary_expected = candidate_names[0] if candidate_names else f"test_{stem}.py"
+
+    # 1. Search in the same directory
+    for name in candidate_names:
+        candidate = parent_dir / name
+        if candidate.is_file():
+            return str(candidate).replace("\\", "/"), primary_expected
+
+    # 2. Search in common test root directories
+    search_dirs = [parent_dir]
+    curr = parent_dir
+    for _ in range(5):
+        if curr.parent == curr:
+            break
+        curr = curr.parent
+        search_dirs.append(curr)
+
+    test_roots = ["tests", "__tests__", "test"]
+    if cfg and isinstance(cfg, dict):
+        te_cfg = cfg.get("testEvidence", {})
+        if "testRoots" in te_cfg and isinstance(te_cfg["testRoots"], list):
+            test_roots = te_cfg["testRoots"]
+
+    for root_cand in search_dirs:
+        for tr in test_roots:
+            td = root_cand / tr
+            if td.is_dir():
+                for name in candidate_names:
+                    tfile = td / name
+                    if tfile.is_file():
+                        return str(tfile).replace("\\", "/"), primary_expected
+                    try:
+                        rel = target_path.relative_to(root_cand)
+                        rel_parts = list(rel.parts)
+                        if rel_parts and rel_parts[0].lower() in ["src", "lib", "app", "core", "agent", "engine"]:
+                            rel_parts.pop(0)
+                        if rel_parts:
+                            rel_parts[-1] = name
+                            mirrored = td / Path(*rel_parts)
+                            if mirrored.is_file():
+                                return str(mirrored).replace("\\", "/"), primary_expected
+                    except ValueError:
+                        continue
+
+    return None, primary_expected
+
+
+def check_t1_missing_test(
+    target_file: str,
+    added_text: str,
+    cfg: Optional[dict] = None
+) -> Tuple[bool, str, Optional[str]]:
+    """
+    T1 — MISSING_RELATED_TEST (WARN ONLY).
+    Triggers when production code changes but no candidate test file exists on disk,
+    or candidate test file exists but was not updated in the active session window.
+    Returns: (warn_triggered, warn_message, candidate_test_path)
+    """
+    if not added_text.strip():
+        return False, "", None
+
+    if is_exempt_from_test_evidence(target_file, cfg):
+        return False, "", None
+
+    candidate_path, expected_name = resolve_candidate_test_file(target_file, cfg)
+
+    if not candidate_path or not os.path.exists(candidate_path):
+        return True, (
+            f"Test Kanıtı Uyarısı (T1_MISSING_RELATED_TEST): Üretim kodunda değişiklik yapıldı "
+            f"ancak ilişkili test dosyası ('{expected_name}') diskte bulunamadı. "
+            f"Davranış değişikliği için ilgili test dosyasını oluşturmayı veya güncellemeyi değerlendirin."
+        ), None
+
+    session_window = 300
+    if cfg and isinstance(cfg, dict):
+        session_window = cfg.get("testEvidence", {}).get("sessionWindowSeconds", 300)
+
+    try:
+        test_mtime = os.path.getmtime(candidate_path)
+        if (time.time() - test_mtime) > session_window:
+            return True, (
+                f"Test Kanıtı Uyarısı (T1_MISSING_RELATED_TEST): Üretim kodu değiştirildi ancak "
+                f"ilişkili test dosyası ('{candidate_path}') bu oturumda ({session_window}s) güncellenmedi."
+            ), candidate_path
+    except OSError:
+        test_mtime = 0.0
+
+    return False, "", candidate_path
+
+
+def check_t2_observable_assertion(
+    added_lines: List[str],
+    added_text: str,
+    is_python: bool,
+    is_ts: bool
+) -> Tuple[bool, str]:
+    """
+    T2 — NO_OBSERVABLE_ASSERTION (WARN ONLY).
+    Triggers when a test case (def test_..., it(...), test(...)) is added/modified,
+    but no observable assertion pattern is detected in the added test body.
+    Exempts setup/teardown/describe blocks (beforeEach, describe, setUp).
+    """
+    if not added_text.strip():
+        return False, ""
+
+    has_test_definition = False
+    test_names = []
+
+    if is_python:
+        py_test_defs = re.findall(r"^\s*def\s+(test_[a-zA-Z0-9_]+)\s*\(", added_text, re.MULTILINE)
+        if py_test_defs:
+            has_test_definition = True
+            test_names.extend(py_test_defs)
+    if is_ts or not is_python:
+        ts_test_defs = re.findall(r"\b(?:it|test)\s*\(\s*[\"'\`]([^\"'\`]+)[\"'\`]", added_text)
+        if ts_test_defs:
+            has_test_definition = True
+            test_names.extend(ts_test_defs)
+
+    if not has_test_definition:
+        return False, ""
+
+    py_assertion = bool(re.search(r"\b(?:assert\b|self\.assert[A-Za-z0-9_]+|pytest\.raises|pytest\.approx)", added_text))
+    ts_assertion = bool(re.search(
+        r"\b(?:expect\s*\(|assert\s*[\(\.]|\.to(?:Be|Equal|StrictEqual|Throw|HaveBeenCalled|Match|Contain|BeTruthy|BeFalsy|BeNull|BeUndefined|BeDefined|BeGreaterThan|BeLessThan|Reject|Resolve)\b|t\.(?:is|true|deepEqual|false)\b|\.should\.[a-zA-Z]+)",
+        added_text
+    ))
+
+    has_assertion = py_assertion if is_python else (ts_assertion if is_ts else (py_assertion or ts_assertion))
+
+    if not has_assertion:
+        sample_tests = ", ".join(f"'{n}'" for n in test_names[:2])
+        return True, (
+            f"Test Gözlem Uyarısı (T2_NO_OBSERVABLE_ASSERTION): Eklenen/değiştirilen test case "
+            f"({sample_tests}) içinde gözlemlenebilir bir assertion (assert, expect, self.assert*, pytest.raises) "
+            f"tespit edilemedi. İçi boş veya assertionsız test yazılmasından kaçının."
+        )
+
+    return False, ""
+
+
+def check_t3_symbol_to_test_link(
+    target_file: str,
+    added_text: str,
+    candidate_test_path: Optional[str],
+    is_python: bool,
+    is_ts: bool
+) -> Tuple[bool, str]:
+    """
+    T3 — SYMBOL_TO_TEST_LINK (WARN ONLY).
+    Checks whether newly added/modified top-level or exported production symbols
+    are referenced by name in the candidate test file.
+    Does not run if candidate test file does not exist (T1 covers absence).
+    """
+    if not added_text.strip() or not candidate_test_path:
+        return False, ""
+
+    if not os.path.isfile(candidate_test_path):
+        return False, ""
+
+    extracted_symbols = []
+    if is_python:
+        funcs = re.findall(r"^def\s+([a-zA-Z0-9_]+)\s*\(", added_text, re.MULTILINE)
+        classes = re.findall(r"^class\s+([a-zA-Z0-9_]+)", added_text, re.MULTILINE)
+        extracted_symbols = [s for s in funcs + classes if not s.startswith("_")]
+    elif is_ts:
+        exported_funcs = re.findall(r"export\s+(?:async\s+)?function\s+([a-zA-Z0-9_]+)", added_text)
+        exported_consts = re.findall(r"export\s+const\s+([a-zA-Z0-9_]+)\s*=", added_text)
+        exported_classes = re.findall(r"export\s+class\s+([a-zA-Z0-9_]+)", added_text)
+        top_funcs = re.findall(r"^function\s+([a-zA-Z0-9_]+)\s*\(", added_text, re.MULTILINE)
+        top_classes = re.findall(r"^class\s+([a-zA-Z0-9_]+)", added_text, re.MULTILINE)
+        extracted_symbols = [s for s in exported_funcs + exported_consts + exported_classes + top_funcs + top_classes if not s.startswith("_")]
+
+    if not extracted_symbols:
+        return False, ""
+
+    try:
+        with open(candidate_test_path, "r", encoding="utf-8", errors="ignore") as f:
+            test_content = f.read()
+    except (IOError, OSError):
+        return False, ""
+
+    missing_symbols = []
+    for sym in extracted_symbols:
+        if not re.search(r"\b" + re.escape(sym) + r"\b", test_content):
+            missing_symbols.append(sym)
+
+    if len(missing_symbols) == len(extracted_symbols):
+        sample = ", ".join(f"'{s}'" for s in missing_symbols[:3])
+        return True, (
+            f"Sembol-Test İlişki Uyarısı (T3_SYMBOL_TO_TEST_LINK): Değiştirilen üretim sembolü "
+            f"({sample}) ilgili test dosyasında ('{Path(candidate_test_path).name}') doğrudan referans edilmemiş. "
+            f"Test dosyasının bu davranışı doğrudan veya dolaylı test ettiğinden emin olun."
+        )
+
+    return False, ""
+
+
+def evaluate_test_evidence(
+    target_file: str,
+    is_test_file: bool,
+    added_lines: List[str],
+    added_text: str,
+    cfg: Optional[dict] = None,
+    is_python: bool = True,
+    is_ts: bool = False
+) -> List[Tuple[str, str]]:
+    """
+    Evaluates Phase 2 Test Evidence rules (T1, T2, T3).
+    Returns a list of (rule_id, warning_message) tuples. Never blocks.
+    """
+    warnings = []
+
+    if cfg and isinstance(cfg, dict):
+        if not cfg.get("testEvidence", {}).get("enabled", True):
+            return warnings
+
+    if is_test_file:
+        t2_warn, t2_msg = check_t2_observable_assertion(added_lines, added_text, is_python, is_ts)
+        if t2_warn:
+            warnings.append(("T2_NO_OBSERVABLE_ASSERTION", t2_msg))
+    else:
+        t1_warn, t1_msg, candidate_path = check_t1_missing_test(target_file, added_text, cfg)
+        if t1_warn:
+            warnings.append(("T1_MISSING_RELATED_TEST", t1_msg))
+
+        if candidate_path and os.path.isfile(candidate_path):
+            t3_warn, t3_msg = check_t3_symbol_to_test_link(target_file, added_text, candidate_path, is_python, is_ts)
+            if t3_warn:
+                warnings.append(("T3_SYMBOL_TO_TEST_LINK", t3_msg))
+
+    return warnings
+
+
+# ============================================================================
+# 6. MAIN DISPATCHER & RULE ORCHESTRATOR
 # ============================================================================
 
 def validate_gravityguard():
@@ -820,12 +1108,33 @@ def validate_gravityguard():
                 sys.exit(0)
 
     # ========================================================================
+    # GUARD 7: PHASE 2 TEST EVIDENCE AIRBAG (T1, T2, T3) — WARN ONLY
+    # ========================================================================
+    cfg = load_gravityguard_config(target_file)
+    test_evidence_warnings = evaluate_test_evidence(
+        target_file=target_file,
+        is_test_file=is_test_file,
+        added_lines=added_lines,
+        added_text=added_text,
+        cfg=cfg,
+        is_python=is_python,
+        is_ts=is_ts
+    )
+    for rule_id, warn_msg in test_evidence_warnings:
+        log_event(tool_name, "WARNING", target_file, warn_msg, rule_id=rule_id)
+
+    # ========================================================================
     # PASS / APPROVED
     # ========================================================================
     elapsed_ms = (time.perf_counter() - start_time) * 1000
     log_event(tool_name, "APPROVED", target_file, f"All Guards Passed ({elapsed_ms:.1f}ms)", rule_id="PASS")
-    print(json.dumps({"decision": "allow"}))
+    res_payload = {"decision": "allow"}
+    if test_evidence_warnings:
+        res_payload["warnings"] = [w[1] for w in test_evidence_warnings]
+        res_payload["warning_rule_ids"] = [w[0] for w in test_evidence_warnings]
+    print(json.dumps(res_payload))
     sys.exit(0)
+
 
 
 if __name__ == "__main__":
