@@ -44,7 +44,13 @@ This document serves as the persistent engineering knowledge repository for **Gr
 
 ### 2.1. Rule Matrix Pipeline Architecture
 The Python engine enforces checks through an ordered, high-to-low priority pipeline:
-1. **`G0_SECRET_LEAK` (P0 - BLOCK / WARN)**: Diff-safe secret and credential airbag. Scans strictly `added_text` for private keys, GitHub tokens, Claude/OpenAI/Gemini/Slack keys (BLOCK), and suspicious Bearer tokens / connection strings (WARN). Masks all evidence to prevent secondary log leaks.
+1. **`G0_SECRET_LEAK` (P0 - BLOCK / WARN)**: Diff-safe secret and credential airbag.
+   - **Scope Boundary**: Guarantees that AI tool-calls passing through the validator cannot write exposed credentials to target files. Out-of-band OS edits (direct PowerShell scripts, external text editors) are outside hook scope.
+   - **Scanning Scope**: Scans strictly `added_text` using `difflib.SequenceMatcher`.
+   - **High-Confidence Patterns (BLOCK)**: Private keys (`BEGIN ... PRIVATE KEY`), GitHub tokens (`ghp_`, `github_pat_`, etc.), Claude/Anthropic keys (`sk-ant-...`), OpenAI modern keys (`sk-proj-...`), Google/Gemini keys (`AIza...`), Slack tokens (`xoxb-`, `xoxp-`, etc.).
+   - **Suspicious Credentials (WARN)**: Long Bearer tokens and connection URIs with embedded passwords.
+   - **Placeholder Principle**: Placeholder detection (`example`, `your_api_key`, `dummy`) is a convenience heuristic to avoid false positives, not a security boundary. The primary security boundary is strict provider pattern matching.
+   - **Redaction Invariant**: All detected secrets are redacted (`sk-ant-****...****890`) before reaching logs (`srp_guardian_live.json`) or stdout to prevent secondary leaks.
 2. **`G1_SILENT_EXCEPTION` (P0 - BLOCK)**: Diff-safe exception integrity guard. Rejects newly added empty catch/except blocks (`except: pass`, `catch {}`).
 3. **`G2_TEST_INTEGRITY` (P0 - BLOCK / WARN)**: Test suite preservation. Rejects test case deletion across full files (`Counter`) and test disablers (`.skip()`, `xit()`). Allows `pytest.mark.xfail` and treats `.only()` as WARN.
 4. **`G3_COMPILER_BYPASS` (P1 - WARN ONLY)**: Flags newly introduced linter/compiler suppression pragmas (`# noqa`, `# type: ignore`, `@ts-ignore`).

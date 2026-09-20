@@ -564,6 +564,23 @@ class TestGravityGuardPhase1(unittest.TestCase):
         self.assertEqual(res.get("decision"), "deny")
         self.assertIn("G0_SECRET_LEAK", res.get("reason", ""))
 
+    def test_g0_block_slack_token(self):
+        """Slack token (xoxb-, xoxp-, etc.) in added lines must be BLOCKED"""
+        token = "xoxb-" + "123456789012-1234567890123-abcdefghijklmnopqrstuvwx"
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/src/slack.py",
+                    "TargetContent": "token = None",
+                    "ReplacementContent": f"token = '{token}'"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "deny")
+        self.assertIn("G0_SECRET_LEAK", res.get("reason", ""))
+
     def test_g0_allow_obvious_placeholder(self):
         """Obvious placeholder values must be ALLOWED"""
         payload = {
