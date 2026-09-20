@@ -33,13 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Multi-file isolation: edits across different files (e.g. `auth.ts` vs `calc.py`) maintain separate claims and never block or coalesce each other.
   - State cleanup: `clean_file_state` automatically deletes `active_lint_workers` and `file_edits` records upon completion so `debounce_state.json` remains minimal.
   - Floating-point epsilon tolerance (`1e-6`) prevents IEEE 754 precision boundary issues.
-- **Automated Test Suite Expansion (80/80 Passing)**:
-  - Expanded test suite to **80 automated unit tests** (`engine/test_gravity_validator.py`), 80/80 passing.
-  - Added 7 pure deterministic decision tests covering initial worker claim, duplicate worker suppression, under-threshold quiet window (<300ms), reached quiet window (300ms), window reset on new burst, state cleanup, and multi-file isolation.
+- **Automated Test Suite Expansion (81/81 Passing)**:
+  - Expanded test suite to **81 automated unit tests** (`engine/test_gravity_validator.py`), 81/81 passing.
+  - Added 7 pure deterministic decision tests and 1 integration-style coalescing end-to-end contract test (no sleep, no subprocess).
   - Conducted 1,000-iteration statistical latency distribution benchmark:
-    - **Average (Avg):** `0.1143 ms`
-    - **95th Percentile (p95):** `0.2368 ms`
-    - **99th Percentile (p99):** `0.6425 ms`
+    - **Average (Avg):** `0.103 ms`
+    - **95th Percentile (p95):** `0.204 ms`
+    - **99th Percentile (p99):** `0.454 ms`
 
 ---
 

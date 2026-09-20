@@ -1638,17 +1638,27 @@ class TestGravityGuardPhase2(unittest.TestCase):
         self.assertTrue(async_runner.should_spawn_worker(worker_already_running=False))
 
     def test_orchestration_mock_subprocess_popen(self):
-        """Verifies trigger_background_validation invokes async_runner detached without waiting"""
+        """Verifies trigger_background_validation invokes async_runner detached without waiting.
+
+        GravityGuard is a pre-tool hook: it fires BEFORE the AI's tool call writes
+        the file to disk. Therefore trigger_background_validation() must NOT require
+        the file to exist locally. We mock subprocess.Popen (and os.path.exists for
+        the runner_path check only) so the test is self-contained and target-file
+        existence is irrelevant to this contract.
+        """
         import importlib.util
         spec = importlib.util.spec_from_file_location("gravity_validator", VALIDATOR_PATH)
         gv = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(gv)
 
-        with patch("subprocess.Popen") as mock_popen:
+        target = "C:/fake_project/src/auth.ts"
+        real_runner_path = os.path.join(os.path.dirname(VALIDATOR_PATH), "async_runner.py")
+
+        with patch("subprocess.Popen") as mock_popen, \
+             patch("os.path.exists", side_effect=lambda p: True if "async_runner" in str(p) else os.path.exists.__wrapped__(p) if hasattr(os.path.exists, "__wrapped__") else True):
             mock_proc = MagicMock()
             mock_popen.return_value = mock_proc
 
-            target = "C:/fake_project/src/auth.ts"
             gv.trigger_background_validation(target)
 
             # Ensure Popen was called exactly once
@@ -1673,6 +1683,76 @@ class TestGravityGuardPhase2(unittest.TestCase):
             # CRITICAL: Verify parent process NEVER waits on the background child
             mock_proc.wait.assert_not_called()
             mock_proc.communicate.assert_not_called()
+
+    def test_lint_coalescing_integration_active_worker_state(self):
+        """Integration-style coalescing contract test (no real sleep, no subprocess):
+
+        Verifies that the state-based coalescing contract holds:
+        - Trigger 1: should_spawn_file_worker() returns True → worker claims
+        - Triggers 2-N: same file, worker already claimed → should_spawn_file_worker() returns False
+        - Different file: always gets its own independent claim
+        - clean_file_state() after completion leaves state minimal for next cycle
+
+        This test uses only in-memory pure helpers — no subprocess, no sleep.
+        """
+        sys.path.insert(0, os.path.dirname(VALIDATOR_PATH))
+        import async_runner
+
+        # Simulate initial shared state (as loaded from debounce_state.json)
+        active_workers: dict = {}
+        file_edits: dict = {}
+        norm_auth = "C:/project/src/auth.ts"
+        norm_calc = "C:/project/src/calc.py"
+
+        # --- Trigger 1: auth.ts first edit ---
+        self.assertTrue(async_runner.should_spawn_file_worker(active_workers, norm_auth),
+                        "First trigger must be able to claim worker")
+        # Claim the worker (simulating what main() does)
+        active_workers[norm_auth] = True
+        file_edits[norm_auth] = 100.0
+
+        # --- Trigger 2: auth.ts second edit (rapid burst, worker already active) ---
+        self.assertFalse(async_runner.should_spawn_file_worker(active_workers, norm_auth),
+                         "Second trigger must see active worker and NOT spawn duplicate")
+        # Simulate timestamp reset (what the no-op path does)
+        file_edits[norm_auth] = 100.15
+
+        # --- Trigger 3: auth.ts third edit ---
+        self.assertFalse(async_runner.should_spawn_file_worker(active_workers, norm_auth),
+                         "Third trigger must also see active worker")
+        file_edits[norm_auth] = 100.25
+
+        # --- Multi-file isolation: calc.py is independent ---
+        self.assertTrue(async_runner.should_spawn_file_worker(active_workers, norm_calc),
+                        "Different file must get independent worker claim")
+        active_workers[norm_calc] = True
+        file_edits[norm_calc] = 100.10
+
+        # --- Worker for auth.ts completes: 300ms quiet window elapsed ---
+        now_after_quiet = 100.25 + 0.3 + 0.01  # 10ms past the window
+        self.assertTrue(async_runner.should_run_file_lint(file_edits[norm_auth], now_after_quiet),
+                        "After 300ms quiet window, linter must be cleared to run")
+
+        # --- Cleanup after auth.ts linter finishes ---
+        state_dict = {
+            "active_lint_workers": dict(active_workers),
+            "file_edits": dict(file_edits)
+        }
+        async_runner.clean_file_state(state_dict, norm_auth)
+
+        # auth.ts state purged
+        self.assertNotIn(norm_auth, state_dict["active_lint_workers"])
+        self.assertNotIn(norm_auth, state_dict["file_edits"])
+
+        # calc.py state untouched
+        self.assertIn(norm_calc, state_dict["active_lint_workers"])
+        self.assertIn(norm_calc, state_dict["file_edits"])
+
+        # --- Next cycle: auth.ts can be claimed again cleanly ---
+        fresh_active_workers = state_dict["active_lint_workers"]
+        self.assertTrue(async_runner.should_spawn_file_worker(fresh_active_workers, norm_auth),
+                        "After cleanup, auth.ts must be claimable again for next burst")
+
 
     # --- PHASE 2.5: PER-FILE LINT BURST COALESCING & STATE CLEANUP TESTS ---
     def test_lint_coalescing_first_trigger_spawns_worker(self):

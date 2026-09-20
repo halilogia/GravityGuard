@@ -38,7 +38,7 @@ This document outlines the strategic evolution, architectural milestones, and pl
   - Integrated 9Router local AI pipeline with sub-3s model failover.
 - [x] **Live Security Monitor Webview**:
   - Real-time Activity Bar panel streaming audit events from `~/.gemini/logs/srp_guardian_live.json`.
-- [x] **80/80 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`).
+- [x] **81/81 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`).
 
 ---
 
@@ -72,7 +72,7 @@ This document outlines the strategic evolution, architectural milestones, and pl
 
 ---
 
-## Phase 3: v1.2.0 — Extended Complexity Guard & Pre-Tool Whisperer
+## Phase 3: v1.3.0 — Extended Complexity Guard & Pre-Tool Whisperer
 
 *Target: Q1 2027*
 

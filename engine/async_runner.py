@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 GravityGuard Async Static Validation Runner (Tier 2 / Tier 3)
 Executes lightweight linters in the background without blocking the AI tool-call loop.
@@ -279,12 +279,6 @@ def execute_single_file_lint(target_file: str, project_root: Path, diag_path: Pa
     """Executes the specific linter for the given file and updates diagnostics.json."""
     if not os.path.exists(target_file):
         return
-    # Guard: skip if the project_root is a temp directory — this prevents runaway
-    # workers from being created during test runs that use tempfile.mkdtemp() paths.
-    import tempfile as _tmpmod
-    sys_tmp = str(Path(_tmpmod.gettempdir()).resolve()).lower()
-    if str(project_root.resolve()).lower().startswith(sys_tmp):
-        return
 
     norm_key = str(Path(target_file).resolve()).replace("\\", "/")
     file_lower = target_file.lower()
@@ -402,14 +396,7 @@ def run_debounce_worker(project_root: Path, idle_threshold: float = 3.0) -> None
 
 
 def trigger_debounce_worker_if_needed(project_root: Path) -> None:
-    """Spawns detached debounce worker process if one is not already active.
-    Skips if project_root is inside the system temp directory (e.g. test fixtures).
-    """
-    import tempfile as _tmpmod
-    sys_tmp = str(Path(_tmpmod.gettempdir()).resolve()).lower()
-    if str(project_root.resolve()).lower().startswith(sys_tmp):
-        return
-
+    """Spawns detached debounce worker process if one is not already active."""
     debounce_path = get_debounce_file_path(project_root)
     state = load_debounce_state(debounce_path)
     state["last_edit_time"] = time.time()
