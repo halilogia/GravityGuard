@@ -5,6 +5,25 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.4] - 2026-09-20
+
+### Fixed
+- **Test Suite Was Flooding the Real Security Audit Log**:
+  - Every `run_validator()` call spawned a real `python.exe` that appended to the *live* audit stream (`~/.gemini/logs/srp_guardian_live.json`) via a hard-coded path in `log_event()`.
+  - The stream keeps only the newest 50 events (`events[:50]`), so a single suite run (64 spawns) evicted **every** genuine security event. The Live Security Monitor webview therefore displayed test fixtures (`C:/fake_project/...`, `%TEMP%\tmp...`) as if they were real activity.
+  - `log_event()` now resolves its directory through a new `_resolve_log_dir()` helper, which honours a `GRAVITYGUARD_LOG_DIR` environment override and falls back to `~/.gemini/logs`.
+  - The test harness points that variable at a per-run temp directory **before** the first spawn, so every child inherits the redirect.
+  - Verified: after a full suite run the live log contains 0 fixture targets, and its real events are preserved.
+- **Malformed Audit Log Discarded History**: when the JSON log existed but failed to parse, the `except` branch silently kept the pre-built empty structure. It now resets to a valid default explicitly instead of relying on an unstated fall-through.
+- **`%TEMP%` Leak**: the harness's isolated audit directory was never deleted, so every suite run left a `gg_audit_*` folder behind. Registered `atexit` cleanup via `shutil.rmtree(..., ignore_errors=True)`.
+
+### Changed
+- **De-flaked `test_sub_50ms_performance`**: the test averaged 5 measurements, so one scheduler/antivirus outlier (observed worst case: 329 ms against a 250 ms threshold) failed the suite. It now takes the **median**, prints min/max for diagnosis, and uses a regression-oriented 400 ms bound. The genuine latency invariant is still covered strictly by `test_core_in_memory_latency` (< 10 ms, measured ~0.03 ms) — this test only guards against spawn latency regressions.
+
+### Notes
+- No behavioural change to any governance guard (G0-G4, SRP, T1-T3, ARCH, OE), to the TSC debounce, or to the hidden-console spawn contract.
+- Test Count: 87/87 passing.
+
 ## [1.2.3] - 2026-09-20
 
 ### Fixed

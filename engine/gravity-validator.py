@@ -15,8 +15,23 @@ from typing import Tuple, List, Optional, Set, Dict, Any
 # 1. LOGGING & AUDIT STREAM (srp_guardian_live.json)
 # ============================================================================
 
+def _resolve_log_dir() -> str:
+    """Resolves the audit-log directory.
+
+    GRAVITYGUARD_LOG_DIR lets the test suite / CI redirect the audit stream to a
+    temp directory. Without it every validator subprocess the suite spawns appends
+    to the *real* user log, and since only the last 50 events are kept, a single
+    suite run evicts all genuine security events and the Live Security Monitor
+    ends up displaying test fixtures as if they were real activity.
+    """
+    override = os.environ.get("GRAVITYGUARD_LOG_DIR", "").strip()
+    if override:
+        return os.path.expanduser(override)
+    return os.path.expanduser(r"~/.gemini/logs")
+
+
 def log_event(action: str, status: str, target_file: str, reason: str, rule_id: str = "SRP"):
-    log_dir = os.path.expanduser(r"~/.gemini/logs")
+    log_dir = _resolve_log_dir()
     try:
         os.makedirs(log_dir, exist_ok=True)
         log_path = os.path.join(log_dir, "srp_guardian_live.json")
@@ -27,7 +42,7 @@ def log_event(action: str, status: str, target_file: str, reason: str, rule_id: 
                 with open(log_path, "r", encoding="utf-8") as f:
                     current_data = json.load(f)
             except Exception:
-                pass
+                current_data = {"activeGuard": "GravityGuard", "status": "ONLINE", "events": []}
                 
         event = {
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
