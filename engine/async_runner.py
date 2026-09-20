@@ -20,6 +20,109 @@ from typing import Dict, Any, List, Optional
 
 
 # ============================================================================
+# HIDDEN SUBPROCESS POLICY (Single Source of Truth)
+# ============================================================================
+# On Windows a background-spawned console program (npx -> cmd.exe -> node,
+# ruff.exe, godot.exe) flashes a visible terminal window unless the console is
+# suppressed at creation time. CREATE_NO_WINDOW (0x08000000) grants a *hidden*
+# console which every descendant inherits. DETACHED_PROCESS is deliberately
+# avoided: it leaves the process with no console, so each console child would
+# allocate its own brand-new *visible* window.
+_CREATE_NO_WINDOW = 0x08000000
+_CREATE_NEW_PROCESS_GROUP = 0x00000200
+
+
+def _hidden_startupinfo() -> "subprocess.STARTUPINFO":
+    """STARTUPINFO that keeps the child window hidden (Windows only)."""
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    return startupinfo
+
+
+def _hidden_popen_kwargs() -> Dict[str, Any]:
+    """Popen kwargs for a fire-and-forget process that must never show a window."""
+    kwargs: Dict[str, Any] = {
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "stdin": subprocess.DEVNULL,
+    }
+    if sys.platform == "win32":
+        kwargs["creationflags"] = _CREATE_NO_WINDOW
+        kwargs["startupinfo"] = _hidden_startupinfo()
+    else:
+        kwargs["start_new_session"] = True
+    return kwargs
+
+
+def _kill_process_tree(proc: subprocess.Popen) -> bool:
+    """Force-kills a timed-out process *and its descendants* (Windows-safe).
+
+    Killing only the direct child leaves orphaned cmd.exe/node.exe grandchildren
+    behind, so on Windows we walk the tree with taskkill /T. Returns True when a
+    termination attempt was issued, False when the tree could not be reached.
+    """
+    issued = False
+    if sys.platform == "win32" and proc.poll() is None:
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=_CREATE_NO_WINDOW,
+                startupinfo=_hidden_startupinfo(),
+            )
+            issued = True
+        except (OSError, subprocess.SubprocessError) as exc:
+            # taskkill missing or refused (e.g. process already gone): fall back
+            # to a direct kill below and report the failure to the caller.
+            _ = exc
+    try:
+        proc.kill()
+        issued = True
+    except OSError as exc:
+        _ = exc
+    return issued
+
+
+def run_hidden(cmd: List[str], cwd: Optional[Path] = None, timeout: float = 10) -> Optional[subprocess.CompletedProcess]:
+    """Runs a linter command silently; no console window ever appears.
+
+    Returns a CompletedProcess (.stdout/.stderr/.returncode), or None when the
+    command times out or cannot be launched.
+    """
+    popen_kwargs: Dict[str, Any] = {
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "stdin": subprocess.DEVNULL,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+    }
+    if cwd is not None:
+        popen_kwargs["cwd"] = str(cwd)
+    if sys.platform == "win32":
+        popen_kwargs["creationflags"] = _CREATE_NO_WINDOW | _CREATE_NEW_PROCESS_GROUP
+        popen_kwargs["startupinfo"] = _hidden_startupinfo()
+
+    try:
+        proc = subprocess.Popen(cmd, **popen_kwargs)
+    except (OSError, ValueError):
+        return None
+
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_process_tree(proc)
+        try:
+            out, err = proc.communicate(timeout=5)
+        except (subprocess.TimeoutExpired, ValueError):
+            return None
+
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+
+
+# ============================================================================
 # PURE DECISION HELPERS (Deterministic, 0-ms & Unit-Testable)
 # ============================================================================
 
@@ -170,12 +273,9 @@ def run_ruff(target_file: str) -> Optional[List[Dict[str, Any]]]:
     if not shutil.which("ruff"):
         return None
     try:
-        res = subprocess.run(
-            ["ruff", "check", "--output-format=json", target_file],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
+        res = run_hidden(["ruff", "check", "--output-format=json", target_file], timeout=10)
+        if res is None:
+            return None
         output = res.stdout.strip()
         if not output:
             return []
@@ -188,7 +288,7 @@ def run_ruff(target_file: str) -> Optional[List[Dict[str, Any]]]:
                 "message": item.get("message", "Lint warning")
             })
         return errors
-    except (subprocess.SubprocessError, json.JSONDecodeError, OSError):
+    except (subprocess.SubprocessError, json.JSONDecodeError, OSError, AttributeError):
         return None
 
 
@@ -204,13 +304,9 @@ def run_eslint(target_file: str, project_root: Path) -> Optional[List[Dict[str, 
         return None
 
     try:
-        res = subprocess.run(
-            cmd,
-            cwd=str(project_root),
-            capture_output=True,
-            text=True,
-            timeout=15
-        )
+        res = run_hidden(cmd, cwd=project_root, timeout=15)
+        if res is None:
+            return None
         output = res.stdout.strip()
         if not output:
             return []
@@ -224,7 +320,7 @@ def run_eslint(target_file: str, project_root: Path) -> Optional[List[Dict[str, 
                     "message": msg.get("message", "Lint error")
                 })
         return errors
-    except (subprocess.SubprocessError, json.JSONDecodeError, OSError):
+    except (subprocess.SubprocessError, json.JSONDecodeError, OSError, AttributeError):
         return None
 
 
@@ -233,21 +329,18 @@ def run_godot_check(target_file: str) -> Optional[List[Dict[str, Any]]]:
     if not shutil.which("godot"):
         return None
     try:
-        res = subprocess.run(
-            ["godot", "--headless", "--check-only", "-s", target_file],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
+        res = run_hidden(["godot", "--headless", "--check-only", "-s", target_file], timeout=10)
+        if res is None:
+            return None
         if res.returncode != 0:
-            err_line = res.stderr.strip() or res.stdout.strip()
+            err_line = (res.stderr or "").strip() or (res.stdout or "").strip()
             return [{
                 "line": 1,
                 "rule": "GDScriptSyntax",
                 "message": err_line[:200]
             }]
         return []
-    except (subprocess.SubprocessError, OSError):
+    except (subprocess.SubprocessError, OSError, AttributeError):
         return None
 
 
@@ -257,17 +350,13 @@ def run_batch_tsc(project_root: Path) -> Optional[Dict[str, List[Dict[str, Any]]
         return None
     cmd = ["npx", "tsc", "--noEmit"] if shutil.which("npx") else ["tsc", "--noEmit"]
     try:
-        res = subprocess.run(
-            cmd,
-            cwd=str(project_root),
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
+        res = run_hidden(cmd, cwd=project_root, timeout=30)
+        if res is None:
+            return None
         if res.returncode == 0:
             return {}
         return parse_tsc_output(res.stdout, project_root)
-    except (subprocess.SubprocessError, OSError):
+    except (subprocess.SubprocessError, OSError, AttributeError):
         return None
 
 
@@ -396,7 +485,7 @@ def run_debounce_worker(project_root: Path, idle_threshold: float = 3.0) -> None
 
 
 def trigger_debounce_worker_if_needed(project_root: Path) -> None:
-    """Spawns detached debounce worker process if one is not already active."""
+    """Spawns the (hidden) debounce worker process if one is not already active."""
     debounce_path = get_debounce_file_path(project_root)
     state = load_debounce_state(debounce_path)
     state["last_edit_time"] = time.time()
@@ -407,22 +496,10 @@ def trigger_debounce_worker_if_needed(project_root: Path) -> None:
 
         runner_script = os.path.abspath(__file__)
         try:
-            if sys.platform == "win32":
-                DETACHED_PROCESS = 0x00000008
-                subprocess.Popen(
-                    [sys.executable, runner_script, "--debounce-worker", "--project", str(project_root)],
-                    creationflags=DETACHED_PROCESS,
-                    close_fds=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-            else:
-                subprocess.Popen(
-                    [sys.executable, runner_script, "--debounce-worker", "--project", str(project_root)],
-                    start_new_session=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
+            subprocess.Popen(
+                [sys.executable, runner_script, "--debounce-worker", "--project", str(project_root)],
+                **_hidden_popen_kwargs()
+            )
         except (OSError, ValueError):
             state["worker_running"] = False
             save_debounce_state(debounce_path, state)

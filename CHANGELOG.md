@@ -5,6 +5,20 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-09-20
+
+### Fixed
+- **Visible Terminal Windows on Windows (Regression Fix)**:
+  - Background validation spawned subprocesses with `DETACHED_PROCESS` (`0x00000008`). A detached process owns **no console**, so every console child it launched (`cmd.exe` via `npx`, `ruff.exe`, `godot.exe`, `node.exe`) allocated a brand-new **visible** console window — the source of the flashing terminal windows.
+  - Replaced with `CREATE_NO_WINDOW` (`0x08000000`) plus `STARTUPINFO` / `SW_HIDE`, which grants a hidden console that all descendant processes inherit.
+  - Routed **all** Tier 2/3 linter invocations through one `run_hidden()` policy in `engine/async_runner.py`; previously `subprocess.run` was called with no window-suppression flags anywhere.
+  - Applied the same hidden-spawn policy to the debounce worker in both `engine/gravity-validator.py` and `engine/async_runner.py`.
+- **Orphaned Process Accumulation**: a timed-out linter previously left `cmd.exe`/`node.exe` grandchildren running (the direct child was killed but not its tree). Added `_kill_process_tree()` using `taskkill /F /T` on Windows.
+- **Test Count**: 82/82 passing (was reported as 81/81). Added a regression test (`test_no_visible_console_for_any_spawned_process`) that asserts `CREATE_NO_WINDOW` + `SW_HIDE` and statically rejects any reintroduction of `DETACHED_PROCESS`.
+
+### Changed
+- Documentation (`ARCHITECTURE.md`, `README.md`) no longer describes `DETACHED_PROCESS` as the spawn mechanism; the hidden-console contract is documented instead.
+
 ## [1.2.0] - 2026-09-20
 
 ### Added
@@ -14,7 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Exemption rules for test files (`test_*.py`, `*.test.ts`, `*.spec.ts`) and configured cohesive modules.
 - **Detached Asynchronous Orchestration & Background Trigger**:
   - Implemented `trigger_background_validation(target_file)` in `engine/gravity-validator.py`.
-  - Spawns `engine/async_runner.py` via detached OS subprocess (`DETACHED_PROCESS` on Windows, `start_new_session` on POSIX) without waiting for completion (returns in ~1 ms).
+  - Spawns `engine/async_runner.py` as a background OS subprocess without waiting for completion (returns in ~1 ms).
+  - Superseded in `1.2.1`: originally used `DETACHED_PROCESS`, which caused visible console windows; now uses `CREATE_NO_WINDOW` + `SW_HIDE`.
   - Evaluates changed code files strictly in the background without adding any synchronous delay to the AI tool-call loop.
 - **State-Based TypeScript Debounce Worker**:
   - Implemented `run_debounce_worker` and `trigger_debounce_worker_if_needed` in `engine/async_runner.py`.

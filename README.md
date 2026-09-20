@@ -1,11 +1,11 @@
-# GravityGuard — v1.2.0
+# GravityGuard — v1.2.1
 
 > Deterministic Architecture Airbag, Secret Leak Airbag & AI Agent Gatekeeper for Antigravity IDE.
 
 [English](#english) | [Türkçe](#türkçe)
 
 [![Antigravity Compatible](https://img.shields.io/badge/Antigravity%20IDE-Compatible-blue.svg)](https://antigravity.google/)
-[![Tests](https://img.shields.io/badge/Tests-81%20Passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-82%20Passing-brightgreen.svg)]()
 [![Core Evaluator](https://img.shields.io/badge/Core%20Benchmark-Avg%200.11ms%20%7C%20p95%200.24ms-blue.svg)]()
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9%20%7C%20ES2022-blue.svg)](https://www.typescriptlang.org/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B%20%7C%20Zero%20Dependencies-brightgreen.svg)](https://www.python.org/)
@@ -40,7 +40,7 @@ GravityGuard operates an ordered, zero-overhead pipeline before any file modific
 ## Key Features
 
 ### 🛡️ 1. Deterministic Architectural Gatekeeper
-- **High-Confidence Airbags**: Pure in-memory diff evaluation: avg `~0.11ms`, p95 `<0.25ms` (zero subprocess). Total Windows subprocess spawn overhead is `<230ms` and runs fully detached from the tool-call loop.
+- **High-Confidence Airbags**: Pure in-memory diff evaluation: avg `~0.11ms`, p95 `<0.25ms` (zero subprocess). Total Windows subprocess spawn overhead is `<230ms` and runs fully hidden from the tool-call loop (`CREATE_NO_WINDOW` + `SW_HIDE`, so no console window ever flashes on screen).
 - **Intelligent Scale Heuristics**: Distinguishes cohesive single-responsibility files from unmaintainable god-files without relying on arbitrary mechanical line-count blocking.
 - **Zero Heavy Dependencies**: Pure standard-library Python validator operating via shallow AST and regex heuristics. Zero compilation overhead.
 

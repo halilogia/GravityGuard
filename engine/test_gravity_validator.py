@@ -1479,18 +1479,28 @@ class TestGravityGuardPhase2(unittest.TestCase):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_async_runner_orchestration_trigger(self):
-        """Verifies trigger_background_validation successfully runs without raising exceptions"""
+        """Verifies trigger_background_validation runs safely and never blocks the caller.
+
+        This test is fully hermetic: Popen is mocked so the suite never launches a
+        real background async_runner process (which would flash a console window
+        and leave a stray process behind).
+        """
         import importlib.util
         spec = importlib.util.spec_from_file_location("gravity_validator", VALIDATOR_PATH)
         gv = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(gv)
 
-        # Trigger on unsupported extension -> early return (no-op)
-        gv.trigger_background_validation("README.md")
-        gv.trigger_background_validation("")
+        with patch("subprocess.Popen") as mock_popen:
+            mock_popen.return_value = MagicMock()
 
-        # Trigger on supported extension with mock/real file -> should execute safely
-        gv.trigger_background_validation("src/auth.py")
+            # Unsupported / empty targets -> early return, no spawn at all
+            gv.trigger_background_validation("README.md")
+            gv.trigger_background_validation("")
+            mock_popen.assert_not_called()
+
+            # Supported extension -> exactly one hidden background spawn
+            gv.trigger_background_validation("src/auth.py")
+            mock_popen.assert_called_once()
 
     def test_async_runner_debounce_state_management(self):
         """Verifies async_runner's debounce state load/save and idle detection logic"""
@@ -1671,9 +1681,16 @@ class TestGravityGuardPhase2(unittest.TestCase):
             self.assertIn("--file", cmd_list)
             self.assertIn(target, cmd_list)
 
-            # Verify detached flags and devnull redirects
+            # Verify NO visible console window can appear: hidden-console flags
+            # (CREATE_NO_WINDOW, NOT DETACHED_PROCESS) plus SW_HIDE startupinfo.
             if sys.platform == "win32":
-                self.assertEqual(call_kwargs.get("creationflags"), 0x00000008)
+                flags = call_kwargs.get("creationflags")
+                self.assertEqual(flags, subprocess.CREATE_NO_WINDOW)
+                self.assertEqual(flags & 0x00000008, 0, "DETACHED_PROCESS must not be used")
+                startupinfo = call_kwargs.get("startupinfo")
+                self.assertIsNotNone(startupinfo, "hidden STARTUPINFO required on Windows")
+                self.assertTrue(startupinfo.dwFlags & subprocess.STARTF_USESHOWWINDOW)
+                self.assertEqual(startupinfo.wShowWindow, subprocess.SW_HIDE)
             else:
                 self.assertTrue(call_kwargs.get("start_new_session"))
 
@@ -1752,6 +1769,50 @@ class TestGravityGuardPhase2(unittest.TestCase):
         fresh_active_workers = state_dict["active_lint_workers"]
         self.assertTrue(async_runner.should_spawn_file_worker(fresh_active_workers, norm_auth),
                         "After cleanup, auth.ts must be claimable again for next burst")
+
+    def test_no_visible_console_for_any_spawned_process(self):
+        """Regression: background spawns must never open a visible terminal window.
+
+        DETACHED_PROCESS was the original bug: a detached process owns no console,
+        so every console child it launches (cmd.exe via npx, ruff, godot) allocates
+        a brand-new VISIBLE console window. The contract is now CREATE_NO_WINDOW +
+        SW_HIDE, which descendants inherit.
+        """
+        sys.path.insert(0, os.path.dirname(VALIDATOR_PATH))
+        import async_runner
+
+        fake_proc = MagicMock()
+        fake_proc.communicate.return_value = ("", "")
+        fake_proc.returncode = 0
+        fake_proc.poll.return_value = 0
+
+        with patch("subprocess.Popen", return_value=fake_proc) as mock_popen:
+            async_runner.run_hidden(["ruff", "check", "x.py"], timeout=5)
+            self.assertTrue(mock_popen.called, "run_hidden must spawn via Popen")
+            _, spawn_kwargs = mock_popen.call_args
+
+            if sys.platform == "win32":
+                flags = spawn_kwargs.get("creationflags")
+                self.assertEqual(flags & async_runner._CREATE_NO_WINDOW,
+                                 async_runner._CREATE_NO_WINDOW)
+                self.assertEqual(flags & 0x00000008, 0,
+                                 "DETACHED_PROCESS causes visible child consoles")
+                startupinfo = spawn_kwargs.get("startupinfo")
+                self.assertIsNotNone(startupinfo)
+                self.assertEqual(startupinfo.wShowWindow, subprocess.SW_HIDE)
+            else:
+                self.assertNotIn("creationflags", spawn_kwargs)
+
+        # No module may reintroduce the DETACHED_PROCESS flag as live code.
+        engine_dir = os.path.dirname(VALIDATOR_PATH)
+        for module_name in ("gravity-validator.py", "async_runner.py"):
+            with open(os.path.join(engine_dir, module_name), "r", encoding="utf-8") as fh:
+                source = fh.read()
+            for line in source.splitlines():
+                if line.lstrip().startswith("#"):
+                    continue
+                self.assertNotIn("DETACHED_PROCESS = 0x00000008", line,
+                                 f"{module_name} must not spawn detached console processes")
 
 
     # --- PHASE 2.5: PER-FILE LINT BURST COALESCING & STATE CLEANUP TESTS ---

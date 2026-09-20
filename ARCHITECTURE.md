@@ -165,12 +165,16 @@ Writes findings to .gravityguard/runtime/diagnostics.json
 Tool burst ends (3s idle) ──> tsc --noEmit across project
 ```
 
-### 3.3. Detached Background Orchestration & Debounce Worker
+### 3.3. Hidden Background Orchestration & Debounce Worker
 1. **Fire-and-Forget Trigger (`trigger_background_validation`)**:
    - Executed on `ALLOW` decisions in `engine/gravity-validator.py`.
-   - Spawns `async_runner.py` via `DETACHED_PROCESS` (Windows) or `start_new_session` (POSIX) with `DEVNULL` streams.
+   - Spawns `async_runner.py` with `CREATE_NO_WINDOW` + `STARTUPINFO(SW_HIDE)` on Windows, or `start_new_session` on POSIX, with all streams sent to `DEVNULL`.
+   - `DETACHED_PROCESS` is intentionally **not** used: a detached process owns no console, so every console child it launches (`cmd.exe` via `npx`, `ruff.exe`, `godot.exe`) allocates a fresh **visible** console window. `CREATE_NO_WINDOW` instead grants a hidden console that all descendants inherit.
    - The pre-tool hook exits immediately (`~1ms` spawn overhead); AI tool-call continues with zero wait.
-2. **State-Based Debounce Worker (`debounce_state.json`)**:
+2. **Silent Linter Invocation (`run_hidden`)**:
+   - All Tier 2/3 tool invocations (`ruff`, `eslint` via `npx`, `godot`, `tsc` via `npx`) route through a single `run_hidden()` policy so no linter can ever flash a terminal window.
+   - On timeout, `_kill_process_tree()` uses `taskkill /F /T` to terminate the whole process tree, preventing orphaned `cmd.exe`/`node.exe` grandchildren from accumulating.
+3. **State-Based Debounce Worker (`debounce_state.json`)**:
    - Records `last_edit_time = time.time()`.
    - Spawns a background worker process that sleeps in 3.0s idle intervals.
    - If an AI agent performs 5 edits in 2.5 seconds, the worker continually resets until a full 3.0s quiet window elapses, firing `tsc --noEmit` exactly once.

@@ -640,14 +640,44 @@ def read_recent_diagnostics(target_file: str) -> List[Tuple[str, str]]:
         return []
 
 
-# --- ASYNC STATIC VALIDATION ORCHESTRATION (DETACHED BACKGROUND RUNNER) ---
+# --- ASYNC STATIC VALIDATION ORCHESTRATION (HIDDEN BACKGROUND RUNNER) ---
+
+# Windows console-window suppression.
+# CREATE_NO_WINDOW (0x08000000) gives the child process a *hidden* console, which
+# every console program it later spawns (cmd.exe, npx, ruff, godot, node) inherits.
+# DETACHED_PROCESS (0x00000008) is deliberately NOT used: a detached process has no
+# console at all, so each console child it spawns allocates a brand-new *visible*
+# console window -- that was the source of the flashing terminal windows.
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def _hidden_console_kwargs() -> dict:
+    """Returns Popen kwargs that run a background process with no visible window."""
+    kwargs = {
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "stdin": subprocess.DEVNULL,
+    }
+    if sys.platform == "win32":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
+        kwargs["creationflags"] = _CREATE_NO_WINDOW
+        kwargs["startupinfo"] = startupinfo
+    else:
+        kwargs["start_new_session"] = True
+    return kwargs
+
+
 def trigger_background_validation(target_file: str) -> None:
     """
-    Spawns async_runner.py in a detached background subprocess.
+    Spawns async_runner.py in a fully hidden background subprocess.
     Never blocks the AI tool-call loop: returns in ~1ms without waiting for completion.
     Only triggers for supported code files (.py, .ts, .tsx, .js, .jsx, .gd).
-    Skips if the file does not exist on disk (prevents test fixtures with fake paths
-    from spawning uncontrolled async_runner processes and terminal windows).
+
+    GravityGuard is a PreToolUse hook: it fires BEFORE the AI tool call writes the
+    file to disk, so the target file may legitimately not exist yet. Existence is
+    therefore NOT checked here -- async_runner.py handles that on its own side.
     """
     if not target_file:
         return
@@ -661,22 +691,11 @@ def trigger_background_validation(target_file: str) -> None:
         return
 
     try:
-        if sys.platform == "win32":
-            DETACHED_PROCESS = 0x00000008
-            subprocess.Popen(
-                [sys.executable, runner_path, "--file", target_file],
-                creationflags=DETACHED_PROCESS,
-                close_fds=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-        else:
-            subprocess.Popen(
-                [sys.executable, runner_path, "--file", target_file],
-                start_new_session=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
+        subprocess.Popen(
+            [sys.executable, runner_path, "--file", target_file],
+            close_fds=True,
+            **_hidden_console_kwargs()
+        )
     except (OSError, ValueError):
         return
 

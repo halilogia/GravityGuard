@@ -4,7 +4,7 @@ This document outlines the strategic evolution, architectural milestones, and pl
 
 ---
 
-## Current Status: v1.2.0 (Phase 1, Phase 2 & Phase 2.5 Released)
+## Current Status: v1.2.1 (Phase 1, Phase 2 & Phase 2.5 Released)
 
 ### ✅ Phase 1: High-Confidence Integrity & Architecture Guards
 - [x] **Universal Rebranding & Setup**: Standalone repository under `GitHub/Public/GravityGuard` with full TypeScript IDE extension + Python Guard Engine.
@@ -38,7 +38,7 @@ This document outlines the strategic evolution, architectural milestones, and pl
   - Integrated 9Router local AI pipeline with sub-3s model failover.
 - [x] **Live Security Monitor Webview**:
   - Real-time Activity Bar panel streaming audit events from `~/.gemini/logs/srp_guardian_live.json`.
-- [x] **81/81 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`).
+- [x] **82/82 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`).
 
 ---
 
@@ -55,7 +55,7 @@ This document outlines the strategic evolution, architectural milestones, and pl
   - Zero blocking — prompts AI toward modularity and SRP boundaries.
 - [x] **Tier 2 / Tier 3 Async Static Validation Pipeline & Real Orchestration**:
   - Preserved the **< 10 ms Fast Guard Invariant**: Pre-tool path strictly runs zero external compilers or linters.
-  - **Detached Background Orchestration**: `trigger_background_validation()` launches `async_runner.py` in ~1ms without waiting for completion.
+  - **Hidden Background Orchestration**: `trigger_background_validation()` launches `async_runner.py` in ~1ms without waiting for completion, using `CREATE_NO_WINDOW` + `SW_HIDE` so no console window ever appears (see v1.2.1 fix).
   - **State-Based TS Debounce Worker**: Persistent `.gravityguard/runtime/debounce_state.json` enforces a real 3.0s idle window after edit bursts before running `tsc --noEmit`.
   - **Per-File TSC Diagnostics**: `parse_tsc_output` maps project compilation errors directly to modified target files (`auth.ts`).
   - **Per-File Lint Burst Coalescing & State Cleanup**: 300ms quiet window for single-file linters (`ruff`, `eslint`, `godot`) dedupes rapid multi-edit bursts to exactly 1 linter process, automatically purging finished state from `debounce_state.json`.
