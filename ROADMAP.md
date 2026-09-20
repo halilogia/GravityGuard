@@ -85,3 +85,54 @@ This document outlines the strategic evolution, architectural milestones, and pl
 ### 3.2. Pre-Hook Architecture Whisperer
 - [ ] Intercept AI agent tool calls before execution (`pre-tool hook`).
 - [ ] Automatically inject active layer boundaries and architectural rules into the agent's prompt context to prevent violations before code is generated.
+
+### 3.3. `run_command` Mutation Detection (P3-02)
+- [ ] Narrow pre-filter for obvious filesystem mutation commands (`Remove-Item`, `del`, `rmdir`, `rm`, `move`, `Move-Item`, `Set-Content`, `Out-File`, `Add-Content`).
+- [ ] **Do NOT** deep-analyze every terminal command. Fast-path allow ordinary work: `git status/diff/log/show`, `python -c`, `blender --background --python`, `npm`, `pytest`.
+- [ ] Explicitly document that bypass remains possible (`python x.py` calling `os.remove`, `blender --python` scripts) — this closes obvious paths only, not all paths.
+- [ ] Performance must be measured on a **real coding session** — not on this conversation's transcript, which is polluted with diagnostic commands.
+- [ ] Known measured baseline (this repo's log): ~30.7% git, ~28.5% arbitrary Python/Blender code exec, ~2% file mutation commands.
+
+### 3.4. Controlled Test Maintenance Mode (P3-01)
+- [ ] User can consciously authorize test cleanup; only **G2** relaxes while the mode is active.
+- [ ] **AI must not be able to grant this permission to itself** — otherwise the guard stops being a boundary.
+- [ ] No broad bypass without explicit user approval.
+- [ ] Authorization mechanism intentionally undecided: `.gravityguard.json` is technically easy but is AI-modifiable (so not a security boundary); an environment variable is impractical for an already-running Antigravity process (env vars are read at process start).
+- [ ] Note: G2 currently blocks test deletion, renaming, `.skip`, and moving a test to `archive/`, with no escape hatch equivalent to `# srp: bypass`.
+
+### 3.5. Git Secret Safety Net — commit-time hook (P3-03)
+> This is a **local machine layer**, separate from GravityGuard's engine. It lives in `.git/hooks`, which is not version-controlled.
+
+- [x] Replaced the dead `lefthook` trigger with a **portable** `loss-guard.py` call (no hardcoded user paths).
+- [x] Applied to `~/.git-template` + 12 repositories (8 previously dead, 4 previously alive).
+- [x] Extended secret-scan scope from `{.tsx,.jsx,.ts,.js,.vue,.svelte}` to include `.py`, `.pyw`, `.pyi`.
+- [x] Verified: synthetic `.ts` / `.js` / `.py` / `.pyw` commits are blocked; a clean file passes.
+- [x] **Fixed:** the interactive confirmation prompt (`CONIN$`) used to hang forever when no console was attached, so the commit never completed. The prompt was removed entirely; warnings are now informational and never block. Verified: warning-producing commit completes in 0.7s.
+- [x] **Fixed:** reverted the `pre-push` hook to a no-op in 9 repositories (it inspected staged files, which is meaningless at push time).
+- [x] **Expanded scan coverage (measured):** the guard previously scanned only 9 file types. A 16-type probe showed `.env`, `.json`, `.yaml`, `.toml`, `.ipynb`, `.sh`, `.ps1`, `.bat`, `.gd`, `.godot` all passed through unscanned. Fixed with a **two-list design**: `SECRET_EXTENSIONS` (wide, ~30 types, secret scan only) and `STRUCTURAL_EXTENSIONS` (narrow, code files only, the four structural checks). This widens detection without adding a single warning to non-code files.
+- [x] **Hardened `secret_checker.py`:** added AWS (`AKIA`), HuggingFace (`hf_`), GitLab (`glpat-`), Stripe (`sk_live_`/`rk_live_`), Telegram bot, npm, and PyPI patterns, plus PEM private-key block headers. Added placeholder skipping (so `.env.example` and documentation examples do not false-block) and value masking + line numbers in the block message.
+- [x] **Template-diff verification:** all 12 repository copies verified byte-identical to `~/.git-template/hooks`.
+- [x] **Global gitignore:** `core.excludesFile` was unset (no global protection at all). Created `~/.gitignore_global` covering `.env*`, `*.key`, `*.pem`, `credentials.json`, `secrets.*`, `id_rsa`, etc. This prevents secrets from being staged in the first place across all 55 repositories; the hook remains the detection layer for `git add -f` overrides.
+- [x] **Backup consolidation:** 105 scattered `.bak-before-*` files (161.5 KB) moved from hidden `.git/hooks` directories into `~/.git-hook-backups/`, tagged with their originating repository. Nothing deleted.
+- [ ] Scope note: of the 5 checks in `loss-guard`, only the secret check is relevant to Python projects; the other 4 (visual tags, React hooks, lazy placeholders, `components/` line balance) target web/React code.
++
++### 3.6. Repo ↔ Live Plugin Synchronization (P3-04)
++> The guard engine exists as **two copies**: the repo source (`engine/gravity-validator.py`) and the live plugin copy (`~/.gemini/config/plugins/srp-swarm-guardian/scripts/srp-validator.py`). The plugin copy is renamed because `hooks.json` invokes `python scripts/srp-validator.py`. The two directories are separate deployment targets, so the duplicate cannot be eliminated — only kept in check.
++
++- [x] **Risk identified and closed with tooling.** No sync mechanism existed. This is the same failure mode as the earlier `lefthook` incident: one copy is edited, the other silently rots, and live protection degrades without any signal.
++- [x] **Added `tools/sync_plugin.py`** — copies repo engine → live plugin:
++  - `--check` reports drift only and exits `1` when copies differ (safe for pre-commit / CI).
++  - `--dry-run` prints the plan without touching anything.
++  - Default mode backs the old target up into `~/.git-hook-backups/plugin-sync/` before copying.
++  - Validates the source with `ast.parse` **before** copying, so a broken file can never be pushed into the live hook.
++  - Verifies the copy with MD5 **after** copying; a mismatch is reported as failure (exit `2`).
++  - Files tracked: `engine/gravity-validator.py` → `scripts/srp-validator.py`, and `engine/async_runner.py` → `scripts/async_runner.py`.
++- [x] **Verified by deliberate drift injection:** a synthetic 21-byte line was appended to the live plugin copy. `--check` correctly reported `FARKLI / drift` and exited `1`; the default mode restored the file and confirmed it by MD5 (`f1bbb2af…`). Test residue was removed afterwards.
++- [ ] **Not automated:** nothing forces the sync to run. A future option is a post-commit hook that runs `sync_plugin.py --check` and warns on drift.
++- [ ] **Open naming debt:** the same file is `gravity-validator.py` in the repo and `srp-validator.py` in the plugin. A search finds no cross-reference between the two names, so the relationship is invisible to anyone reading either side.
++
++### 3.7. Repository Hygiene (local cleanup, 2026-09-20)
++- [x] Removed the `.kilo/worktrees/magnificent-earth` git worktree via `git worktree remove --force`. It was **not** a stale copy — it sat on the same commit (`2377035`) with identical line counts; the byte delta (1526 B) exactly matched the line count, i.e. a pure CRLF-vs-LF difference under `core.autocrlf=true`.
++- [x] Removed `srp-validator.py.bak-v123` (63,454 B). Confirmed as a manual snapshot of `v1.2.3`: its size matches `git cat-file -s 8ad8bef:engine/gravity-validator.py` exactly, so it remains recoverable from history. (Its exact original location was not conclusively re-verified before deletion; the size match is the evidence that matters.)
++- [ ] **Found, not yet actioned:** the plugin's `skills/srp-modularizer/` folder contains five unrelated files — `SKILL (1).md` (SOLID Principles), `SKILL (2).md` (@json-render/solid), `SKILL(3).md` (Requesting Code Review), `solid.md`, and `solid-skills-main.zip`. Their word-overlap with the real `SKILL.md` is 7–10% (i.e. unrelated content), the `(1)`/`(2)` suffixes indicate browser download duplicates, and none is referenced by any other file. They appear to be stray download artifacts, pending user confirmation before removal.
++- [ ] **Note:** `.gravityguard/runtime/` empty directories regenerate on their own because the engine recreates them; deleting them is pointless.
