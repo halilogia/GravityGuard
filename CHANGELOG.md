@@ -5,6 +5,29 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-09-20
+
+### Added
+- **G0 — Secret Leak Guard (BLOCK / WARN)**:
+  - High-confidence credential airbag blocking OpenAI, Anthropic/Claude, Google/Gemini, Slack, GitHub tokens, and private keys in diffs.
+  - Audit warnings for raw connection URIs and bearer tokens.
+  - Strict evidence masking (`sk-ant-****...****890`) preventing secondary leaks in logs or stdout.
+- **G1 — Silent Exception Hardening (Diff-Safe)**:
+  - Upgraded to `difflib.SequenceMatcher` to prevent false positives when existing handlers are touched.
+- **G2 — Test Integrity Hardening**:
+  - Implemented `collections.Counter` full-file comparison to block test deletion.
+  - Downgraded `.only()` to `WARN` and allowed `@pytest.mark.xfail`.
+- **G4 — Import Matrix Boundary Hardening**:
+  - Added support for Python relative imports (`from .network import ...`) and TypeScript side-effects (`import './network'`).
+  - Added strict path-segment matching preventing substring collisions (e.g. `networking` vs `network`).
+- **Phase 2 — Test Evidence Analyzer (T1, T2, T3)**:
+  - `T1_MISSING_RELATED_TEST (WARN)`: Warns when production code changes without a candidate test file on disk or when candidate test was untouched during the active session. Exemption allowlist for `types`, `constants`, `migrations`, `*.d.ts`.
+  - `T2_NO_OBSERVABLE_ASSERTION (WARN)`: Verifies newly added test cases contain observable assertions (`assert`, `self.assert*`, `pytest.raises`, `expect()`, `.toBe()`, `.toEqual()`).
+  - `T3_SYMBOL_TO_TEST_LINK (WARN)`: Verifies that newly added top-level/exported functions or classes appear by name in the candidate test file.
+- **Automated Test Suite Expansion**:
+  - Expanded test suite from 13 to **52 automated unit tests** (`engine/test_gravity_validator.py`).
+  - Measured core evaluator in-memory execution latency at `~0.031 ms` and Phase 2 evaluator at `~0.007 ms`.
+
 ---
 
 ## [1.0.0] - 2026-09-20

@@ -1,29 +1,46 @@
-# GravityGuard — v1.0.0
+# GravityGuard — v1.1.0
 
-> Deterministic Architecture Airbag & AI Agent Gatekeeper for Antigravity IDE.
+> Deterministic Architecture Airbag, Secret Leak Airbag & AI Agent Gatekeeper for Antigravity IDE.
 
 [English](#english) | [Türkçe](#türkçe)
 
 [![Antigravity Compatible](https://img.shields.io/badge/Antigravity%20IDE-Compatible-blue.svg)](https://antigravity.google/)
+[![Tests](https://img.shields.io/badge/Tests-52%20Passing-brightgreen.svg)]()
+[![Core Evaluator](https://img.shields.io/badge/Core%20Latency-%3C%200.05ms-blue.svg)]()
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9%20%7C%20ES2022-blue.svg)](https://www.typescriptlang.org/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B%20%7C%20Zero%20Dependencies-brightgreen.svg)](https://www.python.org/)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 [![Local AI First](https://img.shields.io/badge/Local%20AI-9Router%20%7C%20Ollama-orange.svg)]()
 
-**GravityGuard** is a lightweight, deterministic architectural gatekeeper and prompt engineering companion built specifically for **Antigravity IDE** and modern AI coding agents. It prevents autonomous AI agents from degrading codebase quality, violating architectural layer boundaries, creating massive god-files, and breaking the Single Responsibility Principle (SRP).
-
-It also features an ultra-low-latency **Status Bar Prompt Enhancer** that expands raw developer requests into defensive, architecture-preserving technical specifications using local AI models in seconds.
+**GravityGuard** is an ultra-lightweight, deterministic architectural gatekeeper, secret airbag, and prompt engineering companion built specifically for **Antigravity IDE** and modern autonomous AI coding agents. It intercepts AI agent tool-calls in `< 0.05ms` to prevent codebase degradation, accidental credential leaks, architectural violations, and silent error masking.
 
 ---
 
 ## English
 
+## Active Rule & Evidence Matrix
+
+GravityGuard operates an ordered, zero-overhead pipeline before any file modification tool call is executed:
+
+| ID | Rule Name | Severity | What It Enforces / Catches |
+| :--- | :--- | :--- | :--- |
+| **`G0`** | **Secret Leak Guard** | **BLOCK / WARN** | Blocks leaked credentials in diffs (OpenAI, Anthropic/Claude, Gemini, Slack, GitHub tokens, and private keys). Emits audit warnings for raw connection URIs and bearer tokens. Masks all logs. |
+| **`G1`** | **Silent Exception Guard** | **BLOCK** | Rejects newly added empty exception blocks (`except: pass`, `except: ...`, `catch {}`). Forces robust error logging or re-raising. |
+| **`G2`** | **Test Integrity Guard** | **BLOCK / WARN** | Prevents AI agents from "cheating" tests. Blocks test deletion via frequency counters (`collections.Counter`) and disables trickery (`.skip()`, `xit()`). Emits WARN on `.only()`. |
+| **`G3`** | **Compiler Bypass Guard** | **WARN ONLY** | Flags newly introduced linter/compiler suppression pragmas (`# noqa`, `# type: ignore`, `@ts-ignore`, `eslint-disable`). |
+| **`G4`** | **Import Matrix Guard** | **BLOCK** | Enforces layer boundaries defined in `.gravityguard.json` (e.g. `ui` forbidden from importing `database`). Supports relative imports and TS side-effects. |
+| **`SRP`** | **Single Responsibility** | **BLOCK** | Blocks files mixing raw UI components with HTTP/network calls, or accumulating 4+ major business classes in a god-file. |
+| **`OE`** | **Over-Engineering Spike** | **WARN ONLY** | Heuristic warning when small production changes (< 50 LOC) introduce a disproportionate abstraction spike (2+ classes/interfaces). |
+| **`T1`** | **Missing Related Test** | **WARN ONLY** | Warns when production code changes without a candidate test file on disk or when candidate test was untouched during the active session. Exemption allowlist for `types`, `constants`, `migrations`, etc. |
+| **`T2`** | **Observable Assertion** | **WARN ONLY** | Verifies newly added test cases (`def test_...`, `it(...)`) contain observable assertions (`assert`, `self.assert*`, `pytest.raises`, `expect()`, `.toBe()`, `.toEqual()`). |
+| **`T3`** | **Symbol-to-Test Link** | **WARN ONLY** | Verifies that newly added top-level/exported functions or classes appear by name in the candidate test file. Never double-warns if test is absent. |
+
 ## Key Features
 
 ### 🛡️ 1. Deterministic Architectural Gatekeeper
-- **Single Responsibility Principle (SRP) Enforcement**: Scans code modifications in `< 50ms` to prevent multi-responsibility anti-patterns (such as mixing raw UI rendering with HTTP/Network requests in a single file).
+- **High-Confidence Airbags**: Evaluates pure in-memory diffs in `< 0.05ms` (and `< 130ms` total Windows subprocess spawn).
 - **Intelligent Scale Heuristics**: Distinguishes cohesive single-responsibility files from unmaintainable god-files without relying on arbitrary mechanical line-count blocking.
-- **Zero Heavy Dependencies**: Pure Python validator operating via shallow AST and regex heuristics. Zero compilation overhead.
+- **Zero Heavy Dependencies**: Pure standard-library Python validator operating via shallow AST and regex heuristics. Zero compilation overhead.
 
 ### ✨ 2. Status Bar Prompt Enhancer (`Ctrl + Alt + E`)
 - **Interactive Status Bar Item**: Click `$(sparkle) Prompt Geliştir` on the bottom right or press **`Ctrl + Alt + E`** (`Cmd + Alt + E` on macOS) anywhere in the IDE.
@@ -42,6 +59,7 @@ It also features an ultra-low-latency **Status Bar Prompt Enhancer** that expand
 ### 💬 4. Native In-Chat `/enhance` Skill
 - Prefer staying in the chat window? Simply type `/enhance <your instruction>` directly into the Antigravity chat box.
 - The built-in GravityGuard skill immediately processes your request without opening external windows.
+
 
 ---
 
@@ -74,12 +92,30 @@ It also features an ultra-low-latency **Status Bar Prompt Enhancer** that expand
 
 ## Türkçe
 
+## Aktif Kural ve Kanıt Matrisi
+
+GravityGuard, herhangi bir dosya değiştirme aracı çalıştırılmadan önce sıfır gecikmeli sıralı bir denetim hattı işletir:
+
+| Kural | Adı | Seviye | Ne Yapar / Neyi Yakalar? |
+| :--- | :--- | :--- | :--- |
+| **`G0`** | **Gizli Veri Hava Yastığı (Secret Leak)** | **ENGELLE / UYAR** | Kod farklarında unutulan API anahtarlarını (OpenAI, Anthropic/Claude, Gemini, Slack, GitHub tokenları, Private Key'ler) engeller. Ham bağlantı adresleri ve Bearer tokenları için uyarı verir. Logları maskeler. |
+| **`G1`** | **Sessiz Hata Engelleme (Silent Exception)** | **ENGELLE (BLOCK)** | Yeni eklenen boş `except: pass` ve `catch {}` bloklarını reddeder. Hataların loglanmasını veya fırlatılmasını zorunlu kılar. |
+| **`G2`** | **Test Bütünlüğü Koruma (Test Integrity)** | **ENGELLE / UYAR** | Ajanın testleri silmesini (`Counter` ile tam dosya karşılaştırması) ve testleri `.skip()` / `xit()` ile susturmasını engeller. Odaklanmış testlere (`.only()`) karşı uyarır. |
+| **`G3`** | **Derleyici Susturma Tespiti (Compiler Bypass)**| **YALNIZCA UYAR** | Yeni eklenen `# noqa`, `# type: ignore`, `@ts-ignore` gibi linter susturmalarını tespit eder ve geliştiriciyi uyarır. |
+| **`G4`** | **Katman İthalat Matrisi (Import Matrix)** | **ENGELLE (BLOCK)** | `.gravityguard.json` dosyasında tanımlanan mimari sınırları zorunlu kılar (örn: `ui` doğrudan `database` import edemez). Relative ve side-effect importları destekler. |
+| **`SRP`** | **Tek Sorumluluk Koruması (SRP Boundary)** | **ENGELLE (BLOCK)** | Aynı dosyada UI bileşenleri ile Network/HTTP çağrılarının karıştırılmasını veya bir dosyaya 4'ten fazla ana sınıf yığılmasını engeller. |
+| **`OE`** | **Aşırı Soyutlama Tespiti (Over-Engineering)** | **YALNIZCA UYAR** | Küçük değişikliklerde (< 50 satır) orantısız biçimde 2 veya daha fazla yeni soyutlama (sınıf/arayüz) eklenmesine karşı YAGNI uyarısı verir. |
+| **`T1`** | **Eksik İlişkili Test (Missing Related Test)** | **YALNIZCA UYAR** | Üretim kodu değiştiğinde diskte aday test dosyası yoksa veya bu oturumda teste dokunulmamışsa uyarır (`types`, `constants`, `migrations` muaf). |
+| **`T2`** | **Gözlemlenebilir Assertion (Observable Assertion)**| **YALNIZCA UYAR** | Yeni eklenen test case'lerinin (`def test_...`, `it(...)`) en az bir assertion (`assert`, `self.assert*`, `expect()`, `.toBe()`, `pytest.raises`) içerdiğini doğrular. |
+| **`T3`** | **Sembol-Test İlişkisi (Symbol-to-Test Link)** | **YALNIZCA UYAR** | Eklenen/değişen fonksiyon veya sınıf isimlerinin ilgili test dosyasında adıyla geçip geçmediğini kontrol eder. Test yoksa T1 önceliklidir. |
+
 ## Temel Özellikler
 
 ### 🛡️ 1. Deterministik Mimari Bekçi (Gatekeeper)
-- **Tek Sorumluluk Prensibi (SRP) Koruması**: Kod değişikliklerini 50 milisaniyenin altında denetler. Ham arayüz (UI) bileşenleri ile ağ (Network/HTTP) işlemlerinin aynı dosyada karıştırılmasını engeller.
+- **Yüksek Güvenilirlikli Hava Yastığı**: Saf bellek içi diff denetimlerini `< 0.05 ms` sürede tamamlar.
 - **Akıllı Ölçek Analizi**: Yapay zekanın tek dosyaya aşırı sorumluluk yığarak devasa "god-file" oluşturmasını önler. Mekanik satır sınırı koymak yerine semantik sorumluluk dağılımına bakar.
 - **Sıfır Harici Bağımlılık**: Saf Python ile yazılmış, AST ve regex tabanlı hafif analiz motoru. Ağır kütüphane veya derleme gerektirmez.
+
 
 ### ✨ 2. Status Bar Prompt Geliştirici (`Ctrl + Alt + E`)
 - **Status Bar Erişimi**: Sağ alttaki `✨ Prompt Geliştir` butonuna tıklayın veya dilediğiniz an **`Ctrl + Alt + E`** kısayolunu kullanın.
