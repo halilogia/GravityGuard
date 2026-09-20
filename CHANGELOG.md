@@ -23,14 +23,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tier 2 / Tier 3 Diagnostics State Bridge**:
   - Background findings recorded in `.gravityguard/runtime/diagnostics.json`.
   - `STATIC_LINTER_DIAGNOSTIC (WARN)`: Injects recent background linter findings into AI context during subsequent pre-tool calls (< 0.5 ms).
-- **Prompt Enhancer Architectural Guidance Preamble**:
-  - Updated `src/extension.ts` prompt enhancement system prompt with explicit directives favoring cohesive modules over monolithic accumulation.
-- **Automated Test Suite Expansion (69/69 Passing)**:
-  - Expanded test suite to **69 automated unit tests** (`engine/test_gravity_validator.py`), 69/69 passing.
+- **Per-File TypeScript Diagnostics Integration**:
+  - Implemented `parse_tsc_output` in `engine/async_runner.py` parsing raw compiler output (`file(line,col): error TSxxxx: message`) into normalized per-file diagnostic entries.
+  - Resolved the critical feedback loop gap: `read_recent_diagnostics(target_file)` now matches TypeScript compiler errors directly against modified target files (e.g. `auth.ts`) instead of dropping them in an unindexed global bucket.
+- **Per-File Lint Burst Coalescing**:
+  - Implemented `file_edits` tracking in `debounce_state.json` to prevent rapid duplicate linter executions when an AI agent modifies the same file multiple times within milliseconds.
+- **Automated Test Suite Expansion (73/73 Passing)**:
+  - Expanded test suite to **73 automated unit tests** (`engine/test_gravity_validator.py`), 73/73 passing.
+  - Added deterministic tests for pure debounce idle decisions (`should_run_after_idle`), duplicate worker spawn protection, and detached subprocess invocation via `unittest.mock`.
   - Conducted 1,000-iteration statistical latency distribution benchmark:
-    - **Average (Avg):** `0.1198 ms`
-    - **95th Percentile (p95):** `0.2292 ms`
-    - **99th Percentile (p99):** `0.5343 ms`
+    - **Average (Avg):** `0.1135 ms`
+    - **95th Percentile (p95):** `0.1866 ms`
+    - **99th Percentile (p99):** `0.7426 ms`
 
 ---
 

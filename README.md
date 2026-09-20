@@ -5,8 +5,8 @@
 [English](#english) | [Türkçe](#türkçe)
 
 [![Antigravity Compatible](https://img.shields.io/badge/Antigravity%20IDE-Compatible-blue.svg)](https://antigravity.google/)
-[![Tests](https://img.shields.io/badge/Tests-69%20Passing-brightgreen.svg)]()
-[![Core Evaluator](https://img.shields.io/badge/Core%20Benchmark-Avg%200.11ms%20%7C%20p95%200.23ms-blue.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-73%20Passing-brightgreen.svg)]()
+[![Core Evaluator](https://img.shields.io/badge/Core%20Benchmark-Avg%200.11ms%20%7C%20p95%200.19ms-blue.svg)]()
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9%20%7C%20ES2022-blue.svg)](https://www.typescriptlang.org/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B%20%7C%20Zero%20Dependencies-brightgreen.svg)](https://www.python.org/)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)

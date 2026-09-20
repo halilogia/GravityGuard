@@ -7,6 +7,7 @@ import sys
 import tempfile
 import shutil
 from typing import Tuple
+from unittest.mock import patch, MagicMock
 
 VALIDATOR_PATH = os.path.join(os.path.dirname(__file__), "gravity-validator.py")
 
@@ -1547,6 +1548,131 @@ class TestGravityGuardPhase2(unittest.TestCase):
         print(f"\n[BENCHMARK - 1000 RUNS] Avg: {avg_ms:.4f} ms | p95: {p95_ms:.4f} ms | p99: {p99_ms:.4f} ms")
         self.assertLess(avg_ms, 1.0, "Core evaluator average latency must be < 1ms")
         self.assertLess(p95_ms, 2.0, "Core evaluator p95 latency must be < 2ms")
+
+    # --- PHASE 2.5 CRITICAL HARDENING TESTS ---
+
+    def test_tsc_per_file_diagnostics_integration(self):
+        """Verifies tsc compiler output is parsed per-file and matched by read_recent_diagnostics"""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            sys.path.insert(0, os.path.dirname(VALIDATOR_PATH))
+            import async_runner
+            from pathlib import Path
+
+            p_root = Path(temp_dir).resolve()
+            diag_path = async_runner.get_diagnostics_file_path(p_root)
+
+            auth_file = p_root / "src" / "auth.ts"
+            unrelated_file = p_root / "src" / "unrelated.ts"
+            auth_file.parent.mkdir(parents=True, exist_ok=True)
+            auth_file.write_text("export const token = 123;\n", encoding="utf-8")
+            unrelated_file.write_text("export const name = 'test';\n", encoding="utf-8")
+
+            sample_tsc_stdout = (
+                f"{auth_file}(12,5): error TS2322: Type 'string' is not assignable to type 'number'.\n"
+                f"{auth_file}(18,1): error TS2554: Expected 2 arguments, but got 1.\n"
+            )
+
+            file_errors_map = async_runner.parse_tsc_output(sample_tsc_stdout, p_root)
+            norm_auth_key = str(auth_file).replace("\\", "/")
+            self.assertIn(norm_auth_key, file_errors_map)
+            self.assertEqual(len(file_errors_map[norm_auth_key]), 2)
+            self.assertEqual(file_errors_map[norm_auth_key][0]["rule"], "TS2322")
+
+            # Save to diagnostics.json as run_debounce_worker would do
+            diag_data = {"version": 1, "lastUpdated": time.time(), "entries": {}}
+            for f_path, errs in file_errors_map.items():
+                diag_data["entries"][f_path] = {
+                    "tool": "tsc",
+                    "timestamp": time.time(),
+                    "errors": errs
+                }
+            async_runner.save_diagnostics(diag_path, diag_data)
+
+            # Test validator reader on auth_file -> must surface TS2322
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("gravity_validator", VALIDATOR_PATH)
+            gv = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(gv)
+
+            auth_warnings = gv.read_recent_diagnostics(str(auth_file))
+            self.assertTrue(len(auth_warnings) > 0, "auth.ts must receive tsc diagnostics")
+            self.assertEqual(auth_warnings[0][0], "STATIC_LINTER_DIAGNOSTIC")
+            self.assertIn("TS2322", auth_warnings[0][1])
+
+            # Test validator reader on unrelated_file -> must NOT receive auth.ts error
+            unrelated_warnings = gv.read_recent_diagnostics(str(unrelated_file))
+            self.assertEqual(len(unrelated_warnings), 0, "unrelated.ts must not see auth.ts errors")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_should_run_after_idle_decision_matrix(self):
+        """Verifies pure debounce logic: returns True strictly when idle_threshold has passed"""
+        sys.path.insert(0, os.path.dirname(VALIDATOR_PATH))
+        import async_runner
+
+        # Invalid last edit
+        self.assertFalse(async_runner.should_run_after_idle(0.0, 100.0, 3.0))
+
+        # 1.0s elapsed (< 3.0s) -> False
+        self.assertFalse(async_runner.should_run_after_idle(100.0, 101.0, 3.0))
+
+        # 2.9s elapsed (< 3.0s) -> False
+        self.assertFalse(async_runner.should_run_after_idle(100.0, 102.9, 3.0))
+
+        # 3.0s elapsed (== 3.0s) -> True
+        self.assertTrue(async_runner.should_run_after_idle(100.0, 103.0, 3.0))
+
+        # 5.0s elapsed (> 3.0s) -> True
+        self.assertTrue(async_runner.should_run_after_idle(100.0, 105.0, 3.0))
+
+        # New edit reset: now == last_edit -> False
+        self.assertFalse(async_runner.should_run_after_idle(105.0, 105.0, 3.0))
+
+    def test_should_spawn_worker_duplicate_protection(self):
+        """Verifies duplicate worker processes are never spawned concurrently"""
+        sys.path.insert(0, os.path.dirname(VALIDATOR_PATH))
+        import async_runner
+
+        self.assertFalse(async_runner.should_spawn_worker(worker_already_running=True))
+        self.assertTrue(async_runner.should_spawn_worker(worker_already_running=False))
+
+    def test_orchestration_mock_subprocess_popen(self):
+        """Verifies trigger_background_validation invokes async_runner detached without waiting"""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("gravity_validator", VALIDATOR_PATH)
+        gv = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gv)
+
+        with patch("subprocess.Popen") as mock_popen:
+            mock_proc = MagicMock()
+            mock_popen.return_value = mock_proc
+
+            target = "C:/fake_project/src/auth.ts"
+            gv.trigger_background_validation(target)
+
+            # Ensure Popen was called exactly once
+            mock_popen.assert_called_once()
+            call_args, call_kwargs = mock_popen.call_args
+
+            # Check binary command arguments
+            cmd_list = call_args[0]
+            self.assertTrue(any("async_runner.py" in arg for arg in cmd_list))
+            self.assertIn("--file", cmd_list)
+            self.assertIn(target, cmd_list)
+
+            # Verify detached flags and devnull redirects
+            if sys.platform == "win32":
+                self.assertEqual(call_kwargs.get("creationflags"), 0x00000008)
+            else:
+                self.assertTrue(call_kwargs.get("start_new_session"))
+
+            self.assertEqual(call_kwargs.get("stdout"), subprocess.DEVNULL)
+            self.assertEqual(call_kwargs.get("stderr"), subprocess.DEVNULL)
+
+            # CRITICAL: Verify parent process NEVER waits on the background child
+            mock_proc.wait.assert_not_called()
+            mock_proc.communicate.assert_not_called()
 
 
 if __name__ == "__main__":

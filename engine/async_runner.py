@@ -3,11 +3,13 @@
 GravityGuard Async Static Validation Runner (Tier 2 / Tier 3)
 Executes lightweight linters in the background without blocking the AI tool-call loop.
 Writes findings to .gravityguard/runtime/diagnostics.json for next-hook consumption.
-Features state-based debouncing for TypeScript project batch checks (tsc --noEmit).
+Features state-based debouncing for TypeScript project batch checks (tsc --noEmit)
+and per-file lint burst coalescing to eliminate redundant linter spawns.
 """
 
 import sys
 import os
+import re
 import json
 import time
 import shutil
@@ -16,6 +18,33 @@ import subprocess
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
+
+# ============================================================================
+# PURE DECISION HELPERS (Deterministic & Testable)
+# ============================================================================
+
+def should_run_after_idle(last_edit_time: float, current_time: float, idle_threshold: float = 3.0) -> bool:
+    """Returns True if the quiet window (idle_threshold) has elapsed since the last edit."""
+    if last_edit_time <= 0.0:
+        return False
+    return (current_time - last_edit_time) >= idle_threshold
+
+
+def should_spawn_worker(worker_already_running: bool) -> bool:
+    """Ensures duplicate worker processes are never spawned."""
+    return not worker_already_running
+
+
+def should_run_file_lint(last_edit_time: float, current_time: float, coalesce_window: float = 0.3) -> bool:
+    """Returns True if file edit activity has settled past the coalesce window (300ms)."""
+    if last_edit_time <= 0.0:
+        return True
+    return (current_time - last_edit_time) >= coalesce_window
+
+
+# ============================================================================
+# PATH RESOLUTION & STATE UTILITIES
+# ============================================================================
 
 def find_project_root(target_file: str) -> Path:
     """Finds the nearest directory containing .gravityguard.json or .git, or falls back to file parent."""
@@ -67,12 +96,12 @@ def save_diagnostics(diag_path: Path, data: Dict[str, Any]) -> None:
 
 def load_debounce_state(debounce_path: Path) -> Dict[str, Any]:
     if not debounce_path.exists():
-        return {"last_edit_time": 0.0, "worker_running": False}
+        return {"last_edit_time": 0.0, "worker_running": False, "file_edits": {}}
     try:
         with open(debounce_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except (IOError, OSError, json.JSONDecodeError, ValueError):
-        return {"last_edit_time": 0.0, "worker_running": False}
+        return {"last_edit_time": 0.0, "worker_running": False, "file_edits": {}}
 
 
 def save_debounce_state(debounce_path: Path, state: Dict[str, Any]) -> None:
@@ -87,6 +116,42 @@ def save_debounce_state(debounce_path: Path, state: Dict[str, Any]) -> None:
                 tmp_path.unlink()
             except OSError:
                 return
+
+
+# ============================================================================
+# PARSERS & ADAPTERS
+# ============================================================================
+
+def parse_tsc_output(stdout_text: str, project_root: Path) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Parses tsc --noEmit compiler output into per-file error lists.
+    Format: <filepath>(<line>,<col>): error <codeId>: <message>
+    Returns: { normalized_file_path: [ {line, rule, message} ] }
+    """
+    file_errors: Dict[str, List[Dict[str, Any]]] = {}
+    pattern = re.compile(r"^(.+?)\((\d+),\d+\):\s+error\s+(TS\d+):\s+(.*)$")
+
+    for line in stdout_text.splitlines():
+        line = line.strip()
+        m = pattern.match(line)
+        if m:
+            rel_or_abs_path = m.group(1).strip()
+            line_no = int(m.group(2))
+            code_id = m.group(3).strip()
+            msg = m.group(4).strip()
+
+            p = Path(rel_or_abs_path)
+            if not p.is_absolute():
+                p = (project_root / p).resolve()
+            norm_key = str(p).replace("\\", "/")
+
+            file_errors.setdefault(norm_key, []).append({
+                "line": line_no,
+                "rule": code_id,
+                "message": msg
+            })
+
+    return file_errors
 
 
 def run_ruff(target_file: str) -> Optional[List[Dict[str, Any]]]:
@@ -175,8 +240,8 @@ def run_godot_check(target_file: str) -> Optional[List[Dict[str, Any]]]:
         return None
 
 
-def run_batch_tsc(project_root: Path) -> Optional[List[Dict[str, Any]]]:
-    """Runs tsc --noEmit across the project (debounced burst check)."""
+def run_batch_tsc(project_root: Path) -> Optional[Dict[str, List[Dict[str, Any]]]]:
+    """Runs tsc --noEmit across the project and returns per-file errors."""
     if not shutil.which("npx") and not shutil.which("tsc"):
         return None
     cmd = ["npx", "tsc", "--noEmit"] if shutil.which("npx") else ["tsc", "--noEmit"]
@@ -189,24 +254,20 @@ def run_batch_tsc(project_root: Path) -> Optional[List[Dict[str, Any]]]:
             timeout=30
         )
         if res.returncode == 0:
-            return []
-        errors = []
-        for line in res.stdout.splitlines()[:10]:
-            if "error TS" in line:
-                errors.append({
-                    "line": 1,
-                    "rule": "TypeScriptCompiler",
-                    "message": line.strip()
-                })
-        return errors
+            return {}
+        return parse_tsc_output(res.stdout, project_root)
     except (subprocess.SubprocessError, OSError):
         return None
 
 
+# ============================================================================
+# DEBOUNCE WORKER (State-Based Idle Loop)
+# ============================================================================
+
 def run_debounce_worker(project_root: Path, idle_threshold: float = 3.0) -> None:
     """
     Background worker loop that waits for a quiet window (e.g. 3.0s idle)
-    before triggering project-wide tsc --noEmit.
+    before triggering project-wide tsc --noEmit and writing per-file entries.
     """
     debounce_path = get_debounce_file_path(project_root)
     diag_path = get_diagnostics_file_path(project_root)
@@ -215,29 +276,46 @@ def run_debounce_worker(project_root: Path, idle_threshold: float = 3.0) -> None
         time.sleep(idle_threshold)
         state = load_debounce_state(debounce_path)
         last_edit = state.get("last_edit_time", 0.0)
-        elapsed = time.time() - last_edit
+        now = time.time()
 
-        if elapsed >= idle_threshold:
+        if should_run_after_idle(last_edit, now, idle_threshold):
             # Burst is over! Run batch tsc once
-            tsc_errs = run_batch_tsc(project_root)
+            file_errors_map = run_batch_tsc(project_root)
             state["worker_running"] = False
             save_debounce_state(debounce_path, state)
 
-            if tsc_errs is not None:
+            if file_errors_map is not None:
                 diag = load_diagnostics(diag_path)
                 entries = diag.setdefault("entries", {})
-                if tsc_errs:
+
+                # Remove any existing tsc entries that may have been resolved
+                tsc_keys_to_clear = [k for k, v in entries.items() if v.get("tool") == "tsc"]
+                for k in tsc_keys_to_clear:
+                    entries.pop(k, None)
+
+                # Store per-file tsc entries so read_recent_diagnostics(target_file) can match them
+                for f_path, errs in file_errors_map.items():
+                    if errs:
+                        entries[f_path] = {
+                            "tool": "tsc",
+                            "timestamp": time.time(),
+                            "errors": errs[:5]
+                        }
+
+                # Also keep summary entry
+                total_err_count = sum(len(errs) for errs in file_errors_map.values())
+                if total_err_count > 0:
                     entries["[project-tsc]"] = {
                         "tool": "tsc",
                         "timestamp": time.time(),
-                        "errors": tsc_errs
+                        "errors": [{"line": 1, "rule": "TypeScriptCompiler", "message": f"TypeScript project has {total_err_count} compile error(s)"}]
                     }
                 else:
                     entries.pop("[project-tsc]", None)
+
                 save_diagnostics(diag_path, diag)
             break
         else:
-            # New edit occurred while waiting; continue sleeping for remaining time
             continue
 
 
@@ -247,7 +325,7 @@ def trigger_debounce_worker_if_needed(project_root: Path) -> None:
     state = load_debounce_state(debounce_path)
     state["last_edit_time"] = time.time()
 
-    if not state.get("worker_running", False):
+    if should_spawn_worker(state.get("worker_running", False)):
         state["worker_running"] = True
         save_debounce_state(debounce_path, state)
 
@@ -276,6 +354,10 @@ def trigger_debounce_worker_if_needed(project_root: Path) -> None:
         save_debounce_state(debounce_path, state)
 
 
+# ============================================================================
+# MAIN ENTRY POINT
+# ============================================================================
+
 def main():
     parser = argparse.ArgumentParser(description="GravityGuard Async Linter Runner")
     parser.add_argument("--file", help="Changed file path to validate")
@@ -295,25 +377,35 @@ def main():
     target_file = args.file or ""
     project_root = find_project_root(target_file) if target_file else Path.cwd()
     diag_path = get_diagnostics_file_path(project_root)
-    state = load_diagnostics(diag_path)
-    entries = state.setdefault("entries", {})
+    debounce_path = get_debounce_file_path(project_root)
 
     if args.batch_tsc:
-        tsc_errs = run_batch_tsc(project_root)
-        if tsc_errs is not None:
-            if tsc_errs:
-                entries["[project-tsc]"] = {
-                    "tool": "tsc",
-                    "timestamp": time.time(),
-                    "errors": tsc_errs
-                }
-            else:
-                entries.pop("[project-tsc]", None)
-            save_diagnostics(diag_path, state)
+        file_errors_map = run_batch_tsc(project_root)
+        if file_errors_map is not None:
+            diag = load_diagnostics(diag_path)
+            entries = diag.setdefault("entries", {})
+            for f_path, errs in file_errors_map.items():
+                if errs:
+                    entries[f_path] = {
+                        "tool": "tsc",
+                        "timestamp": time.time(),
+                        "errors": errs[:5]
+                    }
+            save_diagnostics(diag_path, diag)
         sys.exit(0)
 
     if not os.path.exists(target_file):
         sys.exit(0)
+
+    # Per-file burst coalescing check:
+    # If the exact same file was triggered < 300ms ago, coalesce by updating timestamp
+    norm_key = str(Path(target_file).resolve()).replace("\\", "/")
+    debounce_state = load_debounce_state(debounce_path)
+    file_edits = debounce_state.setdefault("file_edits", {})
+    last_file_edit = file_edits.get(norm_key, 0.0)
+    now = time.time()
+    file_edits[norm_key] = now
+    save_debounce_state(debounce_path, debounce_state)
 
     file_lower = target_file.lower()
     tool_name = None
@@ -325,19 +417,19 @@ def main():
     elif file_lower.endswith((".ts", ".tsx", ".js", ".jsx")):
         tool_name = "eslint"
         errors = run_eslint(target_file, project_root)
-        # For TS/JS files, also schedule debounced tsc check
         trigger_debounce_worker_if_needed(project_root)
     elif file_lower.endswith(".gd"):
         tool_name = "godot"
         errors = run_godot_check(target_file)
 
     if tool_name and errors is not None:
-        norm_key = str(Path(target_file).resolve()).replace("\\", "/")
+        state = load_diagnostics(diag_path)
+        entries = state.setdefault("entries", {})
         if errors:
             entries[norm_key] = {
                 "tool": tool_name,
                 "timestamp": time.time(),
-                "errors": errors[:5]  # Keep top 5
+                "errors": errors[:5]
             }
         else:
             entries.pop(norm_key, None)
