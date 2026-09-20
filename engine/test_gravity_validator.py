@@ -1674,8 +1674,80 @@ class TestGravityGuardPhase2(unittest.TestCase):
             mock_proc.wait.assert_not_called()
             mock_proc.communicate.assert_not_called()
 
+    # --- PHASE 2.5: PER-FILE LINT BURST COALESCING & STATE CLEANUP TESTS ---
+    def test_lint_coalescing_first_trigger_spawns_worker(self):
+        """Scenario 1: First edit trigger on a file must claim and spawn worker."""
+        sys.path.insert(0, os.path.dirname(VALIDATOR_PATH))
+        import async_runner
+        active_workers = {}
+        file_key = "C:/fake/auth.ts"
+        self.assertTrue(async_runner.should_spawn_file_worker(active_workers, file_key))
+
+    def test_lint_coalescing_worker_already_active_prevents_duplicate(self):
+        """Scenario 2: When worker is already active for a file, subsequent triggers do NOT spawn new worker."""
+        sys.path.insert(0, os.path.dirname(VALIDATOR_PATH))
+        import async_runner
+        active_workers = {"C:/fake/auth.ts": True}
+        file_key = "C:/fake/auth.ts"
+        self.assertFalse(async_runner.should_spawn_file_worker(active_workers, file_key))
+
+    def test_lint_coalescing_quiet_window_under_threshold(self):
+        """Scenario 3: If edit occurred 100ms ago (< 300ms coalesce window), linter must NOT run yet."""
+        sys.path.insert(0, os.path.dirname(VALIDATOR_PATH))
+        import async_runner
+        last_edit = 100.0
+        now = 100.1  # 100ms elapsed
+        self.assertFalse(async_runner.should_run_file_lint(last_edit, now, coalesce_window=0.3))
+
+    def test_lint_coalescing_quiet_window_reached(self):
+        """Scenario 4: If 300ms has elapsed with no new edits, quiet window is satisfied and linter can run."""
+        sys.path.insert(0, os.path.dirname(VALIDATOR_PATH))
+        import async_runner
+        last_edit = 100.0
+        now = 100.3  # Exactly 300ms elapsed
+        self.assertTrue(async_runner.should_run_file_lint(last_edit, now, coalesce_window=0.3))
+        now_later = 100.45  # 450ms elapsed
+        self.assertTrue(async_runner.should_run_file_lint(last_edit, now_later, coalesce_window=0.3))
+
+    def test_lint_coalescing_new_burst_resets_window(self):
+        """Scenario 5: If a new edit arrives during the quiet window, the timer window resets."""
+        sys.path.insert(0, os.path.dirname(VALIDATOR_PATH))
+        import async_runner
+        # Initial edit at t=100.0. A second edit arrives at t=100.2
+        last_edit = 100.2
+        # At t=100.3 (300ms from initial edit, but only 100ms from latest edit) -> must NOT run
+        self.assertFalse(async_runner.should_run_file_lint(last_edit, 100.3, coalesce_window=0.3))
+        # At t=100.5 (300ms from latest edit) -> now it runs!
+        self.assertTrue(async_runner.should_run_file_lint(last_edit, 100.5, coalesce_window=0.3))
+
+    def test_lint_coalescing_clean_file_state(self):
+        """Scenario 6: Once worker finishes, active claim and timestamp are purged from state."""
+        sys.path.insert(0, os.path.dirname(VALIDATOR_PATH))
+        import async_runner
+        state = {
+            "active_lint_workers": {"C:/fake/auth.ts": True, "C:/fake/other.py": True},
+            "file_edits": {"C:/fake/auth.ts": 123.45, "C:/fake/other.py": 678.90}
+        }
+        async_runner.clean_file_state(state, "C:/fake/auth.ts")
+        self.assertNotIn("C:/fake/auth.ts", state["active_lint_workers"])
+        self.assertNotIn("C:/fake/auth.ts", state["file_edits"])
+        # Unrelated file state remains intact
+        self.assertIn("C:/fake/other.py", state["active_lint_workers"])
+        self.assertIn("C:/fake/other.py", state["file_edits"])
+
+    def test_lint_coalescing_multi_file_isolation(self):
+        """Scenario 7: Worker active on auth.ts does NOT block worker spawn on calc.py."""
+        sys.path.insert(0, os.path.dirname(VALIDATOR_PATH))
+        import async_runner
+        active_workers = {"C:/fake/auth.ts": True}
+        file_ts = "C:/fake/auth.ts"
+        file_py = "C:/fake/calc.py"
+        self.assertFalse(async_runner.should_spawn_file_worker(active_workers, file_ts))
+        self.assertTrue(async_runner.should_spawn_file_worker(active_workers, file_py))
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

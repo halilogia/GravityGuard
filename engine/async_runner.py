@@ -20,26 +20,37 @@ from typing import Dict, Any, List, Optional
 
 
 # ============================================================================
-# PURE DECISION HELPERS (Deterministic & Testable)
+# PURE DECISION HELPERS (Deterministic, 0-ms & Unit-Testable)
 # ============================================================================
 
 def should_run_after_idle(last_edit_time: float, current_time: float, idle_threshold: float = 3.0) -> bool:
     """Returns True if the quiet window (idle_threshold) has elapsed since the last edit."""
     if last_edit_time <= 0.0:
         return False
-    return (current_time - last_edit_time) >= idle_threshold
+    return (current_time - last_edit_time) >= (idle_threshold - 1e-6)
 
 
 def should_spawn_worker(worker_already_running: bool) -> bool:
-    """Ensures duplicate worker processes are never spawned."""
+    """Ensures duplicate batch worker processes are never spawned."""
     return not worker_already_running
+
+
+def should_spawn_file_worker(active_workers: Dict[str, bool], file_key: str) -> bool:
+    """Returns True if no lint worker is currently active for this specific file."""
+    return not active_workers.get(file_key, False)
 
 
 def should_run_file_lint(last_edit_time: float, current_time: float, coalesce_window: float = 0.3) -> bool:
     """Returns True if file edit activity has settled past the coalesce window (300ms)."""
     if last_edit_time <= 0.0:
         return True
-    return (current_time - last_edit_time) >= coalesce_window
+    return (current_time - last_edit_time) >= (coalesce_window - 1e-6)
+
+
+def clean_file_state(state: Dict[str, Any], file_key: str) -> None:
+    """Cleans up active worker and edit timestamps after lint completion so state stays minimal."""
+    state.setdefault("active_lint_workers", {}).pop(file_key, None)
+    state.setdefault("file_edits", {}).pop(file_key, None)
 
 
 # ============================================================================
@@ -96,12 +107,12 @@ def save_diagnostics(diag_path: Path, data: Dict[str, Any]) -> None:
 
 def load_debounce_state(debounce_path: Path) -> Dict[str, Any]:
     if not debounce_path.exists():
-        return {"last_edit_time": 0.0, "worker_running": False, "file_edits": {}}
+        return {"last_edit_time": 0.0, "worker_running": False, "file_edits": {}, "active_lint_workers": {}}
     try:
         with open(debounce_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except (IOError, OSError, json.JSONDecodeError, ValueError):
-        return {"last_edit_time": 0.0, "worker_running": False, "file_edits": {}}
+        return {"last_edit_time": 0.0, "worker_running": False, "file_edits": {}, "active_lint_workers": {}}
 
 
 def save_debounce_state(debounce_path: Path, state: Dict[str, Any]) -> None:
@@ -261,8 +272,73 @@ def run_batch_tsc(project_root: Path) -> Optional[Dict[str, List[Dict[str, Any]]
 
 
 # ============================================================================
-# DEBOUNCE WORKER (State-Based Idle Loop)
+# LINT & BATCH WORKERS (With Quiet-Window Coalescing)
 # ============================================================================
+
+def execute_single_file_lint(target_file: str, project_root: Path, diag_path: Path) -> None:
+    """Executes the specific linter for the given file and updates diagnostics.json."""
+    if not os.path.exists(target_file):
+        return
+
+    norm_key = str(Path(target_file).resolve()).replace("\\", "/")
+    file_lower = target_file.lower()
+    tool_name = None
+    errors = None
+
+    if file_lower.endswith(".py"):
+        tool_name = "ruff"
+        errors = run_ruff(target_file)
+    elif file_lower.endswith((".ts", ".tsx", ".js", ".jsx")):
+        tool_name = "eslint"
+        errors = run_eslint(target_file, project_root)
+        trigger_debounce_worker_if_needed(project_root)
+    elif file_lower.endswith(".gd"):
+        tool_name = "godot"
+        errors = run_godot_check(target_file)
+
+    if tool_name and errors is not None:
+        state = load_diagnostics(diag_path)
+        entries = state.setdefault("entries", {})
+        if errors:
+            entries[norm_key] = {
+                "tool": tool_name,
+                "timestamp": time.time(),
+                "errors": errors[:5]
+            }
+        else:
+            entries.pop(norm_key, None)
+        save_diagnostics(diag_path, state)
+
+
+def run_coalesced_file_lint_worker(target_file: str, project_root: Path, coalesce_window: float = 0.3) -> None:
+    """
+    Coalesces rapid successive edits on the same file.
+    Waits until no edits have occurred on target_file for coalesce_window (300ms),
+    then executes the linter once on the final file state and cleans up state.
+    """
+    debounce_path = get_debounce_file_path(project_root)
+    diag_path = get_diagnostics_file_path(project_root)
+    norm_key = str(Path(target_file).resolve()).replace("\\", "/")
+
+    while True:
+        time.sleep(coalesce_window)
+        state = load_debounce_state(debounce_path)
+        file_edits = state.get("file_edits", {})
+        last_edit = file_edits.get(norm_key, 0.0)
+        now = time.time()
+
+        if should_run_file_lint(last_edit, now, coalesce_window):
+            # Quiet window reached without new edits: execute linter once
+            execute_single_file_lint(target_file, project_root, diag_path)
+
+            # Cleanup worker state so future modifications start fresh
+            clean_file_state(state, norm_key)
+            save_debounce_state(debounce_path, state)
+            break
+        else:
+            # More edits arrived during sleep; continue waiting for calm
+            continue
+
 
 def run_debounce_worker(project_root: Path, idle_threshold: float = 3.0) -> None:
     """
@@ -288,7 +364,7 @@ def run_debounce_worker(project_root: Path, idle_threshold: float = 3.0) -> None
                 diag = load_diagnostics(diag_path)
                 entries = diag.setdefault("entries", {})
 
-                # Remove any existing tsc entries that may have been resolved
+                # Remove existing tsc entries that may have been resolved
                 tsc_keys_to_clear = [k for k, v in entries.items() if v.get("tool") == "tsc"]
                 for k in tsc_keys_to_clear:
                     entries.pop(k, None)
@@ -397,43 +473,26 @@ def main():
     if not os.path.exists(target_file):
         sys.exit(0)
 
-    # Per-file burst coalescing check:
-    # If the exact same file was triggered < 300ms ago, coalesce by updating timestamp
+    # Per-file burst coalescing logic:
     norm_key = str(Path(target_file).resolve()).replace("\\", "/")
     debounce_state = load_debounce_state(debounce_path)
     file_edits = debounce_state.setdefault("file_edits", {})
-    last_file_edit = file_edits.get(norm_key, 0.0)
+    active_workers = debounce_state.setdefault("active_lint_workers", {})
+
     now = time.time()
     file_edits[norm_key] = now
-    save_debounce_state(debounce_path, debounce_state)
 
-    file_lower = target_file.lower()
-    tool_name = None
-    errors = None
-
-    if file_lower.endswith(".py"):
-        tool_name = "ruff"
-        errors = run_ruff(target_file)
-    elif file_lower.endswith((".ts", ".tsx", ".js", ".jsx")):
-        tool_name = "eslint"
-        errors = run_eslint(target_file, project_root)
-        trigger_debounce_worker_if_needed(project_root)
-    elif file_lower.endswith(".gd"):
-        tool_name = "godot"
-        errors = run_godot_check(target_file)
-
-    if tool_name and errors is not None:
-        state = load_diagnostics(diag_path)
-        entries = state.setdefault("entries", {})
-        if errors:
-            entries[norm_key] = {
-                "tool": tool_name,
-                "timestamp": time.time(),
-                "errors": errors[:5]
-            }
-        else:
-            entries.pop(norm_key, None)
-        save_diagnostics(diag_path, state)
+    if should_spawn_file_worker(active_workers, norm_key):
+        # Claim file lint worker
+        active_workers[norm_key] = True
+        save_debounce_state(debounce_path, debounce_state)
+        # Execute coalesced worker (waits 300ms quiet window then lints once)
+        run_coalesced_file_lint_worker(target_file, project_root, coalesce_window=0.3)
+    else:
+        # A worker is already running for this file; updating file_edits[norm_key] = now
+        # successfully resets its timer window. Exit immediately without spawning extra processes!
+        save_debounce_state(debounce_path, debounce_state)
+        sys.exit(0)
 
 
 if __name__ == "__main__":

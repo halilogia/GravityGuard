@@ -38,7 +38,7 @@ This document outlines the strategic evolution, architectural milestones, and pl
   - Integrated 9Router local AI pipeline with sub-3s model failover.
 - [x] **Live Security Monitor Webview**:
   - Real-time Activity Bar panel streaming audit events from `~/.gemini/logs/srp_guardian_live.json`.
-- [x] **73/73 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`).
+- [x] **80/80 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`).
 
 ---
 
@@ -49,7 +49,7 @@ This document outlines the strategic evolution, architectural milestones, and pl
 
 ---
 
-## ✅ Phase 2.5: Static Validation & Architecture Guidance (v1.2.0)
+## ✅ Phase 2.5: Static Validation & Architecture Guidance (v1.2.0 - FROZEN)
 - [x] **ARCH_FILE_GROWTH Guard (WARN ONLY)**:
   - Detects monolithic file accumulation: (1) Projected LOC >= 1000, (2) Single tool-call addition >= 180 LOC, (3) Creeping growth on 800+ LOC file with >= 80 LOC addition.
   - Zero blocking — prompts AI toward modularity and SRP boundaries.
@@ -57,6 +57,8 @@ This document outlines the strategic evolution, architectural milestones, and pl
   - Preserved the **< 10 ms Fast Guard Invariant**: Pre-tool path strictly runs zero external compilers or linters.
   - **Detached Background Orchestration**: `trigger_background_validation()` launches `async_runner.py` in ~1ms without waiting for completion.
   - **State-Based TS Debounce Worker**: Persistent `.gravityguard/runtime/debounce_state.json` enforces a real 3.0s idle window after edit bursts before running `tsc --noEmit`.
+  - **Per-File TSC Diagnostics**: `parse_tsc_output` maps project compilation errors directly to modified target files (`auth.ts`).
+  - **Per-File Lint Burst Coalescing & State Cleanup**: 300ms quiet window for single-file linters (`ruff`, `eslint`, `godot`) dedupes rapid multi-edit bursts to exactly 1 linter process, automatically purging finished state from `debounce_state.json`.
   - **Diagnostics Bridge**: `.gravityguard/runtime/diagnostics.json` stores linter findings; `STATIC_LINTER_DIAGNOSTIC (WARN)` reads them in sub-millisecond time.
 - [x] **Prompt Enhancer Architectural Guidance Preamble**:
   - System prompt directives favoring cohesive modules over monolithic accumulation.

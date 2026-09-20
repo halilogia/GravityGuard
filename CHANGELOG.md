@@ -26,15 +26,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Per-File TypeScript Diagnostics Integration**:
   - Implemented `parse_tsc_output` in `engine/async_runner.py` parsing raw compiler output (`file(line,col): error TSxxxx: message`) into normalized per-file diagnostic entries.
   - Resolved the critical feedback loop gap: `read_recent_diagnostics(target_file)` now matches TypeScript compiler errors directly against modified target files (e.g. `auth.ts`) instead of dropping them in an unindexed global bucket.
-- **Per-File Lint Burst Coalescing**:
-  - Implemented `file_edits` tracking in `debounce_state.json` to prevent rapid duplicate linter executions when an AI agent modifies the same file multiple times within milliseconds.
-- **Automated Test Suite Expansion (73/73 Passing)**:
-  - Expanded test suite to **73 automated unit tests** (`engine/test_gravity_validator.py`), 73/73 passing.
-  - Added deterministic tests for pure debounce idle decisions (`should_run_after_idle`), duplicate worker spawn protection, and detached subprocess invocation via `unittest.mock`.
+- **Per-File Lint Burst Coalescing & Worker State Cleanup**:
+  - Implemented 300 ms quiet-window coalescing (`run_coalesced_file_lint_worker`, `should_spawn_file_worker`, `should_run_file_lint`) in `engine/async_runner.py`.
+  - Dedupes rapid consecutive edits (bursts) on the same file: exactly 1 worker claims execution, subsequent triggers within the window update the timestamp and immediately exit (zero process accumulation).
+  - Once the 300 ms quiet window elapses with no further edits, linter runs strictly once against the final file state.
+  - Multi-file isolation: edits across different files (e.g. `auth.ts` vs `calc.py`) maintain separate claims and never block or coalesce each other.
+  - State cleanup: `clean_file_state` automatically deletes `active_lint_workers` and `file_edits` records upon completion so `debounce_state.json` remains minimal.
+  - Floating-point epsilon tolerance (`1e-6`) prevents IEEE 754 precision boundary issues.
+- **Automated Test Suite Expansion (80/80 Passing)**:
+  - Expanded test suite to **80 automated unit tests** (`engine/test_gravity_validator.py`), 80/80 passing.
+  - Added 7 pure deterministic decision tests covering initial worker claim, duplicate worker suppression, under-threshold quiet window (<300ms), reached quiet window (300ms), window reset on new burst, state cleanup, and multi-file isolation.
   - Conducted 1,000-iteration statistical latency distribution benchmark:
-    - **Average (Avg):** `0.1135 ms`
-    - **95th Percentile (p95):** `0.1866 ms`
-    - **99th Percentile (p99):** `0.7426 ms`
+    - **Average (Avg):** `0.1143 ms`
+    - **95th Percentile (p95):** `0.2368 ms`
+    - **99th Percentile (p99):** `0.6425 ms`
 
 ---
 
