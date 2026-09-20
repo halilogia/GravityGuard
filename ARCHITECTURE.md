@@ -145,7 +145,8 @@ AI Agent Tool Call Triggered
        ▼
 All Blocking Rules Passed?
    ├── No  ──> Output { decision: "deny", reason: "..." } -> Exit 0
-   └── Yes ──> Output { decision: "allow", warnings: [...] } -> Exit 0
+   └── Yes ──> Output { decision: "allow", reason?: "[RULE_ID] ..." } -> Exit 0
+               (schema: decision | reason | permissionOverrides | overwrite, protojson camelCase)
        │
        ▼
 Tool Execution Completes
@@ -165,7 +166,32 @@ Writes findings to .gravityguard/runtime/diagnostics.json
 Tool burst ends (3s idle) ──> tsc --noEmit across project
 ```
 
-### 3.3. Hidden Background Orchestration & Debounce Worker
+### 3.3. Hook stdout Contract (v1.2.5)
+
+A `PreToolUse` hook response accepts **only** these keys:
+
+| Key | Type | Required |
+|---|---|---|
+| `decision` | string (`allow` / `deny` / `ask` / `force_ask`) | yes |
+| `reason` | string | no |
+| `permissionOverrides` | array of strings | no |
+| `overwrite` | object (shallow top-level merge into tool args) | no |
+
+Payloads are **protojson-encoded**, and protojson **rejects unknown fields**. Emitting
+any other key makes the harness discard the *entire* response, so an intended WARN
+becomes a hard tool failure.
+
+- **v1.2.5 fix**: warnings were previously emitted as a `warnings` / `warning_rule_ids`
+  array. That silently blocked every write tool whenever a warning fired — the safer the
+  guard (WARN rather than DENY), the worse the outcome. Warnings now travel inside
+  `reason` formatted as `[RULE_ID] message`, joined with `" ⚠ "`, so rule IDs stay
+  machine-readable through their prefix.
+- **Regression protection**: `TestHookStdoutContract` asserts the warn path emits no
+  schema-invalid key and still delivers its warning, and `run_validator()` in the test
+  harness gates every response against the allowed key set. A plain `json.loads` accepts
+  any key — which is why the suite stayed green while production writes were blocked.
+
+### 3.4. Hidden Background Orchestration & Debounce Worker
 1. **Fire-and-Forget Trigger (`trigger_background_validation`)**:
    - Executed on `ALLOW` decisions in `engine/gravity-validator.py`.
    - Spawns `async_runner.py` with `CREATE_NO_WINDOW` + `STARTUPINFO(SW_HIDE)` on Windows, or `start_new_session` on POSIX, with all streams sent to `DEVNULL`.

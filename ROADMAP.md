@@ -4,7 +4,7 @@ This document outlines the strategic evolution, architectural milestones, and pl
 
 ---
 
-## Current Status: v1.2.1 (Phase 1, Phase 2 & Phase 2.5 Released)
+## Current Status: v1.2.5 (Phase 1, Phase 2 & Phase 2.5 Released & Frozen)
 
 ### ✅ Phase 1: High-Confidence Integrity & Architecture Guards
 - [x] **Universal Rebranding & Setup**: Standalone repository under `GitHub/Public/GravityGuard` with full TypeScript IDE extension + Python Guard Engine.
@@ -38,7 +38,7 @@ This document outlines the strategic evolution, architectural milestones, and pl
   - Integrated 9Router local AI pipeline with sub-3s model failover.
 - [x] **Live Security Monitor Webview**:
   - Real-time Activity Bar panel streaming audit events from `~/.gemini/logs/srp_guardian_live.json`.
-- [x] **87/87 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`).
+- [x] **89/89 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`).
 
 ---
 
