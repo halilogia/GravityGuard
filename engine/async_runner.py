@@ -143,6 +143,16 @@ def should_spawn_file_worker(active_workers: Dict[str, bool], file_key: str) -> 
     return not active_workers.get(file_key, False)
 
 
+def async_spawning_disabled() -> bool:
+    """True when background process spawning is disabled via environment.
+
+    Tests and CI set GRAVITYGUARD_DISABLE_ASYNC=1 so the suite never launches real
+    background workers. Without it, tests that create real files in temp dirs spawn
+    live async_runner processes which then get orphaned when the temp dir is removed.
+    """
+    return os.environ.get("GRAVITYGUARD_DISABLE_ASYNC", "").strip() == "1"
+
+
 def should_run_file_lint(last_edit_time: float, current_time: float, coalesce_window: float = 0.3) -> bool:
     """Returns True if file edit activity has settled past the coalesce window (300ms)."""
     if last_edit_time <= 0.0:
@@ -429,19 +439,49 @@ def run_coalesced_file_lint_worker(target_file: str, project_root: Path, coalesc
             continue
 
 
-def run_debounce_worker(project_root: Path, idle_threshold: float = 3.0) -> None:
+def run_debounce_worker(project_root: Path, idle_threshold: float = 3.0,
+                        max_lifetime: float = 120.0) -> None:
     """
     Background worker loop that waits for a quiet window (e.g. 3.0s idle)
     before triggering project-wide tsc --noEmit and writing per-file entries.
+
+    Termination guarantees (a worker must never outlive its purpose):
+      1. Quiet window reached     -> run batch tsc once, then exit.
+      2. Project root disappeared -> exit (nothing left to validate).
+      3. Debounce state file gone -> exit (no pending edit to debounce).
+      4. max_lifetime exceeded    -> exit (hard upper bound).
     """
     debounce_path = get_debounce_file_path(project_root)
     diag_path = get_diagnostics_file_path(project_root)
+    started_at = time.time()
 
     while True:
         time.sleep(idle_threshold)
+
+        # Guard: hard upper bound on total worker lifetime.
+        if (time.time() - started_at) > max_lifetime:
+            return
+
+        # Guard: project root disappeared (e.g. temp workspace cleaned up).
+        if not project_root.exists():
+            return
+
+        # Guard: state file removed -> no pending edit to debounce. Without this,
+        # load_debounce_state() yields last_edit_time == 0.0, should_run_after_idle()
+        # stays permanently False, and the loop spins forever while re-creating the
+        # deleted .gravityguard/runtime directory tree on every iteration.
+        if not debounce_path.exists():
+            return
+
         state = load_debounce_state(debounce_path)
         last_edit = state.get("last_edit_time", 0.0)
         now = time.time()
+
+        if last_edit <= 0.0:
+            # No recorded edit activity: nothing to coalesce.
+            state["worker_running"] = False
+            save_debounce_state(debounce_path, state)
+            return
 
         if should_run_after_idle(last_edit, now, idle_threshold):
             # Burst is over! Run batch tsc once
@@ -479,13 +519,14 @@ def run_debounce_worker(project_root: Path, idle_threshold: float = 3.0) -> None
                     entries.pop("[project-tsc]", None)
 
                 save_diagnostics(diag_path, diag)
-            break
-        else:
-            continue
+            return
 
 
 def trigger_debounce_worker_if_needed(project_root: Path) -> None:
     """Spawns the (hidden) debounce worker process if one is not already active."""
+    if async_spawning_disabled():
+        return
+
     debounce_path = get_debounce_file_path(project_root)
     state = load_debounce_state(debounce_path)
     state["last_edit_time"] = time.time()

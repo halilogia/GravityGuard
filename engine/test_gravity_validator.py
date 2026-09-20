@@ -9,6 +9,11 @@ import shutil
 from typing import Tuple
 from unittest.mock import patch, MagicMock
 
+# Hermetic test suite: no test may launch a real background worker process.
+# Set BEFORE importing any module so every spawn path observes it. Tests that
+# specifically assert the spawn contract clear this var locally.
+os.environ["GRAVITYGUARD_DISABLE_ASYNC"] = "1"
+
 VALIDATOR_PATH = os.path.join(os.path.dirname(__file__), "gravity-validator.py")
 
 def run_validator(payload: dict) -> Tuple[dict, float]:
@@ -1490,7 +1495,8 @@ class TestGravityGuardPhase2(unittest.TestCase):
         gv = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(gv)
 
-        with patch("subprocess.Popen") as mock_popen:
+        with patch.dict(os.environ, {"GRAVITYGUARD_DISABLE_ASYNC": "0"}), \
+             patch("subprocess.Popen") as mock_popen:
             mock_popen.return_value = MagicMock()
 
             # Unsupported / empty targets -> early return, no spawn at all
@@ -1501,6 +1507,23 @@ class TestGravityGuardPhase2(unittest.TestCase):
             # Supported extension -> exactly one hidden background spawn
             gv.trigger_background_validation("src/auth.py")
             mock_popen.assert_called_once()
+
+    def test_async_spawning_kill_switch_prevents_all_spawns(self):
+        """Verifies GRAVITYGUARD_DISABLE_ASYNC=1 fully suppresses background spawning."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("gravity_validator", VALIDATOR_PATH)
+        gv = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gv)
+
+        sys.path.insert(0, os.path.dirname(VALIDATOR_PATH))
+        import async_runner
+
+        with patch.dict(os.environ, {"GRAVITYGUARD_DISABLE_ASYNC": "1"}), \
+             patch("subprocess.Popen") as mock_popen:
+            gv.trigger_background_validation("src/auth.py")
+            mock_popen.assert_not_called()
+
+        self.assertTrue(async_runner.async_spawning_disabled())
 
     def test_async_runner_debounce_state_management(self):
         """Verifies async_runner's debounce state load/save and idle detection logic"""
@@ -1664,7 +1687,8 @@ class TestGravityGuardPhase2(unittest.TestCase):
         target = "C:/fake_project/src/auth.ts"
         real_runner_path = os.path.join(os.path.dirname(VALIDATOR_PATH), "async_runner.py")
 
-        with patch("subprocess.Popen") as mock_popen, \
+        with patch.dict(os.environ, {"GRAVITYGUARD_DISABLE_ASYNC": "0"}), \
+             patch("subprocess.Popen") as mock_popen, \
              patch("os.path.exists", side_effect=lambda p: True if "async_runner" in str(p) else os.path.exists.__wrapped__(p) if hasattr(os.path.exists, "__wrapped__") else True):
             mock_proc = MagicMock()
             mock_popen.return_value = mock_proc

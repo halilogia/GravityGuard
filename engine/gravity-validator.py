@@ -682,6 +682,11 @@ def trigger_background_validation(target_file: str) -> None:
     if not target_file:
         return
 
+    # Kill switch: tests/CI disable all background spawning so a suite run can
+    # never launch real workers that then outlive the test process.
+    if os.environ.get("GRAVITYGUARD_DISABLE_ASYNC", "").strip() == "1":
+        return
+
     file_lower = target_file.lower()
     if not file_lower.endswith((".py", ".ts", ".tsx", ".js", ".jsx", ".gd")):
         return
