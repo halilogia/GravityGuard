@@ -741,6 +741,12 @@ def resolve_candidate_test_file(target_file: str, cfg: Optional[dict] = None) ->
         if "testRoots" in te_cfg and isinstance(te_cfg["testRoots"], list):
             test_roots = te_cfg["testRoots"]
 
+    source_roots = ["src", "lib", "app", "core", "agent", "engine"]
+    if cfg and isinstance(cfg, dict):
+        te_cfg = cfg.get("testEvidence", {})
+        if "sourceRoots" in te_cfg and isinstance(te_cfg["sourceRoots"], list):
+            source_roots = [r.lower() for r in te_cfg["sourceRoots"]]
+
     for root_cand in search_dirs:
         for tr in test_roots:
             td = root_cand / tr
@@ -752,7 +758,7 @@ def resolve_candidate_test_file(target_file: str, cfg: Optional[dict] = None) ->
                     try:
                         rel = target_path.relative_to(root_cand)
                         rel_parts = list(rel.parts)
-                        if rel_parts and rel_parts[0].lower() in ["src", "lib", "app", "core", "agent", "engine"]:
+                        if rel_parts and rel_parts[0].lower() in source_roots:
                             rel_parts.pop(0)
                         if rel_parts:
                             rel_parts[-1] = name
@@ -812,44 +818,115 @@ def check_t2_observable_assertion(
     added_lines: List[str],
     added_text: str,
     is_python: bool,
-    is_ts: bool
+    is_ts: bool,
+    projected_content: str = "",
+    added_line_numbers: Optional[Set[int]] = None
 ) -> Tuple[bool, str]:
     """
     T2 — NO_OBSERVABLE_ASSERTION (WARN ONLY).
-    Triggers when a test case (def test_..., it(...), test(...)) is added/modified,
-    but no observable assertion pattern is detected in the added test body.
+    Triggers when an individual test case (def test_..., it(...), test(...)) is added or modified,
+    but no observable assertion pattern is detected in THAT SPECIFIC test case's body.
     Exempts setup/teardown/describe blocks (beforeEach, describe, setUp).
+    Does not allow assertions in another test case to mask an unasserted test case.
     """
     if not added_text.strip():
         return False, ""
 
-    has_test_definition = False
-    test_names = []
+    if not projected_content:
+        projected_content = added_text
+    if added_line_numbers is None:
+        added_line_numbers = set(range(1, added_text.count("\n") + 2))
+
+    unasserted_tests: List[str] = []
 
     if is_python:
-        py_test_defs = re.findall(r"^\s*def\s+(test_[a-zA-Z0-9_]+)\s*\(", added_text, re.MULTILINE)
-        if py_test_defs:
-            has_test_definition = True
-            test_names.extend(py_test_defs)
+        # 1. AST extraction from projected_content
+        ast_worked = False
+        try:
+            tree = ast.parse(projected_content)
+            lines = projected_content.splitlines()
+            funcs = []
+            for node in tree.body:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    funcs.append(node)
+                elif isinstance(node, ast.ClassDef):
+                    for sub in node.body:
+                        if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                            funcs.append(sub)
+
+            for fn in funcs:
+                name = fn.name
+                if not (name.startswith("test_") or name.startswith("test")):
+                    continue
+                if name in ("setUp", "tearDown", "setUpClass", "tearDownClass"):
+                    continue
+                start_line = getattr(fn, "lineno", 1)
+                end_line = getattr(fn, "end_lineno", start_line)
+                fn_lines = set(range(start_line, end_line + 1))
+                if fn_lines & added_line_numbers:
+                    body_slice = lines[start_line - 1 : end_line]
+                    body_text = "\n".join(body_slice)
+                    has_assert = bool(re.search(
+                        r"\b(?:assert\b|self\.assert[A-Za-z0-9_]+|pytest\.raises|pytest\.approx)",
+                        body_text
+                    ))
+                    if not has_assert:
+                        unasserted_tests.append(name)
+            ast_worked = True
+        except Exception:
+            ast_worked = False
+
+        # Fallback to regex on added_text if AST fails
+        if not ast_worked:
+            py_test_defs = re.findall(r"^\s*def\s+(test_[a-zA-Z0-9_]+)\s*\(", added_text, re.MULTILINE)
+            if py_test_defs:
+                has_assert = bool(re.search(
+                    r"\b(?:assert\b|self\.assert[A-Za-z0-9_]+|pytest\.raises|pytest\.approx)",
+                    added_text
+                ))
+                if not has_assert:
+                    unasserted_tests.extend(py_test_defs)
+
     if is_ts or not is_python:
-        ts_test_defs = re.findall(r"\b(?:it|test)\s*\(\s*[\"'\`]([^\"'\`]+)[\"'\`]", added_text)
-        if ts_test_defs:
-            has_test_definition = True
-            test_names.extend(ts_test_defs)
+        # TS/JS test case extraction from projected_content
+        pattern = re.compile(r"^\s*(?:it|test)\s*\(\s*[\"'\`]([^\"'\`]+)[\"'\`]", re.MULTILINE)
+        matches = list(pattern.finditer(projected_content))
+        lines = projected_content.splitlines()
 
-    if not has_test_definition:
-        return False, ""
+        if matches:
+            for idx, match in enumerate(matches):
+                test_name = match.group(1)
+                start_char = match.start()
+                start_line = projected_content[:start_char].count("\n") + 1
 
-    py_assertion = bool(re.search(r"\b(?:assert\b|self\.assert[A-Za-z0-9_]+|pytest\.raises|pytest\.approx)", added_text))
-    ts_assertion = bool(re.search(
-        r"\b(?:expect\s*\(|assert\s*[\(\.]|\.to(?:Be|Equal|StrictEqual|Throw|HaveBeenCalled|Match|Contain|BeTruthy|BeFalsy|BeNull|BeUndefined|BeDefined|BeGreaterThan|BeLessThan|Reject|Resolve)\b|t\.(?:is|true|deepEqual|false)\b|\.should\.[a-zA-Z]+)",
-        added_text
-    ))
+                if idx + 1 < len(matches):
+                    end_char = matches[idx + 1].start()
+                else:
+                    end_char = len(projected_content)
 
-    has_assertion = py_assertion if is_python else (ts_assertion if is_ts else (py_assertion or ts_assertion))
+                test_chunk = projected_content[start_char:end_char]
+                end_line = start_line + test_chunk.count("\n")
+                fn_lines = set(range(start_line, end_line + 1))
 
-    if not has_assertion:
-        sample_tests = ", ".join(f"'{n}'" for n in test_names[:2])
+                if fn_lines & added_line_numbers:
+                    has_assert = bool(re.search(
+                        r"\b(?:expect\s*\(|assert\s*[\(\.]|\.to(?:Be|Equal|StrictEqual|Throw|HaveBeenCalled|Match|Contain|BeTruthy|BeFalsy|BeNull|BeUndefined|BeDefined|BeGreaterThan|BeLessThan|Reject|Resolve)\b|t\.(?:is|true|deepEqual|false)\b|\.should\.[a-zA-Z]+)",
+                        test_chunk
+                    ))
+                    if not has_assert:
+                        unasserted_tests.append(test_name)
+        elif is_ts:
+            ts_test_defs = re.findall(r"\b(?:it|test)\s*\(\s*[\"'\`]([^\"'\`]+)[\"'\`]", added_text)
+            if ts_test_defs:
+                has_assert = bool(re.search(
+                    r"\b(?:expect\s*\(|assert\s*[\(\.]|\.to(?:Be|Equal|StrictEqual|Throw|HaveBeenCalled|Match|Contain|BeTruthy|BeFalsy|BeNull|BeUndefined|BeDefined|BeGreaterThan|BeLessThan|Reject|Resolve)\b|t\.(?:is|true|deepEqual|false)\b|\.should\.[a-zA-Z]+)",
+                    added_text
+                ))
+                if not has_assert:
+                    unasserted_tests.extend(ts_test_defs)
+
+    if unasserted_tests:
+        sample_tests = ", ".join(f"'{n}'" for n in unasserted_tests[:2])
         return True, (
             f"Test Gözlem Uyarısı (T2_NO_OBSERVABLE_ASSERTION): Eklenen/değiştirilen test case "
             f"({sample_tests}) içinde gözlemlenebilir bir assertion (assert, expect, self.assert*, pytest.raises) "
@@ -864,12 +941,16 @@ def check_t3_symbol_to_test_link(
     added_text: str,
     candidate_test_path: Optional[str],
     is_python: bool,
-    is_ts: bool
+    is_ts: bool,
+    projected_content: str = "",
+    added_line_numbers: Optional[Set[int]] = None
 ) -> Tuple[bool, str]:
     """
     T3 — SYMBOL_TO_TEST_LINK (WARN ONLY).
-    Checks whether newly added/modified top-level or exported production symbols
+    Checks whether modified/added top-level functions or classes (including body-only changes)
     are referenced by name in the candidate test file.
+    Only checks function/class symbols (ignores scalar constants).
+    Emits WARN if at least one changed symbol is missing from the test file.
     Does not run if candidate test file does not exist (T1 covers absence).
     """
     if not added_text.strip() or not candidate_test_path:
@@ -878,18 +959,67 @@ def check_t3_symbol_to_test_link(
     if not os.path.isfile(candidate_test_path):
         return False, ""
 
-    extracted_symbols = []
+    if not projected_content:
+        projected_content = added_text
+    if added_line_numbers is None:
+        added_line_numbers = set(range(1, added_text.count("\n") + 2))
+
+    extracted_symbols: List[str] = []
+
     if is_python:
-        funcs = re.findall(r"^def\s+([a-zA-Z0-9_]+)\s*\(", added_text, re.MULTILINE)
-        classes = re.findall(r"^class\s+([a-zA-Z0-9_]+)", added_text, re.MULTILINE)
-        extracted_symbols = [s for s in funcs + classes if not s.startswith("_")]
+        try:
+            tree = ast.parse(projected_content)
+            for node in tree.body:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    name = node.name
+                    if name.startswith("_"):
+                        continue
+                    start_line = getattr(node, "lineno", 1)
+                    end_line = getattr(node, "end_lineno", start_line)
+                    if set(range(start_line, end_line + 1)) & added_line_numbers:
+                        extracted_symbols.append(name)
+        except Exception:
+            funcs = re.findall(r"^def\s+([a-zA-Z0-9_]+)\s*\(", added_text, re.MULTILINE)
+            classes = re.findall(r"^class\s+([a-zA-Z0-9_]+)", added_text, re.MULTILINE)
+            extracted_symbols = [s for s in funcs + classes if not s.startswith("_")]
+
     elif is_ts:
-        exported_funcs = re.findall(r"export\s+(?:async\s+)?function\s+([a-zA-Z0-9_]+)", added_text)
-        exported_consts = re.findall(r"export\s+const\s+([a-zA-Z0-9_]+)\s*=", added_text)
-        exported_classes = re.findall(r"export\s+class\s+([a-zA-Z0-9_]+)", added_text)
-        top_funcs = re.findall(r"^function\s+([a-zA-Z0-9_]+)\s*\(", added_text, re.MULTILINE)
-        top_classes = re.findall(r"^class\s+([a-zA-Z0-9_]+)", added_text, re.MULTILINE)
-        extracted_symbols = [s for s in exported_funcs + exported_consts + exported_classes + top_funcs + top_classes if not s.startswith("_")]
+        func_pattern = re.compile(
+            r"^(?:export\s+(?:default\s+)?)?(?:async\s+)?function\s+([a-zA-Z0-9_]+)",
+            re.MULTILINE
+        )
+        class_pattern = re.compile(
+            r"^(?:export\s+(?:default\s+)?)?class\s+([a-zA-Z0-9_]+)",
+            re.MULTILINE
+        )
+        arrow_pattern = re.compile(
+            r"^(?:export\s+)?const\s+([a-zA-Z0-9_]+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[a-zA-Z0-9_]+)\s*=>",
+            re.MULTILINE
+        )
+        all_defs = []
+        for pat in (func_pattern, class_pattern, arrow_pattern):
+            for m in pat.finditer(projected_content):
+                name = m.group(1)
+                if not name.startswith("_"):
+                    start_char = m.start()
+                    start_line = projected_content[:start_char].count("\n") + 1
+                    all_defs.append((start_line, name))
+
+        all_defs.sort(key=lambda x: x[0])
+        lines = projected_content.splitlines()
+        for idx, (start_line, name) in enumerate(all_defs):
+            if idx + 1 < len(all_defs):
+                end_line = all_defs[idx + 1][0] - 1
+            else:
+                end_line = len(lines)
+            if set(range(start_line, end_line + 1)) & added_line_numbers:
+                extracted_symbols.append(name)
+
+        if not extracted_symbols:
+            exp_funcs = re.findall(r"export\s+(?:async\s+)?function\s+([a-zA-Z0-9_]+)", added_text)
+            exp_arrows = re.findall(r"export\s+const\s+([a-zA-Z0-9_]+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[a-zA-Z0-9_]+)\s*=>", added_text)
+            exp_classes = re.findall(r"export\s+class\s+([a-zA-Z0-9_]+)", added_text)
+            extracted_symbols = [s for s in exp_funcs + exp_arrows + exp_classes if not s.startswith("_")]
 
     if not extracted_symbols:
         return False, ""
@@ -905,7 +1035,7 @@ def check_t3_symbol_to_test_link(
         if not re.search(r"\b" + re.escape(sym) + r"\b", test_content):
             missing_symbols.append(sym)
 
-    if len(missing_symbols) == len(extracted_symbols):
+    if missing_symbols:
         sample = ", ".join(f"'{s}'" for s in missing_symbols[:3])
         return True, (
             f"Sembol-Test İlişki Uyarısı (T3_SYMBOL_TO_TEST_LINK): Değiştirilen üretim sembolü "
@@ -921,6 +1051,8 @@ def evaluate_test_evidence(
     is_test_file: bool,
     added_lines: List[str],
     added_text: str,
+    projected_content: str = "",
+    added_line_numbers: Optional[Set[int]] = None,
     cfg: Optional[dict] = None,
     is_python: bool = True,
     is_ts: bool = False
@@ -936,7 +1068,11 @@ def evaluate_test_evidence(
             return warnings
 
     if is_test_file:
-        t2_warn, t2_msg = check_t2_observable_assertion(added_lines, added_text, is_python, is_ts)
+        t2_warn, t2_msg = check_t2_observable_assertion(
+            added_lines, added_text, is_python, is_ts,
+            projected_content=projected_content,
+            added_line_numbers=added_line_numbers
+        )
         if t2_warn:
             warnings.append(("T2_NO_OBSERVABLE_ASSERTION", t2_msg))
     else:
@@ -945,7 +1081,11 @@ def evaluate_test_evidence(
             warnings.append(("T1_MISSING_RELATED_TEST", t1_msg))
 
         if candidate_path and os.path.isfile(candidate_path):
-            t3_warn, t3_msg = check_t3_symbol_to_test_link(target_file, added_text, candidate_path, is_python, is_ts)
+            t3_warn, t3_msg = check_t3_symbol_to_test_link(
+                target_file, added_text, candidate_path, is_python, is_ts,
+                projected_content=projected_content,
+                added_line_numbers=added_line_numbers
+            )
             if t3_warn:
                 warnings.append(("T3_SYMBOL_TO_TEST_LINK", t3_msg))
 
@@ -1116,6 +1256,8 @@ def validate_gravityguard():
         is_test_file=is_test_file,
         added_lines=added_lines,
         added_text=added_text,
+        projected_content=projected_content,
+        added_line_numbers=added_line_numbers,
         cfg=cfg,
         is_python=is_python,
         is_ts=is_ts

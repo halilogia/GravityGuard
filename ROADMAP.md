@@ -4,13 +4,17 @@ This document outlines the strategic evolution, architectural milestones, and pl
 
 ---
 
-## Current Status: v1.0.0 (Phase 1 — High-Confidence Guards Released)
+## Current Status: v1.1.0 (Phase 1 & Phase 2.1 Released)
 
 ### ✅ Phase 1: High-Confidence Integrity & Architecture Guards
 - [x] **Universal Rebranding & Setup**: Standalone repository under `GitHub/Public/GravityGuard` with full TypeScript IDE extension + Python Guard Engine.
+- [x] **G0 — Secret Leak Guard (BLOCK / WARN)**:
+  - High-confidence credential airbag blocking OpenAI, Anthropic/Claude, Google/Gemini, Slack, GitHub tokens, and private keys in diffs.
+  - Audit warnings for raw connection URIs and bearer tokens.
+  - Strict evidence masking (`sk-ant-****...****890`) preventing secondary leaks in logs or stdout.
 - [x] **G1 — Silent Exception Guard (BLOCK)**:
   - Detects newly added empty exception handlers (`except: pass`, `except: ...`, `catch {}`).
-  - Strict diff-based evaluation (existing unchanged handlers are preserved without false alarms).
+  - Strict diff-based evaluation via `difflib.SequenceMatcher` (existing unchanged handlers are preserved without false alarms).
   - Permits recovery fallbacks (`return None`, `return []`).
 - [x] **G2 — Test Integrity Guard (BLOCK / WARN)**:
   - Blocks newly added test disabling tricks (`.skip()`, `xit()`, `xdescribe()`, `@pytest.mark.skip`, `@unittest.skip`).
@@ -23,6 +27,8 @@ This document outlines the strategic evolution, architectural milestones, and pl
   - Emits warning audit logs without blocking legitimate workarounds.
 - [x] **G4 — Import Matrix Guard (BLOCK)**:
   - User-configurable layer boundaries via `.gravityguard.json` (e.g. `ui` forbidden from importing `network` or `database`).
+  - Supports Python relative imports (`from .network import ...`) and TypeScript side-effects (`import './network'`).
+  - Exact path-segment matching prevents false substring collisions.
   - Blocks illegal cross-layer imports deterministically in < 2ms.
 - [x] **OE_SPIKE — Over-Engineering Heuristic (WARN ONLY)**:
   - Passive warning when small production changes (<50 LOC) introduce a disproportionate abstraction spike (2+ new classes/interfaces).
@@ -32,18 +38,19 @@ This document outlines the strategic evolution, architectural milestones, and pl
   - Integrated 9Router local AI pipeline with sub-3s model failover.
 - [x] **Live Security Monitor Webview**:
   - Real-time Activity Bar panel streaming audit events from `~/.gemini/logs/srp_guardian_live.json`.
-- [x] **52/52 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`).
+- [x] **59/59 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`).
 
 ---
 
 ## Phase 2: v1.1.0 — Test Evidence & Intent-Aware Enhancer
 
-*Status: 2.1 Released | 2.2 Target: Q4 2026*
+*Status: 2.1 Released ✅ | 2.2 Target: Q4 2026*
 
-### 2.1. Test Evidence Analyzer (T1, T2, T3) — Released ✅
-- [x] **T1 — Missing Related Test (WARN)**: Verifies that production code changes have an associated candidate test file on disk and active session touch footprint. Respects exemption allowlist (`types`, `constants`, `index`, `*.d.ts`, `migrations`, `config`, `schemas`).
-- [x] **T2 — Observable Assertion Verification (WARN)**: Lightweight verification that newly added/modified test cases (`def test_...`, `it(...)`, `test(...)`) contain observable assertions (`assert`, `self.assert*`, `pytest.raises`, `expect()`, `.toBe()`, `.toEqual()`, `.toThrow()`). Protects fixture/beforeEach/describe setups from false alarms.
-- [x] **T3 — Symbol-to-Test Link (WARN)**: Verifies that newly added/modified top-level or exported production symbols (functions, classes) are referenced by name in the candidate test file. Never double-warns if test file is absent (T1 precedence). Zero blocking.
+### 2.1. Test Evidence Analyzer (T1, T2, T3) — Released & Hardened ✅
+- [x] **T1 — Missing Related Test (WARN)**: Verifies that production code changes have an associated candidate test file on disk and recent modification window (`sessionWindowSeconds`, default 300s). Dynamically honors `sourceRoots` and `testRoots` from `.gravityguard.json`. Respects exemption allowlist (`types`, `constants`, `index`, `*.d.ts`, `migrations`, `config`, `schemas`).
+- [x] **T2 — Observable Assertion Verification (WARN)**: Case-level verification using AST/line-span tracking that modified/added test cases contain observable assertions (`assert`, `self.assert*`, `pytest.raises`, `expect()`, `.toBe()`, `.toEqual()`, `.toThrow()`). Catches body-only modifications without declarations, prevents assertion masking across multiple tests, and protects fixture/beforeEach/describe setups from false alarms.
+- [x] **T3 — Symbol-to-Test Link (WARN)**: Body-aware line-span verification that newly added or modified top-level functions, classes, and exported arrow functions are referenced by name in the candidate test file. Ignores scalar constants (`export const MAX = 3`). Emits grouped warning if any changed symbol is absent. Zero blocking.
+
 
 ### 2.2. Intent-Aware Prompt Enhancer
 - [ ] Automated query classification:

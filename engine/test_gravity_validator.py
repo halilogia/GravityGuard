@@ -1054,7 +1054,227 @@ class TestGravityGuardPhase2(unittest.TestCase):
         print(f"\n[BENCHMARK - PHASE 2 EVALUATOR] Average in-memory logic execution: {avg_ms:.3f} ms")
         self.assertLess(avg_ms, 5.0, "Phase 2 in-memory evaluator must execute in < 5ms")
 
+    # --- PHASE 2 HARDENING TESTS (Edge-cases & Body Modifications) ---
+
+    def test_t2_warn_when_existing_python_test_body_modified_without_assertion(self):
+        """When an existing test's body is modified to remove assertions, T2 must WARN"""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            test_file = os.path.join(temp_dir, "test_auth.py")
+            with open(test_file, "w", encoding="utf-8") as f:
+                f.write("def test_login():\n    assert login() is True\n")
+
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": test_file,
+                        "TargetContent": "    assert login() is True",
+                        "ReplacementContent": "    print(login())"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "allow")
+            self.assertIn("T2_NO_OBSERVABLE_ASSERTION", res.get("warning_rule_ids", []))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_t2_warn_when_one_test_has_assertion_and_one_lacks_it(self):
+        """When a change introduces 2 tests, one asserted and one unasserted, T2 must WARN"""
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/tests/multi.test.ts",
+                    "TargetContent": "// placeholder",
+                    "ReplacementContent": "it('asserted test', () => {\n  expect(foo()).toBe(true);\n});\n\nit('unasserted test', () => {\n  doSomething();\n});"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+        self.assertIn("T2_NO_OBSERVABLE_ASSERTION", res.get("warning_rule_ids", []))
+
+    def test_t3_catch_body_only_python_modification(self):
+        """When only a function body is modified, T3 must still resolve the parent symbol via AST"""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            src_dir = os.path.join(temp_dir, "src")
+            tests_dir = os.path.join(temp_dir, "tests")
+            os.makedirs(src_dir, exist_ok=True)
+            os.makedirs(tests_dir, exist_ok=True)
+
+            prod_file = os.path.join(src_dir, "calc.py")
+            test_file = os.path.join(tests_dir, "test_calc.py")
+
+            with open(prod_file, "w", encoding="utf-8") as f:
+                f.write("def calculate(x):\n    return x + 1\n")
+            # Candidate test file does NOT mention 'calculate'
+            with open(test_file, "w", encoding="utf-8") as f:
+                f.write("def test_dummy():\n    assert True\n")
+
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": prod_file,
+                        "TargetContent": "    return x + 1",
+                        "ReplacementContent": "    validate(x)\n    return x + 1"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "allow")
+            self.assertIn("T3_SYMBOL_TO_TEST_LINK", res.get("warning_rule_ids", []))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_t3_warn_when_one_of_two_symbols_missing_in_test(self):
+        """When 2 symbols are changed and 1 is missing from test, T3 must WARN (not stay silent)"""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            src_dir = os.path.join(temp_dir, "src")
+            tests_dir = os.path.join(temp_dir, "tests")
+            os.makedirs(src_dir, exist_ok=True)
+            os.makedirs(tests_dir, exist_ok=True)
+
+            prod_file = os.path.join(src_dir, "service.py")
+            test_file = os.path.join(tests_dir, "test_service.py")
+
+            with open(prod_file, "w", encoding="utf-8") as f:
+                f.write("def old(): pass\n")
+            # Only 'foo' is in the test file, 'bar' is absent
+            with open(test_file, "w", encoding="utf-8") as f:
+                f.write("def test_service():\n    assert foo() == 1\n")
+
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": prod_file,
+                        "TargetContent": "def old(): pass",
+                        "ReplacementContent": "def foo():\n    return 1\n\ndef bar():\n    return 2\n"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "allow")
+            self.assertIn("T3_SYMBOL_TO_TEST_LINK", res.get("warning_rule_ids", []))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_t3_ignore_exported_scalar_constant(self):
+        """Exported scalar constant (e.g. export const MAX = 3) must NOT be treated as a T3 function symbol"""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            src_dir = os.path.join(temp_dir, "src")
+            tests_dir = os.path.join(temp_dir, "tests")
+            os.makedirs(src_dir, exist_ok=True)
+            os.makedirs(tests_dir, exist_ok=True)
+
+            prod_file = os.path.join(src_dir, "constants.ts")
+            test_file = os.path.join(tests_dir, "constants.test.ts")
+
+            with open(prod_file, "w", encoding="utf-8") as f:
+                f.write("// constants\n")
+            with open(test_file, "w", encoding="utf-8") as f:
+                f.write("it('works', () => { expect(1).toBe(1); });\n")
+
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": prod_file,
+                        "TargetContent": "// constants",
+                        "ReplacementContent": "export const MAX_RETRIES = 3;\nexport const DEFAULT_TIMEOUT = 5000;"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "allow")
+            self.assertNotIn("T3_SYMBOL_TO_TEST_LINK", res.get("warning_rule_ids", []))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_t3_catch_exported_arrow_function(self):
+        """Exported arrow function (e.g. export const handle = () => {}) must be caught by T3"""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            src_dir = os.path.join(temp_dir, "src")
+            tests_dir = os.path.join(temp_dir, "tests")
+            os.makedirs(src_dir, exist_ok=True)
+            os.makedirs(tests_dir, exist_ok=True)
+
+            prod_file = os.path.join(src_dir, "handler.ts")
+            test_file = os.path.join(tests_dir, "handler.test.ts")
+
+            with open(prod_file, "w", encoding="utf-8") as f:
+                f.write("// handler\n")
+            # Candidate test does NOT mention 'handleUserEvent'
+            with open(test_file, "w", encoding="utf-8") as f:
+                f.write("it('dummy', () => { expect(true).toBe(true); });\n")
+
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": prod_file,
+                        "TargetContent": "// handler",
+                        "ReplacementContent": "export const handleUserEvent = (event: any) => {\n  return event.type;\n};"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "allow")
+            self.assertIn("T3_SYMBOL_TO_TEST_LINK", res.get("warning_rule_ids", []))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_t1_source_roots_config_respected(self):
+        """Configured sourceRoots (e.g. ['core_logic']) must be used to resolve candidate test"""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            cfg_path = os.path.join(temp_dir, ".gravityguard.json")
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "testEvidence": {
+                        "sourceRoots": ["core_logic"],
+                        "testRoots": ["tests"]
+                    }
+                }, f)
+
+            core_dir = os.path.join(temp_dir, "core_logic")
+            tests_dir = os.path.join(temp_dir, "tests")
+            os.makedirs(core_dir, exist_ok=True)
+            os.makedirs(tests_dir, exist_ok=True)
+
+            prod_file = os.path.join(core_dir, "engine.py")
+            test_file = os.path.join(tests_dir, "test_engine.py")
+
+            with open(prod_file, "w", encoding="utf-8") as f:
+                f.write("def run(): pass\n")
+            with open(test_file, "w", encoding="utf-8") as f:
+                f.write("def test_engine(): assert True\n")
+
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": prod_file,
+                        "TargetContent": "def run(): pass",
+                        "ReplacementContent": "def run():\n    return 42\n"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "allow")
+            self.assertNotIn("T1_MISSING_RELATED_TEST", res.get("warning_rule_ids", []))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

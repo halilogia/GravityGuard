@@ -20,13 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **G4 — Import Matrix Boundary Hardening**:
   - Added support for Python relative imports (`from .network import ...`) and TypeScript side-effects (`import './network'`).
   - Added strict path-segment matching preventing substring collisions (e.g. `networking` vs `network`).
-- **Phase 2 — Test Evidence Analyzer (T1, T2, T3)**:
-  - `T1_MISSING_RELATED_TEST (WARN)`: Warns when production code changes without a candidate test file on disk or when candidate test was untouched during the active session. Exemption allowlist for `types`, `constants`, `migrations`, `*.d.ts`.
-  - `T2_NO_OBSERVABLE_ASSERTION (WARN)`: Verifies newly added test cases contain observable assertions (`assert`, `self.assert*`, `pytest.raises`, `expect()`, `.toBe()`, `.toEqual()`).
-  - `T3_SYMBOL_TO_TEST_LINK (WARN)`: Verifies that newly added top-level/exported functions or classes appear by name in the candidate test file.
+- **Phase 2 — Test Evidence Analyzer (T1, T2, T3) Hardening**:
+  - `T1_MISSING_RELATED_TEST (WARN)`: Candidate test resolution honoring `sourceRoots` and `testRoots` from `.gravityguard.json` with recent modification window tracking (`sessionWindowSeconds`). Exemption allowlist for `types`, `constants`, `migrations`, `*.d.ts`.
+  - `T2_NO_OBSERVABLE_ASSERTION (WARN)`: Case-level AST and line-span tracking ensuring every modified/added test case individually contains observable assertions (`assert`, `self.assert*`, `pytest.raises`, `expect()`, `.toBe()`, `.toEqual()`). Prevents assertions in adjacent tests from masking unasserted stubs.
+  - `T3_SYMBOL_TO_TEST_LINK (WARN)`: Body-aware line-span verification resolving parent functions/classes even when declarations are unchanged. Ignores scalar constants while tracking exported arrow functions. Emits grouped warning if any changed symbol is absent.
 - **Automated Test Suite Expansion**:
-  - Expanded test suite from 13 to **52 automated unit tests** (`engine/test_gravity_validator.py`).
-  - Measured core evaluator in-memory execution latency at `~0.031 ms` and Phase 2 evaluator at `~0.007 ms`.
+  - Expanded test suite from 13 to **59 automated unit tests** (`engine/test_gravity_validator.py`).
+  - Measured core evaluator in-memory execution latency at `~0.032 ms` and Phase 2 evaluator at `~0.015 ms`.
 
 ---
 
