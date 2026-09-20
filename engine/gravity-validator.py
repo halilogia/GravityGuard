@@ -1505,8 +1505,17 @@ def validate_gravityguard():
     log_event(tool_name, "APPROVED", target_file, f"All Guards Passed ({elapsed_ms:.1f}ms)", rule_id="PASS")
     res_payload = {"decision": "allow"}
     if all_warnings:
-        res_payload["warnings"] = [w[1] for w in all_warnings]
-        res_payload["warning_rule_ids"] = [w[0] for w in all_warnings]
+        # NOTE: the hook schema (hooks.md -> PreToolUse Output) allows ONLY
+        # `decision`, `reason`, `permissionOverrides` and `overwrite`. Payloads are
+        # protojson-encoded, and protojson REJECTS unknown fields — emitting
+        # `warnings` / `warning_rule_ids` made the harness throw away the whole
+        # response (`proto: unknown field "warnings"`), which turned a WARN into a
+        # hard tool failure and blocked the write. Warnings therefore travel inside
+        # `reason`, the only schema-valid field surfaced to the user/agent, with a
+        # `[RULE_ID]` prefix so they remain machine-readable.
+        res_payload["reason"] = " ⚠ ".join(
+            f"[{rule_id}] {msg}" for rule_id, msg in all_warnings
+        )
     print(json.dumps(res_payload))
     trigger_background_validation(target_file)
     sys.exit(0)

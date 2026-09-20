@@ -2,7 +2,7 @@
   "name": "gravityguard",
   "displayName": "GravityGuard — Architecture Airbag & Gatekeeper for AI Agents",
   "description": "Deterministic architectural gatekeeper, test sufficiency analyzer, and prompt engineering copilot for Antigravity IDE & AI Coding Agents.",
-  "version": "1.2.3",
+  "version": "1.2.5",
   "publisher": "halilemre",
   "license": "GPL-3.0",
   "engines": {

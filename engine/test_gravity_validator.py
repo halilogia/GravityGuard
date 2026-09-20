@@ -28,6 +28,20 @@ atexit.register(shutil.rmtree, _AUDIT_LOG_DIR, ignore_errors=True)
 
 VALIDATOR_PATH = os.path.join(os.path.dirname(__file__), "gravity-validator.py")
 
+# The REAL harness decodes hook stdout with protojson and REJECTS unknown fields.
+# `json.loads` below accepts anything, which is exactly why the suite stayed green
+# (87/87) while the live guard was blocked in production: the stdout contract was
+# never validated. Only these keys are legal for a PreToolUse response.
+# Source: antigravity-ide/builtin/skills/agy-customizations/docs/hooks.md (PreToolUse Output).
+SCHEMA_ALLOWED_KEYS = {"decision", "reason", "permissionOverrides", "overwrite"}
+
+
+def _warnings_from(res: dict) -> str:
+    """Warnings are delivered through `reason` (the only schema-valid, agent-visible
+    field). This helper keeps call sites readable."""
+    return res.get("reason", "") or ""
+
+
 def run_validator(payload: dict) -> Tuple[dict, float]:
     start = time.perf_counter()
     proc = subprocess.Popen(
@@ -43,6 +57,14 @@ def run_validator(payload: dict) -> Tuple[dict, float]:
         res = json.loads(stdout.strip())
     except Exception as e:
         res = {"error": str(e), "stdout": stdout, "stderr": stderr}
+    # Gate on the protocol contract: a payload the harness cannot decode must fail
+    # loudly here instead of silently blocking every write tool at runtime.
+    if "error" not in res:
+        assert set(res.keys()) <= SCHEMA_ALLOWED_KEYS, (
+            f"Hook stdout violates the PreToolUse schema. Illegal key(s): "
+            f"{set(res.keys()) - SCHEMA_ALLOWED_KEYS}. protojson rejects the WHOLE "
+            f"response on an unknown field, so this blocks the tool call. Got: {res}"
+        )
     return res, elapsed_ms
 
 class TestGravityGuardPhase1(unittest.TestCase):
@@ -767,7 +789,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
         }
         res, _ = run_validator(payload)
         self.assertEqual(res.get("decision"), "allow")
-        rule_ids = res.get("warning_rule_ids", [])
+        rule_ids = _warnings_from(res)
         self.assertNotIn("T1_MISSING_RELATED_TEST", rule_ids)
 
     def test_t1_exempt_declarations_and_migrations(self):
@@ -784,7 +806,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
         }
         res, _ = run_validator(payload)
         self.assertEqual(res.get("decision"), "allow")
-        rule_ids = res.get("warning_rule_ids", [])
+        rule_ids = _warnings_from(res)
         self.assertNotIn("T1_MISSING_RELATED_TEST", rule_ids)
 
     def test_t1_warn_when_candidate_test_absent(self):
@@ -801,7 +823,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
         }
         res, _ = run_validator(payload)
         self.assertEqual(res.get("decision"), "allow", "T1 must never block production changes")
-        rule_ids = res.get("warning_rule_ids", [])
+        rule_ids = _warnings_from(res)
         self.assertIn("T1_MISSING_RELATED_TEST", rule_ids)
 
     def test_t1_allow_when_candidate_test_recently_touched(self):
@@ -833,7 +855,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             }
             res, _ = run_validator(payload)
             self.assertEqual(res.get("decision"), "allow")
-            rule_ids = res.get("warning_rule_ids", [])
+            rule_ids = _warnings_from(res)
             self.assertNotIn("T1_MISSING_RELATED_TEST", rule_ids)
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -870,7 +892,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             }
             res, _ = run_validator(payload)
             self.assertEqual(res.get("decision"), "allow")
-            rule_ids = res.get("warning_rule_ids", [])
+            rule_ids = _warnings_from(res)
             self.assertIn("T1_MISSING_RELATED_TEST", rule_ids)
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -891,7 +913,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
         }
         res, _ = run_validator(payload)
         self.assertEqual(res.get("decision"), "allow")
-        rule_ids = res.get("warning_rule_ids", [])
+        rule_ids = _warnings_from(res)
         self.assertIn("T2_NO_OBSERVABLE_ASSERTION", rule_ids)
 
     def test_t2_allow_python_test_with_assert(self):
@@ -908,7 +930,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
         }
         res, _ = run_validator(payload)
         self.assertEqual(res.get("decision"), "allow")
-        rule_ids = res.get("warning_rule_ids", [])
+        rule_ids = _warnings_from(res)
         self.assertNotIn("T2_NO_OBSERVABLE_ASSERTION", rule_ids)
 
     def test_t2_allow_python_test_with_pytest_raises(self):
@@ -925,7 +947,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
         }
         res, _ = run_validator(payload)
         self.assertEqual(res.get("decision"), "allow")
-        rule_ids = res.get("warning_rule_ids", [])
+        rule_ids = _warnings_from(res)
         self.assertNotIn("T2_NO_OBSERVABLE_ASSERTION", rule_ids)
 
     def test_t2_warn_empty_ts_test_no_assertion(self):
@@ -942,7 +964,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
         }
         res, _ = run_validator(payload)
         self.assertEqual(res.get("decision"), "allow")
-        rule_ids = res.get("warning_rule_ids", [])
+        rule_ids = _warnings_from(res)
         self.assertIn("T2_NO_OBSERVABLE_ASSERTION", rule_ids)
 
     def test_t2_allow_ts_test_with_expect(self):
@@ -959,7 +981,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
         }
         res, _ = run_validator(payload)
         self.assertEqual(res.get("decision"), "allow")
-        rule_ids = res.get("warning_rule_ids", [])
+        rule_ids = _warnings_from(res)
         self.assertNotIn("T2_NO_OBSERVABLE_ASSERTION", rule_ids)
 
     def test_t2_ignore_describe_and_before_each(self):
@@ -976,7 +998,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
         }
         res, _ = run_validator(payload)
         self.assertEqual(res.get("decision"), "allow")
-        rule_ids = res.get("warning_rule_ids", [])
+        rule_ids = _warnings_from(res)
         self.assertNotIn("T2_NO_OBSERVABLE_ASSERTION", rule_ids)
 
     # --- T3: SYMBOL_TO_TEST_LINK ---
@@ -1010,7 +1032,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             }
             res, _ = run_validator(payload)
             self.assertEqual(res.get("decision"), "allow")
-            rule_ids = res.get("warning_rule_ids", [])
+            rule_ids = _warnings_from(res)
             self.assertNotIn("T3_SYMBOL_TO_TEST_LINK", rule_ids)
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -1044,7 +1066,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             }
             res, _ = run_validator(payload)
             self.assertEqual(res.get("decision"), "allow")
-            rule_ids = res.get("warning_rule_ids", [])
+            rule_ids = _warnings_from(res)
             self.assertIn("T3_SYMBOL_TO_TEST_LINK", rule_ids)
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -1107,7 +1129,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             }
             res, _ = run_validator(payload)
             self.assertEqual(res.get("decision"), "allow")
-            self.assertIn("T2_NO_OBSERVABLE_ASSERTION", res.get("warning_rule_ids", []))
+            self.assertIn("T2_NO_OBSERVABLE_ASSERTION", _warnings_from(res))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -1125,7 +1147,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
         }
         res, _ = run_validator(payload)
         self.assertEqual(res.get("decision"), "allow")
-        self.assertIn("T2_NO_OBSERVABLE_ASSERTION", res.get("warning_rule_ids", []))
+        self.assertIn("T2_NO_OBSERVABLE_ASSERTION", _warnings_from(res))
 
     def test_t3_catch_body_only_python_modification(self):
         """When only a function body is modified, T3 must still resolve the parent symbol via AST"""
@@ -1157,7 +1179,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             }
             res, _ = run_validator(payload)
             self.assertEqual(res.get("decision"), "allow")
-            self.assertIn("T3_SYMBOL_TO_TEST_LINK", res.get("warning_rule_ids", []))
+            self.assertIn("T3_SYMBOL_TO_TEST_LINK", _warnings_from(res))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -1191,7 +1213,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             }
             res, _ = run_validator(payload)
             self.assertEqual(res.get("decision"), "allow")
-            self.assertIn("T3_SYMBOL_TO_TEST_LINK", res.get("warning_rule_ids", []))
+            self.assertIn("T3_SYMBOL_TO_TEST_LINK", _warnings_from(res))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -1224,7 +1246,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             }
             res, _ = run_validator(payload)
             self.assertEqual(res.get("decision"), "allow")
-            self.assertNotIn("T3_SYMBOL_TO_TEST_LINK", res.get("warning_rule_ids", []))
+            self.assertNotIn("T3_SYMBOL_TO_TEST_LINK", _warnings_from(res))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -1258,7 +1280,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             }
             res, _ = run_validator(payload)
             self.assertEqual(res.get("decision"), "allow")
-            self.assertIn("T3_SYMBOL_TO_TEST_LINK", res.get("warning_rule_ids", []))
+            self.assertIn("T3_SYMBOL_TO_TEST_LINK", _warnings_from(res))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -1300,7 +1322,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             }
             res, _ = run_validator(payload)
             self.assertEqual(res.get("decision"), "allow")
-            self.assertNotIn("T1_MISSING_RELATED_TEST", res.get("warning_rule_ids", []))
+            self.assertNotIn("T1_MISSING_RELATED_TEST", _warnings_from(res))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -1332,7 +1354,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             }
             res, _ = run_validator(payload)
             self.assertEqual(res.get("decision"), "allow", "ARCH_FILE_GROWTH must never block")
-            rule_ids = res.get("warning_rule_ids", [])
+            rule_ids = _warnings_from(res)
             self.assertIn("ARCH_FILE_GROWTH", rule_ids)
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -1351,7 +1373,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
         }
         res, _ = run_validator(payload)
         self.assertEqual(res.get("decision"), "allow")
-        self.assertIn("ARCH_FILE_GROWTH", res.get("warning_rule_ids", []))
+        self.assertIn("ARCH_FILE_GROWTH", _warnings_from(res))
 
     def test_arch_file_growth_creeping_growth_800_plus_80_triggers_warn(self):
         """When an 800+ LOC file receives 80+ lines, ARCH_FILE_GROWTH warns"""
@@ -1377,7 +1399,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             }
             res, _ = run_validator(payload)
             self.assertEqual(res.get("decision"), "allow")
-            self.assertIn("ARCH_FILE_GROWTH", res.get("warning_rule_ids", []))
+            self.assertIn("ARCH_FILE_GROWTH", _warnings_from(res))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -1395,7 +1417,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
         }
         res, _ = run_validator(payload)
         self.assertEqual(res.get("decision"), "allow")
-        rule_ids = res.get("warning_rule_ids", [])
+        rule_ids = _warnings_from(res)
         self.assertNotIn("ARCH_FILE_GROWTH", rule_ids)
 
     def test_arch_file_growth_normal_small_edit_no_warning(self):
@@ -1411,7 +1433,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
         }
         res, _ = run_validator(payload)
         self.assertEqual(res.get("decision"), "allow")
-        rule_ids = res.get("warning_rule_ids", [])
+        rule_ids = _warnings_from(res)
         self.assertNotIn("ARCH_FILE_GROWTH", rule_ids)
 
     def test_static_linter_diagnostics_fresh_read(self):
@@ -1455,10 +1477,11 @@ class TestGravityGuardPhase2(unittest.TestCase):
             }
             res, _ = run_validator(payload)
             self.assertEqual(res.get("decision"), "allow")
-            rule_ids = res.get("warning_rule_ids", [])
+            rule_ids = _warnings_from(res)
             self.assertIn("STATIC_LINTER_DIAGNOSTIC", rule_ids)
-            warnings = res.get("warnings", [])
-            self.assertTrue(any("ruff" in w and "F841" in w for w in warnings))
+            warnings = _warnings_from(res)
+            self.assertIn("ruff", warnings)
+            self.assertIn("F841", warnings)
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -1503,7 +1526,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             }
             res, _ = run_validator(payload)
             self.assertEqual(res.get("decision"), "allow")
-            rule_ids = res.get("warning_rule_ids", [])
+            rule_ids = _warnings_from(res)
             self.assertNotIn("STATIC_LINTER_DIAGNOSTIC", rule_ids)
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -2135,6 +2158,59 @@ class TestGravityGuardPhase2(unittest.TestCase):
                              "absent state file must not be re-created on expiry")
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+class TestHookStdoutContract(unittest.TestCase):
+    """
+    Regression guard for the production incident where a WARN turned into a HARD
+    tool failure: the hook emitted `warnings` / `warning_rule_ids`, the harness
+    decoded stdout with protojson, rejected the unknown field and discarded the
+    ENTIRE response — so every write tool call was blocked.
+
+    Invariant: stdout keys must stay within SCHEMA_ALLOWED_KEYS, and warnings must
+    still reach the user/agent through `reason`.
+    """
+
+    def test_warn_path_emits_only_schema_keys_and_delivers_warning(self):
+        """A warning-producing call must stay schema-valid AND still surface the warning."""
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/src/service.py",
+                    "TargetContent": "result = do_task()",
+                    "ReplacementContent": (
+                        "import os  # noqa\n"
+                        "result = do_task()\n"
+                    )
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+
+        self.assertEqual(res.get("decision"), "allow",
+                         "WARN-only guards must never block a write")
+        # (1) No schema-invalid field may appear, or protojson kills the response.
+        self.assertNotIn("warnings", res)
+        self.assertNotIn("warning_rule_ids", res)
+        # (2) The warning must still be delivered — schema-valid, agent-visible.
+        self.assertIn("G3_COMPILER_BYPASS", _warnings_from(res))
+
+    def test_clean_edit_emits_minimal_schema_valid_response(self):
+        """A warning-free edit must emit a bare, schema-valid allow."""
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "C:/fake_project/src/math_utils.py",
+                    "TargetContent": "def add(a, b):\n    return a + b\n",
+                    "ReplacementContent": "def add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+        self.assertLessEqual(set(res.keys()), SCHEMA_ALLOWED_KEYS)
 
 
 if __name__ == "__main__":

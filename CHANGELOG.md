@@ -5,6 +5,30 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.5] - 2026-09-20
+
+### Fixed
+- **Hook Stdout Violated the PreToolUse Schema — Silently Blocked Every File Write**:
+  - On the WARN path the validator printed `{"decision": "allow", "warnings": [...], "warning_rule_ids": [...]}`.
+  - The Antigravity hook contract permits only `decision`, `reason`, `permissionOverrides` and `overwrite`; payloads are protojson-encoded and protojson **rejects unknown fields**.
+  - The harness therefore discarded the **entire** response (`proto: unknown field "warnings"`). An intended, non-blocking warning became a hard tool failure, so `write_to_file` / `replace_file_content` / `multi_replace_file_content` were blocked outright instead of merely annotated. The failure mode was inverted: the *safer* the guard (WARN, not DENY), the more damaging the outcome.
+  - Warnings are now folded into `reason` — the only schema-valid field surfaced to the user/agent — formatted as `[RULE_ID] message` and joined with `" ⚠ "`, so rule IDs stay machine-readable via the prefix.
+  - Confirmed occurrence: `antigravity/brain/2e98ccd8-...` (Antigravity 2.0), 10 matches of `failed to unmarshal result from hook`. In that session the agent could not use the file-writing tools at all and fell back to PowerShell.
+  - Scope note: the same hook code is shared, so the IDE/CLI were equally exposed. A genuine occurrence in the IDE logs was **not** found (the IDE hits were a different, unrelated payload); this fix is preventive there, not a confirmed reproduction.
+
+### Added
+- **Stdout contract regression tests** (`TestHookStdoutContract`): the warn path must emit no schema-invalid key, must still deliver its warning through `reason`, and a clean edit must emit a minimal allow.
+- **Schema gate in the test harness**: `run_validator()` now asserts `set(res.keys()) <= {decision, reason, permissionOverrides, overwrite}`. The previous harness used plain `json.loads`, which accepts any key — which is precisely why the suite stayed green while the live guard was blocked. A protocol-level bug was invisible to a protocol-blind test.
+
+### Changed
+- Warning assertions migrated from `res.get("warning_rule_ids", [])` to `_warnings_from(res)` (reads `reason`); substring semantics preserved.
+- Test Count: 89/89 passing (was 87/87).
+
+### Notes
+- No governance guard was altered: no block/warn threshold, no TSC debounce, no hidden-console spawn contract. The `deny` paths already emitted only `decision` + `reason` and were correct.
+- Whether `allow` + `reason` is *rendered* to the agent is documented as "shown to the user/agent" but was not empirically verified. The field is schema-valid either way, warnings remain in the audit log, and the previous behaviour is strictly worse regardless of the answer.
+- `package.json` had drifted to `1.2.3` while `1.2.4` was already released; corrected to `1.2.5`.
+
 ## [1.2.4] - 2026-09-20
 
 ### Fixed
