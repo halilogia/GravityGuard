@@ -14,7 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Routed **all** Tier 2/3 linter invocations through one `run_hidden()` policy in `engine/async_runner.py`; previously `subprocess.run` was called with no window-suppression flags anywhere.
   - Applied the same hidden-spawn policy to the debounce worker in both `engine/gravity-validator.py` and `engine/async_runner.py`.
 - **Orphaned Process Accumulation**: a timed-out linter previously left `cmd.exe`/`node.exe` grandchildren running (the direct child was killed but not its tree). Added `_kill_process_tree()` using `taskkill /F /T` on Windows.
-- **Test Count**: 82/82 passing (was reported as 81/81). Added a regression test (`test_no_visible_console_for_any_spawned_process`) that asserts `CREATE_NO_WINDOW` + `SW_HIDE` and statically rejects any reintroduction of `DETACHED_PROCESS`.
+- **Runaway Debounce Worker (Infinite Loop)**:
+  - `run_debounce_worker()` used `while True` and could only exit through `should_run_after_idle()`, which **always** returns `False` when `last_edit_time <= 0.0`.
+  - If `debounce_state.json` disappeared (temp workspace cleaned up, deleted project), the worker spun forever in 3-second intervals. Worse, `get_runtime_dir()` calls `mkdir` on every pass, so the worker kept **re-creating the deleted directory tree**, making the orphan self-sustaining.
+  - Verified live: 4 zombie `--debounce-worker` processes with dead parents but re-created project roots under `%TEMP%`.
+  - Added four termination guards (quiet window reached, project root gone, debounce state gone, `last_edit_time <= 0`) plus a hard `max_lifetime` bound (120s). Replaced `break`/`continue` with explicit `return`.
+- **Test Harness Hermeticity**: added the `GRAVITYGUARD_DISABLE_ASYNC=1` kill switch, honored by both spawn paths. The suite sets it before importing any module, so no test can launch a real background worker.
+- **Test Count**: 83/83 passing (was reported as 81/81). Added regression tests for the hidden-console contract and for the kill switch.
 
 ### Changed
 - Documentation (`ARCHITECTURE.md`, `README.md`) no longer describes `DETACHED_PROCESS` as the spawn mechanism; the hidden-console contract is documented instead.
