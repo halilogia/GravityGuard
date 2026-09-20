@@ -1,4 +1,4 @@
-import sys
+﻿import sys
 import json
 import os
 import re
@@ -646,12 +646,18 @@ def trigger_background_validation(target_file: str) -> None:
     Spawns async_runner.py in a detached background subprocess.
     Never blocks the AI tool-call loop: returns in ~1ms without waiting for completion.
     Only triggers for supported code files (.py, .ts, .tsx, .js, .jsx, .gd).
+    Skips if the file does not exist on disk (prevents test fixtures with fake paths
+    from spawning uncontrolled async_runner processes and terminal windows).
     """
     if not target_file:
         return
 
     file_lower = target_file.lower()
     if not file_lower.endswith((".py", ".ts", ".tsx", ".js", ".jsx", ".gd")):
+        return
+
+    # Guard: do not spawn real background workers for nonexistent/fake files.
+    if not os.path.exists(target_file):
         return
 
     runner_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "async_runner.py")
