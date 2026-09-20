@@ -1663,7 +1663,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
         self.assertFalse(async_runner.should_run_after_idle(105.0, 105.0, 3.0))
 
     def test_should_spawn_worker_duplicate_protection(self):
-        """Verifies duplicate worker processes are never spawned concurrently"""
+        """Verifies the state-based duplicate suppression decision for batch workers."""
         sys.path.insert(0, os.path.dirname(VALIDATOR_PATH))
         import async_runner
 
@@ -1909,6 +1909,115 @@ class TestGravityGuardPhase2(unittest.TestCase):
         file_py = "C:/fake/calc.py"
         self.assertFalse(async_runner.should_spawn_file_worker(active_workers, file_ts))
         self.assertTrue(async_runner.should_spawn_file_worker(active_workers, file_py))
+
+    # --- PHASE 2.5 HARDENING: NEW FILE CREATED AFTER WORKER SPAWN ---
+    def test_new_file_created_after_worker_spawn_is_linted_once(self):
+        """Regression: a file created *after* the worker spawn must still be linted once.
+
+        GravityGuard is a PreToolUse hook, so this worker is spawned BEFORE the AI
+        writes the file. main() previously exited early when the target was missing,
+        which silently meant every newly created file was never linted. The worker now
+        waits a *bounded* grace period for the file to land.
+
+        Uses a mocked clock: no real 300ms/2s sleeps, no subprocesses.
+        """
+        from pathlib import Path
+        sys.path.insert(0, os.path.dirname(VALIDATOR_PATH))
+        import async_runner
+
+        temp_dir = tempfile.mkdtemp(prefix="gg_newfile_")
+        try:
+            project_root = Path(temp_dir)
+            target_file = project_root / "src" / "auth.ts"
+            norm_key = str(target_file.resolve()).replace("\\", "/")
+
+            # Pre-tool ordering: the file does not exist when the worker starts.
+            self.assertFalse(target_file.exists(), "precondition: new file must be absent")
+
+            # --- Pure bounded-wait decision matrix (no sleeping involved) ---
+            self.assertTrue(async_runner.should_wait_for_target_file(False, 0.0, 2.0))
+            self.assertTrue(async_runner.should_wait_for_target_file(False, 1.9, 2.0))
+            self.assertFalse(async_runner.should_wait_for_target_file(True, 0.0, 2.0),
+                             "file appeared -> stop waiting immediately")
+            self.assertFalse(async_runner.should_wait_for_target_file(False, 2.0, 2.0),
+                             "grace exhausted -> bounded wait must end")
+
+            # --- Worker integration on a mocked clock ---
+            clock = {"now": 1000.0, "sleeps": 0}
+
+            def fake_sleep(seconds):
+                clock["sleeps"] += 1
+                clock["now"] += seconds
+                # The AI writes the file shortly after the worker's quiet window.
+                if clock["sleeps"] == 2:
+                    target_file.parent.mkdir(parents=True, exist_ok=True)
+                    target_file.write_text("export const token = 1;\n", encoding="utf-8")
+
+            lint_calls = []
+
+            with patch("async_runner.time.sleep", side_effect=fake_sleep), \
+                 patch("async_runner.time.time", side_effect=lambda: clock["now"]), \
+                 patch("async_runner.execute_single_file_lint",
+                       side_effect=lambda tf, proot, dpath: lint_calls.append(tf)):
+                async_runner.run_coalesced_file_lint_worker(
+                    str(target_file), project_root, coalesce_window=0.3, grace_period=2.0
+                )
+
+            self.assertEqual(len(lint_calls), 1,
+                             "a newly created file must be linted exactly once")
+
+            # Completed work must release its claim so the next burst starts fresh.
+            state = async_runner.load_debounce_state(
+                async_runner.get_debounce_file_path(project_root))
+            self.assertNotIn(norm_key, state.get("active_lint_workers", {}))
+            self.assertNotIn(norm_key, state.get("file_edits", {}))
+
+            # Guard against reintroducing the exact early-exit that caused this bug.
+            with open(os.path.join(os.path.dirname(VALIDATOR_PATH), "async_runner.py"),
+                      "r", encoding="utf-8") as fh:
+                normalized = "\n".join(line.strip() for line in fh.read().splitlines())
+            self.assertNotIn("if not os.path.exists(target_file):\nsys.exit(0)", normalized,
+                             "main() must not skip linting for not-yet-written files")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_worker_exits_cleanly_when_new_file_never_appears(self):
+        """A file that never materialises must not hang the worker or leak state."""
+        from pathlib import Path
+        sys.path.insert(0, os.path.dirname(VALIDATOR_PATH))
+        import async_runner
+
+        temp_dir = tempfile.mkdtemp(prefix="gg_nofile_")
+        try:
+            project_root = Path(temp_dir)
+            target_file = project_root / "src" / "never_written.py"
+            norm_key = str(target_file.resolve()).replace("\\", "/")
+
+            clock = {"now": 2000.0, "sleeps": 0}
+
+            def fake_sleep(seconds):
+                clock["sleeps"] += 1
+                clock["now"] += seconds
+
+            lint_calls = []
+            with patch("async_runner.time.sleep", side_effect=fake_sleep), \
+                 patch("async_runner.time.time", side_effect=lambda: clock["now"]), \
+                 patch("async_runner.execute_single_file_lint",
+                       side_effect=lambda tf, proot, dpath: lint_calls.append(tf)):
+                async_runner.run_coalesced_file_lint_worker(
+                    str(target_file), project_root, coalesce_window=0.3, grace_period=2.0
+                )
+
+            # Bounded wait: finite number of polls, then a clean no-op exit.
+            self.assertEqual(len(lint_calls), 0, "missing file must never be linted")
+            self.assertLessEqual(clock["sleeps"], 10, "grace wait must be bounded")
+
+            state = async_runner.load_debounce_state(
+                async_runner.get_debounce_file_path(project_root))
+            self.assertNotIn(norm_key, state.get("active_lint_workers", {}))
+            self.assertNotIn(norm_key, state.get("file_edits", {}))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

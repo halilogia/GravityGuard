@@ -5,6 +5,23 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-09-20
+
+### Fixed
+- **Newly Created Files Were Never Linted**:
+  - GravityGuard is a `PreToolUse` hook, so it fires **before** the AI writes the file. `async_runner.py`'s `main()` bailed out with `sys.exit(0)` when the target did not exist yet, so a file created *after* the worker spawned was never linted.
+  - Removed that early exit. The per-file coalescing worker now waits its 300 ms quiet window, then spends a **bounded** grace period (2.0 s) for the file to appear.
+  - If the file lands, the normal linter runs once. If it never lands, the worker releases its claim and exits silently — no infinite wait, no state leak.
+  - `execute_single_file_lint()` retains its own existence check as the final safety net.
+- **Documentation Accuracy**: replaced absolute concurrency claims ("exactly 1 worker", "never block") with *state-based duplicate suppression*, since the claim is not a mutex and concurrent `load → claim → save` sequences are not formally atomic.
+
+### Added
+- **Regression Coverage for the New-File Path**: `target file initially absent → worker waits → file appears → lint called exactly once`, plus a companion test asserting a never-written file exits cleanly. Both use a mocked clock (`time.sleep` / `time.time` patched) — no real sleeps, no subprocesses.
+- **Test Count**: 85/85 passing (was 83/83).
+
+### Changed
+- `async_runner.py` pure helpers: added `should_wait_for_target_file()`; added `_await_target_file()` polling helper. No changes to the TS debounce behavior or governance guards (G0-G4, SRP, T1-T3, ARCH, OE).
+
 ## [1.2.1] - 2026-09-20
 
 ### Fixed
@@ -21,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added four termination guards (quiet window reached, project root gone, debounce state gone, `last_edit_time <= 0`) plus a hard `max_lifetime` bound (120s). Replaced `break`/`continue` with explicit `return`.
 - **Test Harness Hermeticity**: added the `GRAVITYGUARD_DISABLE_ASYNC=1` kill switch, honored by both spawn paths. The suite sets it before importing any module, so no test can launch a real background worker.
 - **Test Count**: 83/83 passing (was reported as 81/81). Added regression tests for the hidden-console contract and for the kill switch.
+  - Note: the suite sets `GRAVITYGUARD_DISABLE_ASYNC=1`, so it exercises guard/decision logic but does **not** spawn real Windows process trees. The new-file path is covered by a mocked-clock test (see 1.2.2).
 
 ### Changed
 - Documentation (`ARCHITECTURE.md`, `README.md`) no longer describes `DETACHED_PROCESS` as the spawn mechanism; the hidden-console contract is documented instead.
@@ -49,9 +67,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Resolved the critical feedback loop gap: `read_recent_diagnostics(target_file)` now matches TypeScript compiler errors directly against modified target files (e.g. `auth.ts`) instead of dropping them in an unindexed global bucket.
 - **Per-File Lint Burst Coalescing & Worker State Cleanup**:
   - Implemented 300 ms quiet-window coalescing (`run_coalesced_file_lint_worker`, `should_spawn_file_worker`, `should_run_file_lint`) in `engine/async_runner.py`.
-  - Dedupes rapid consecutive edits (bursts) on the same file: exactly 1 worker claims execution, subsequent triggers within the window update the timestamp and immediately exit (zero process accumulation).
-  - Once the 300 ms quiet window elapses with no further edits, linter runs strictly once against the final file state.
-  - Multi-file isolation: edits across different files (e.g. `auth.ts` vs `calc.py`) maintain separate claims and never block or coalesce each other.
+  - Dedupes rapid consecutive edits (bursts) on the same file via state-based suppression: the first trigger claims the file in `debounce_state.json`, subsequent triggers within the window update the timestamp and exit immediately. For sequential tool calls this yields a single linter run; the claim is best-effort rather than a formally atomic mutex.
+  - Once the 300 ms quiet window elapses with no further edits, linter runs once against the final file state.
+  - Multi-file isolation: edits across different files (e.g. `auth.ts` vs `calc.py`) maintain separate claims and do not block each other.
   - State cleanup: `clean_file_state` automatically deletes `active_lint_workers` and `file_edits` records upon completion so `debounce_state.json` remains minimal.
   - Floating-point epsilon tolerance (`1e-6`) prevents IEEE 754 precision boundary issues.
 - **Automated Test Suite Expansion (81/81 Passing)**:

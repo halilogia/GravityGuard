@@ -134,7 +134,13 @@ def should_run_after_idle(last_edit_time: float, current_time: float, idle_thres
 
 
 def should_spawn_worker(worker_already_running: bool) -> bool:
-    """Ensures duplicate batch worker processes are never spawned."""
+    """Returns True when no batch worker is already claimed in the persisted state.
+
+    This is state-based duplicate suppression, not a mutex: concurrent callers can
+    in principle both observe an unclaimed state. For the sequential tool-call loop
+    GravityGuard serves, that window is not reachable in practice, but the guarantee
+    is best-effort rather than formally atomic.
+    """
     return not worker_already_running
 
 
@@ -164,6 +170,20 @@ def clean_file_state(state: Dict[str, Any], file_key: str) -> None:
     """Cleans up active worker and edit timestamps after lint completion so state stays minimal."""
     state.setdefault("active_lint_workers", {}).pop(file_key, None)
     state.setdefault("file_edits", {}).pop(file_key, None)
+
+
+def should_wait_for_target_file(target_exists: bool, waited_seconds: float,
+                               grace_period: float = 2.0) -> bool:
+    """Returns True while the target file is still missing and grace remains.
+
+    GravityGuard runs as a PreToolUse hook, so this worker is spawned *before* the AI
+    writes the file and the target may legitimately not exist yet. The wait is bounded
+    by grace_period so the worker can never outlive its purpose; once the file lands
+    the worker stops waiting immediately.
+    """
+    if target_exists:
+        return False
+    return waited_seconds < (grace_period - 1e-6)
 
 
 # ============================================================================
@@ -409,11 +429,27 @@ def execute_single_file_lint(target_file: str, project_root: Path, diag_path: Pa
         save_diagnostics(diag_path, state)
 
 
-def run_coalesced_file_lint_worker(target_file: str, project_root: Path, coalesce_window: float = 0.3) -> None:
+def _await_target_file(target_file: str, poll_interval: float, grace_period: float) -> bool:
+    """Polls (bounded) for target_file to appear; returns True once it exists."""
+    waited = 0.0
+    while should_wait_for_target_file(os.path.exists(target_file), waited, grace_period):
+        time.sleep(poll_interval)
+        waited += poll_interval
+    return os.path.exists(target_file)
+
+
+def run_coalesced_file_lint_worker(target_file: str, project_root: Path,
+                                   coalesce_window: float = 0.3,
+                                   grace_period: float = 2.0) -> None:
     """
     Coalesces rapid successive edits on the same file.
     Waits until no edits have occurred on target_file for coalesce_window (300ms),
     then executes the linter once on the final file state and cleans up state.
+
+    GravityGuard is a PreToolUse hook, so this worker is spawned *before* the AI
+    writes the file and the target may legitimately not exist yet. After the quiet
+    window the worker therefore spends a bounded grace_period waiting for the file
+    to land; if it never appears the worker cleans up and exits quietly.
     """
     debounce_path = get_debounce_file_path(project_root)
     diag_path = get_diagnostics_file_path(project_root)
@@ -427,7 +463,15 @@ def run_coalesced_file_lint_worker(target_file: str, project_root: Path, coalesc
         now = time.time()
 
         if should_run_file_lint(last_edit, now, coalesce_window):
-            # Quiet window reached without new edits: execute linter once
+            # Quiet window reached. The write may not have landed yet (pre-tool hook),
+            # so allow a bounded grace period for the file to appear.
+            if not _await_target_file(target_file, coalesce_window, grace_period):
+                # File never materialised: release the claim and exit silently.
+                clean_file_state(state, norm_key)
+                save_debounce_state(debounce_path, state)
+                return
+
+            # Execute linter once on the final file state
             execute_single_file_lint(target_file, project_root, diag_path)
 
             # Cleanup worker state so future modifications start fresh
@@ -588,10 +632,13 @@ def main():
             save_diagnostics(diag_path, diag)
         sys.exit(0)
 
-    if not os.path.exists(target_file):
-        sys.exit(0)
-
-    # Per-file burst coalescing logic:
+    # Per-file burst coalescing logic.
+    #
+    # NOTE: the target file intentionally does NOT have to exist here. GravityGuard
+    # runs as a PreToolUse hook, so this runner is spawned *before* the AI writes the
+    # file. Bailing out early on a missing file would mean every newly created file
+    # is never linted. Existence is handled inside run_coalesced_file_lint_worker(),
+    # which waits a bounded grace period and no-ops cleanly if the file never lands.
     norm_key = str(Path(target_file).resolve()).replace("\\", "/")
     debounce_state = load_debounce_state(debounce_path)
     file_edits = debounce_state.setdefault("file_edits", {})
@@ -604,7 +651,7 @@ def main():
         # Claim file lint worker
         active_workers[norm_key] = True
         save_debounce_state(debounce_path, debounce_state)
-        # Execute coalesced worker (waits 300ms quiet window then lints once)
+        # Execute coalesced worker (waits 300ms quiet window, then lints once)
         run_coalesced_file_lint_worker(target_file, project_root, coalesce_window=0.3)
     else:
         # A worker is already running for this file; updating file_edits[norm_key] = now

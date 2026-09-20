@@ -38,7 +38,7 @@ This document outlines the strategic evolution, architectural milestones, and pl
   - Integrated 9Router local AI pipeline with sub-3s model failover.
 - [x] **Live Security Monitor Webview**:
   - Real-time Activity Bar panel streaming audit events from `~/.gemini/logs/srp_guardian_live.json`.
-- [x] **83/83 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`).
+- [x] **85/85 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`).
 
 ---
 
@@ -58,7 +58,8 @@ This document outlines the strategic evolution, architectural milestones, and pl
   - **Hidden Background Orchestration**: `trigger_background_validation()` launches `async_runner.py` in ~1ms without waiting for completion, using `CREATE_NO_WINDOW` + `SW_HIDE` so no console window ever appears (see v1.2.1 fix).
   - **State-Based TS Debounce Worker**: Persistent `.gravityguard/runtime/debounce_state.json` enforces a real 3.0s idle window after edit bursts before running `tsc --noEmit`. Bounded by explicit termination guards + a `max_lifetime` cap so a worker can never outlive its purpose (see v1.2.1 fix).
   - **Per-File TSC Diagnostics**: `parse_tsc_output` maps project compilation errors directly to modified target files (`auth.ts`).
-  - **Per-File Lint Burst Coalescing & State Cleanup**: 300ms quiet window for single-file linters (`ruff`, `eslint`, `godot`) dedupes rapid multi-edit bursts to exactly 1 linter process, automatically purging finished state from `debounce_state.json`.
+  - **Per-File Lint Burst Coalescing & State Cleanup**: 300ms quiet window for single-file linters (`ruff`, `eslint`, `godot`) with state-based duplicate suppression across rapid multi-edit bursts, automatically purging finished state from `debounce_state.json`. The claim is best-effort, not a formal atomic mutex.
+  - **New-File Grace Period**: since GravityGuard is a `PreToolUse` hook, the worker is spawned *before* the file exists. It waits a bounded 2.0s grace period for the target to land, lints once when it does, and exits cleanly if it never appears (see v1.2.2 fix).
   - **Diagnostics Bridge**: `.gravityguard/runtime/diagnostics.json` stores linter findings; `STATIC_LINTER_DIAGNOSTIC (WARN)` reads them in sub-millisecond time.
 - [x] **Prompt Enhancer Architectural Guidance Preamble**:
   - System prompt directives favoring cohesive modules over monolithic accumulation.
