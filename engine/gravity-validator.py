@@ -5,6 +5,7 @@ import re
 import ast
 import time
 import difflib
+import subprocess
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -638,7 +639,45 @@ def read_recent_diagnostics(target_file: str) -> List[Tuple[str, str]]:
     except (IOError, OSError, json.JSONDecodeError, ValueError) as e:
         return []
 
-    return []
+
+# --- ASYNC STATIC VALIDATION ORCHESTRATION (DETACHED BACKGROUND RUNNER) ---
+def trigger_background_validation(target_file: str) -> None:
+    """
+    Spawns async_runner.py in a detached background subprocess.
+    Never blocks the AI tool-call loop: returns in ~1ms without waiting for completion.
+    Only triggers for supported code files (.py, .ts, .tsx, .js, .jsx, .gd).
+    """
+    if not target_file:
+        return
+
+    file_lower = target_file.lower()
+    if not file_lower.endswith((".py", ".ts", ".tsx", ".js", ".jsx", ".gd")):
+        return
+
+    runner_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "async_runner.py")
+    if not os.path.exists(runner_path):
+        return
+
+    try:
+        if sys.platform == "win32":
+            DETACHED_PROCESS = 0x00000008
+            subprocess.Popen(
+                [sys.executable, runner_path, "--file", target_file],
+                creationflags=DETACHED_PROCESS,
+                close_fds=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+        else:
+            subprocess.Popen(
+                [sys.executable, runner_path, "--file", target_file],
+                start_new_session=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+    except (OSError, ValueError):
+        return
+
 
 
 
@@ -1428,6 +1467,7 @@ def validate_gravityguard():
         res_payload["warnings"] = [w[1] for w in all_warnings]
         res_payload["warning_rule_ids"] = [w[0] for w in all_warnings]
     print(json.dumps(res_payload))
+    trigger_background_validation(target_file)
     sys.exit(0)
 
 

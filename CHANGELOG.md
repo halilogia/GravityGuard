@@ -12,16 +12,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Multi-condition heuristic radar detecting uncontrolled monolithic code accumulation without blocking the AI agent.
   - Triggers on: (1) Projected lines >= 1000, (2) Single tool-call addition >= 180 LOC, or (3) Creeping growth on 800+ LOC files with >= 80 LOC additions.
   - Exemption rules for test files (`test_*.py`, `*.test.ts`, `*.spec.ts`) and configured cohesive modules.
-- **Tier 2 / Tier 3 Async Background Validation & Diagnostics Pipeline**:
-  - Preserved the **< 10 ms Fast Guard Invariant**: Pre-tool interceptor strictly runs zero external compilers or linters.
-  - Added `engine/async_runner.py`: Lightweight asynchronous runner executing Ruff (Python), ESLint (TS/JS), Godot check-only (GDScript), and debounced `tsc --noEmit` (TypeScript batch).
-  - Added persistent state bridge `.gravityguard/runtime/diagnostics.json` with timestamp and file staleness validation.
-  - Added `STATIC_LINTER_DIAGNOSTIC (WARN)`: Sub-millisecond (< 0.5 ms) pre-tool diagnostic reader seamlessly surfacing previous background linter findings directly into AI context.
+- **Detached Asynchronous Orchestration & Background Trigger**:
+  - Implemented `trigger_background_validation(target_file)` in `engine/gravity-validator.py`.
+  - Spawns `engine/async_runner.py` via detached OS subprocess (`DETACHED_PROCESS` on Windows, `start_new_session` on POSIX) without waiting for completion (returns in ~1 ms).
+  - Evaluates changed code files strictly in the background without adding any synchronous delay to the AI tool-call loop.
+- **State-Based TypeScript Debounce Worker**:
+  - Implemented `run_debounce_worker` and `trigger_debounce_worker_if_needed` in `engine/async_runner.py`.
+  - Persists state in `.gravityguard/runtime/debounce_state.json`.
+  - Enforces a real 3.0-second idle window after tool bursts before triggering `tsc --noEmit`, completely eliminating repetitive compiler executions during rapid AI edits.
+- **Tier 2 / Tier 3 Diagnostics State Bridge**:
+  - Background findings recorded in `.gravityguard/runtime/diagnostics.json`.
+  - `STATIC_LINTER_DIAGNOSTIC (WARN)`: Injects recent background linter findings into AI context during subsequent pre-tool calls (< 0.5 ms).
 - **Prompt Enhancer Architectural Guidance Preamble**:
-  - Updated `src/extension.ts` prompt enhancement system prompt with explicit directives favoring cohesive modules over monolithic accumulation while discouraging artificial over-splitting.
-- **Automated Test Suite Expansion**:
-  - Expanded test suite from 59 to **66 automated unit tests** (`engine/test_gravity_validator.py`), 66/66 passing.
-  - In-memory logic latency measured at **~0.039 ms** (core) and **~0.014 ms** (Phase 2 evaluator).
+  - Updated `src/extension.ts` prompt enhancement system prompt with explicit directives favoring cohesive modules over monolithic accumulation.
+- **Automated Test Suite Expansion (69/69 Passing)**:
+  - Expanded test suite to **69 automated unit tests** (`engine/test_gravity_validator.py`), 69/69 passing.
+  - Conducted 1,000-iteration statistical latency distribution benchmark:
+    - **Average (Avg):** `0.1198 ms`
+    - **95th Percentile (p95):** `0.2292 ms`
+    - **99th Percentile (p99):** `0.5343 ms`
 
 ---
 

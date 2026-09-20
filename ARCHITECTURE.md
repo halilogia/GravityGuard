@@ -165,6 +165,16 @@ Writes findings to .gravityguard/runtime/diagnostics.json
 Tool burst ends (3s idle) ──> tsc --noEmit across project
 ```
 
+### 3.3. Detached Background Orchestration & Debounce Worker
+1. **Fire-and-Forget Trigger (`trigger_background_validation`)**:
+   - Executed on `ALLOW` decisions in `engine/gravity-validator.py`.
+   - Spawns `async_runner.py` via `DETACHED_PROCESS` (Windows) or `start_new_session` (POSIX) with `DEVNULL` streams.
+   - The pre-tool hook exits immediately (`~1ms` spawn overhead); AI tool-call continues with zero wait.
+2. **State-Based Debounce Worker (`debounce_state.json`)**:
+   - Records `last_edit_time = time.time()`.
+   - Spawns a background worker process that sleeps in 3.0s idle intervals.
+   - If an AI agent performs 5 edits in 2.5 seconds, the worker continually resets until a full 3.0s quiet window elapses, firing `tsc --noEmit` exactly once.
+
 ---
 
 ## 4. Key Engineering Invariants

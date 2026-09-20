@@ -5,14 +5,14 @@
 [English](#english) | [Türkçe](#türkçe)
 
 [![Antigravity Compatible](https://img.shields.io/badge/Antigravity%20IDE-Compatible-blue.svg)](https://antigravity.google/)
-[![Tests](https://img.shields.io/badge/Tests-66%20Passing-brightgreen.svg)]()
-[![Core Evaluator](https://img.shields.io/badge/Core%20Latency-%3C%200.05ms-blue.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-69%20Passing-brightgreen.svg)]()
+[![Core Evaluator](https://img.shields.io/badge/Core%20Benchmark-Avg%200.11ms%20%7C%20p95%200.23ms-blue.svg)]()
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9%20%7C%20ES2022-blue.svg)](https://www.typescriptlang.org/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B%20%7C%20Zero%20Dependencies-brightgreen.svg)](https://www.python.org/)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 [![Local AI First](https://img.shields.io/badge/Local%20AI-9Router%20%7C%20Ollama-orange.svg)]()
 
-**GravityGuard** is an ultra-lightweight, deterministic architectural gatekeeper, secret airbag, and prompt engineering companion built specifically for **Antigravity IDE** and modern autonomous AI coding agents. It intercepts AI agent tool-calls in `< 0.05ms` to prevent codebase degradation, accidental credential leaks, architectural violations, and silent error masking.
+**GravityGuard** is an ultra-lightweight, deterministic architectural gatekeeper, secret airbag, and prompt engineering companion built specifically for **Antigravity IDE** and modern autonomous AI coding agents. In development benchmarks, it intercepts AI agent tool-calls with an average in-memory logic execution of `~0.11ms` (p95 `< 0.25ms`), preventing codebase degradation, accidental credential leaks, architectural violations, and silent error masking without adding synchronous developer friction.
 
 ---
 
@@ -116,7 +116,7 @@ GravityGuard, herhangi bir dosya değiştirme aracı çalıştırılmadan önce 
 ## Temel Özellikler
 
 ### 🛡️ 1. Deterministik Mimari Bekçi (Gatekeeper)
-- **Yüksek Güvenilirlikli Hava Yastığı**: Saf bellek içi diff denetimlerini `< 0.05 ms` sürede tamamlar.
+- **Yüksek Güvenilirlikli Hava Yastığı**: Saf bellek içi mantık denetimlerini ortalama `~0.11 ms` (p95 `< 0.25 ms`) sürede tamamlar.
 - **Akıllı Ölçek Analizi**: Yapay zekanın tek dosyaya aşırı sorumluluk yığarak devasa "god-file" oluşturmasını önler. Mekanik satır sınırı koymak yerine semantik sorumluluk dağılımına bakar.
 - **Sıfır Harici Bağımlılık**: Saf Python ile yazılmış, AST ve regex tabanlı hafif analiz motoru. Ağır kütüphane veya derleme gerektirmez.
 

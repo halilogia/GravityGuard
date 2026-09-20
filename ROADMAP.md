@@ -38,7 +38,7 @@ This document outlines the strategic evolution, architectural milestones, and pl
   - Integrated 9Router local AI pipeline with sub-3s model failover.
 - [x] **Live Security Monitor Webview**:
   - Real-time Activity Bar panel streaming audit events from `~/.gemini/logs/srp_guardian_live.json`.
-- [x] **66/66 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`).
+- [x] **69/69 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`).
 
 ---
 
@@ -53,11 +53,11 @@ This document outlines the strategic evolution, architectural milestones, and pl
 - [x] **ARCH_FILE_GROWTH Guard (WARN ONLY)**:
   - Detects monolithic file accumulation: (1) Projected LOC >= 1000, (2) Single tool-call addition >= 180 LOC, (3) Creeping growth on 800+ LOC file with >= 80 LOC addition.
   - Zero blocking — prompts AI toward modularity and SRP boundaries.
-- [x] **Tier 2 / Tier 3 Async Static Validation Architecture**:
+- [x] **Tier 2 / Tier 3 Async Static Validation Pipeline & Real Orchestration**:
   - Preserved the **< 10 ms Fast Guard Invariant**: Pre-tool path strictly runs zero external compilers or linters.
-  - `engine/async_runner.py`: Executes changed-file Ruff (Python), ESLint (TS/JS), Godot check-only (GDScript), and debounced `tsc --noEmit` (TS batch).
-  - `.gravityguard/runtime/diagnostics.json`: Lightweight local state bridge.
-  - `STATIC_LINTER_DIAGNOSTIC (WARN)`: Injects recent background linter findings into AI context during subsequent pre-tool calls (< 0.5 ms).
+  - **Detached Background Orchestration**: `trigger_background_validation()` launches `async_runner.py` in ~1ms without waiting for completion.
+  - **State-Based TS Debounce Worker**: Persistent `.gravityguard/runtime/debounce_state.json` enforces a real 3.0s idle window after edit bursts before running `tsc --noEmit`.
+  - **Diagnostics Bridge**: `.gravityguard/runtime/diagnostics.json` stores linter findings; `STATIC_LINTER_DIAGNOSTIC (WARN)` reads them in sub-millisecond time.
 - [x] **Prompt Enhancer Architectural Guidance Preamble**:
   - System prompt directives favoring cohesive modules over monolithic accumulation.
 

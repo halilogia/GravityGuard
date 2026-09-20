@@ -1477,6 +1477,77 @@ class TestGravityGuardPhase2(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_async_runner_orchestration_trigger(self):
+        """Verifies trigger_background_validation successfully runs without raising exceptions"""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("gravity_validator", VALIDATOR_PATH)
+        gv = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gv)
+
+        # Trigger on unsupported extension -> early return (no-op)
+        gv.trigger_background_validation("README.md")
+        gv.trigger_background_validation("")
+
+        # Trigger on supported extension with mock/real file -> should execute safely
+        gv.trigger_background_validation("src/auth.py")
+
+    def test_async_runner_debounce_state_management(self):
+        """Verifies async_runner's debounce state load/save and idle detection logic"""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            sys.path.insert(0, os.path.dirname(VALIDATOR_PATH))
+            import async_runner
+            from pathlib import Path
+
+            p_root = Path(temp_dir)
+            d_path = async_runner.get_debounce_file_path(p_root)
+
+            # Initial state
+            initial = async_runner.load_debounce_state(d_path)
+            self.assertEqual(initial["last_edit_time"], 0.0)
+            self.assertFalse(initial["worker_running"])
+
+            # Save updated state
+            now = time.time()
+            async_runner.save_debounce_state(d_path, {"last_edit_time": now, "worker_running": True})
+
+            loaded = async_runner.load_debounce_state(d_path)
+            self.assertEqual(loaded["last_edit_time"], now)
+            self.assertTrue(loaded["worker_running"])
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_benchmark_1000_runs_avg_and_p95(self):
+        """Measures 1,000 iterations of in-memory core evaluator: records average, p95, and p99 latency"""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("gravity_validator", VALIDATOR_PATH)
+        gv = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gv)
+
+        old_code = "def authenticate(user, pwd):\n    return True\n"
+        new_code = "def authenticate(user, pwd):\n    token = user + pwd\n    return token\n"
+
+        timings = []
+        for _ in range(1000):
+            t0 = time.perf_counter()
+            added_lines, added_text, line_nums = gv.get_diff_analysis(old_code, new_code)
+            gv.check_g0_secret_leak(added_text)
+            gv.check_g1_silent_exception(added_lines, added_text, line_nums, new_code, True, False)
+            gv.check_g3_compiler_bypass(added_text)
+            gv.check_oe_spike(added_text)
+            gv.check_arch_file_growth("src/auth.py", old_code, new_code, added_lines, False)
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            timings.append(elapsed_ms)
+
+        timings.sort()
+        avg_ms = sum(timings) / len(timings)
+        p95_ms = timings[int(len(timings) * 0.95)]
+        p99_ms = timings[int(len(timings) * 0.99)]
+
+        print(f"\n[BENCHMARK - 1000 RUNS] Avg: {avg_ms:.4f} ms | p95: {p95_ms:.4f} ms | p99: {p99_ms:.4f} ms")
+        self.assertLess(avg_ms, 1.0, "Core evaluator average latency must be < 1ms")
+        self.assertLess(p95_ms, 2.0, "Core evaluator p95 latency must be < 2ms")
+
 
 if __name__ == "__main__":
     unittest.main()

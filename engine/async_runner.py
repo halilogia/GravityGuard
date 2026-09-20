@@ -3,6 +3,7 @@
 GravityGuard Async Static Validation Runner (Tier 2 / Tier 3)
 Executes lightweight linters in the background without blocking the AI tool-call loop.
 Writes findings to .gravityguard/runtime/diagnostics.json for next-hook consumption.
+Features state-based debouncing for TypeScript project batch checks (tsc --noEmit).
 """
 
 import sys
@@ -25,10 +26,18 @@ def find_project_root(target_file: str) -> Path:
     return p.parent if p.is_file() else p
 
 
-def get_diagnostics_file_path(project_root: Path) -> Path:
+def get_runtime_dir(project_root: Path) -> Path:
     runtime_dir = project_root / ".gravityguard" / "runtime"
     runtime_dir.mkdir(parents=True, exist_ok=True)
-    return runtime_dir / "diagnostics.json"
+    return runtime_dir
+
+
+def get_diagnostics_file_path(project_root: Path) -> Path:
+    return get_runtime_dir(project_root) / "diagnostics.json"
+
+
+def get_debounce_file_path(project_root: Path) -> Path:
+    return get_runtime_dir(project_root) / "debounce_state.json"
 
 
 def load_diagnostics(diag_path: Path) -> Dict[str, Any]:
@@ -48,7 +57,31 @@ def save_diagnostics(diag_path: Path, data: Dict[str, Any]) -> None:
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         tmp_path.replace(diag_path)
-    except (IOError, OSError) as e:
+    except (IOError, OSError):
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                return
+
+
+def load_debounce_state(debounce_path: Path) -> Dict[str, Any]:
+    if not debounce_path.exists():
+        return {"last_edit_time": 0.0, "worker_running": False}
+    try:
+        with open(debounce_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (IOError, OSError, json.JSONDecodeError, ValueError):
+        return {"last_edit_time": 0.0, "worker_running": False}
+
+
+def save_debounce_state(debounce_path: Path, state: Dict[str, Any]) -> None:
+    tmp_path = debounce_path.with_suffix(".tmp")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+        tmp_path.replace(debounce_path)
+    except (IOError, OSError):
         if tmp_path.exists():
             try:
                 tmp_path.unlink()
@@ -170,11 +203,91 @@ def run_batch_tsc(project_root: Path) -> Optional[List[Dict[str, Any]]]:
         return None
 
 
+def run_debounce_worker(project_root: Path, idle_threshold: float = 3.0) -> None:
+    """
+    Background worker loop that waits for a quiet window (e.g. 3.0s idle)
+    before triggering project-wide tsc --noEmit.
+    """
+    debounce_path = get_debounce_file_path(project_root)
+    diag_path = get_diagnostics_file_path(project_root)
+
+    while True:
+        time.sleep(idle_threshold)
+        state = load_debounce_state(debounce_path)
+        last_edit = state.get("last_edit_time", 0.0)
+        elapsed = time.time() - last_edit
+
+        if elapsed >= idle_threshold:
+            # Burst is over! Run batch tsc once
+            tsc_errs = run_batch_tsc(project_root)
+            state["worker_running"] = False
+            save_debounce_state(debounce_path, state)
+
+            if tsc_errs is not None:
+                diag = load_diagnostics(diag_path)
+                entries = diag.setdefault("entries", {})
+                if tsc_errs:
+                    entries["[project-tsc]"] = {
+                        "tool": "tsc",
+                        "timestamp": time.time(),
+                        "errors": tsc_errs
+                    }
+                else:
+                    entries.pop("[project-tsc]", None)
+                save_diagnostics(diag_path, diag)
+            break
+        else:
+            # New edit occurred while waiting; continue sleeping for remaining time
+            continue
+
+
+def trigger_debounce_worker_if_needed(project_root: Path) -> None:
+    """Spawns detached debounce worker process if one is not already active."""
+    debounce_path = get_debounce_file_path(project_root)
+    state = load_debounce_state(debounce_path)
+    state["last_edit_time"] = time.time()
+
+    if not state.get("worker_running", False):
+        state["worker_running"] = True
+        save_debounce_state(debounce_path, state)
+
+        runner_script = os.path.abspath(__file__)
+        try:
+            if sys.platform == "win32":
+                DETACHED_PROCESS = 0x00000008
+                subprocess.Popen(
+                    [sys.executable, runner_script, "--debounce-worker", "--project", str(project_root)],
+                    creationflags=DETACHED_PROCESS,
+                    close_fds=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            else:
+                subprocess.Popen(
+                    [sys.executable, runner_script, "--debounce-worker", "--project", str(project_root)],
+                    start_new_session=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+        except (OSError, ValueError):
+            state["worker_running"] = False
+            save_debounce_state(debounce_path, state)
+    else:
+        save_debounce_state(debounce_path, state)
+
+
 def main():
     parser = argparse.ArgumentParser(description="GravityGuard Async Linter Runner")
     parser.add_argument("--file", help="Changed file path to validate")
-    parser.add_argument("--batch-tsc", action="store_true", help="Run project-wide tsc --noEmit")
+    parser.add_argument("--project", help="Project root directory")
+    parser.add_argument("--batch-tsc", action="store_true", help="Run project-wide tsc --noEmit immediately")
+    parser.add_argument("--debounce-worker", action="store_true", help="Run background debounced tsc worker")
     args = parser.parse_args()
+
+    if args.debounce_worker:
+        p_root = Path(args.project).resolve() if args.project else Path.cwd()
+        run_debounce_worker(p_root)
+        sys.exit(0)
 
     if not args.file and not args.batch_tsc:
         sys.exit(0)
@@ -188,11 +301,14 @@ def main():
     if args.batch_tsc:
         tsc_errs = run_batch_tsc(project_root)
         if tsc_errs is not None:
-            entries["[project-tsc]"] = {
-                "tool": "tsc",
-                "timestamp": time.time(),
-                "errors": tsc_errs
-            }
+            if tsc_errs:
+                entries["[project-tsc]"] = {
+                    "tool": "tsc",
+                    "timestamp": time.time(),
+                    "errors": tsc_errs
+                }
+            else:
+                entries.pop("[project-tsc]", None)
             save_diagnostics(diag_path, state)
         sys.exit(0)
 
@@ -209,6 +325,8 @@ def main():
     elif file_lower.endswith((".ts", ".tsx", ".js", ".jsx")):
         tool_name = "eslint"
         errors = run_eslint(target_file, project_root)
+        # For TS/JS files, also schedule debounced tsc check
+        trigger_debounce_worker_if_needed(project_root)
     elif file_lower.endswith(".gd"):
         tool_name = "godot"
         errors = run_godot_check(target_file)
