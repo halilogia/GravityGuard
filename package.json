@@ -1,0 +1,107 @@
+{
+  "name": "gravityguard",
+  "displayName": "GravityGuard — Architecture Airbag & Gatekeeper for AI Agents",
+  "description": "Deterministic architectural gatekeeper, test sufficiency analyzer, and prompt engineering copilot for Antigravity IDE & AI Coding Agents.",
+  "version": "1.0.0",
+  "publisher": "halilemre",
+  "license": "GPL-3.0",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Linters",
+    "Programming Languages",
+    "Testing",
+    "Other"
+  ],
+  "keywords": [
+    "antigravity",
+    "ai-agent",
+    "architecture",
+    "srp",
+    "gatekeeper",
+    "clean-code",
+    "prompt-engineering"
+  ],
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./dist/extension.js",
+  "scripts": {
+    "build": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "gravityguard-sidebar",
+          "title": "GravityGuard",
+          "icon": "media/shield.svg"
+        }
+      ]
+    },
+    "views": {
+      "gravityguard-sidebar": [
+        {
+          "type": "webview",
+          "id": "antigravity-guardian-view",
+          "name": "GravityGuard Live Monitor"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "antigravityBridge.enhancePrompt",
+        "title": "GravityGuard: Prompt Geliştir / Enhance (9Router AI)",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "antigravityBridge.ping",
+        "title": "GravityGuard: Ping Status"
+      },
+      {
+        "command": "antigravityBridge.refreshLogs",
+        "title": "GravityGuard: Refresh Logs",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "antigravityBridge.clearLogs",
+        "title": "GravityGuard: Clear Logs",
+        "icon": "$(trash)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "antigravityBridge.enhancePrompt",
+        "key": "ctrl+alt+e",
+        "mac": "cmd+alt+e"
+      }
+    ],
+    "configuration": {
+      "title": "GravityGuard",
+      "properties": {
+        "gravityguard.routerToken": {
+          "type": "string",
+          "default": "",
+          "description": "Bearer token for 9Router API (Local LLM / Router). If empty, GRAVITYGUARD_ROUTER_TOKEN or ROUTER_TOKEN env var is used."
+        },
+        "gravityguard.routerHost": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "description": "Hostname for 9Router API."
+        },
+        "gravityguard.routerPort": {
+          "type": "number",
+          "default": 20128,
+          "description": "Port for 9Router API."
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@types/vscode": "^1.134.0",
+    "typescript": "^5.9.3"
+  }
+}

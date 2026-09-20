@@ -1,0 +1,30 @@
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+.kilo/
+
+# Build Outputs
+dist/
+out/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Environment & Logs
+.env
+*.log
+*.tmp
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
