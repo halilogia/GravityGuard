@@ -142,3 +142,26 @@ This document outlines the strategic evolution, architectural milestones, and pl
 - [x] Removed `srp-validator.py.bak-v123` (63,454 B). Confirmed as a manual snapshot of `v1.2.3`: its size matches `git cat-file -s 8ad8bef:engine/gravity-validator.py` exactly, so it remains recoverable from history. (Its exact original location was not conclusively re-verified before deletion; the size match is the evidence that matters.)
 - [x] **Found and archived:** the plugin's `skills/srp-modularizer/` folder contained five unrelated files — `SKILL (1).md` (SOLID Principles), `SKILL (2).md` (@json-render/solid), `SKILL(3).md` (Requesting Code Review), `solid.md`, and `solid-skills-main.zip`. Their word-overlap with the real `SKILL.md` was 7–10% (i.e. unrelated content), the `(1)`/`(2)` suffixes indicated browser download duplicates, and none was referenced by any other file. **Moved (not deleted) to `Desktop/GG-artik/`** on user instruction, leaving only `SKILL.md` and `Single-Responsibility-Principle.md` in the skill folder.
 - [ ] **Note:** `.gravityguard/runtime/` empty directories regenerate on their own because the engine recreates them; deleting them is pointless.
+
+---
+
+## 4. Explicit Anti-Goals & Out-of-Scope Boundaries
+
+To maintain sub-10ms gatekeeping latency and prevent catastrophic scope creep, GravityGuard explicitly rejects the following product directions:
+
+### ❌ Anti-Goal 1: Becoming a SonarQube / CodeQL Alternative
+- **Why**: SonarQube, Semgrep, and CodeQL are heavy, asynchronous, whole-repository static analysis platforms evaluating cognitive complexity, code duplication, CVE vulnerabilities, and deep inter-procedural dataflow taint. Attempting to replicate this inside an AI tool-interception hook introduces massive latency, clutters prompt feedback with low-priority stylistic nits, and duplicates decades of solved compiler engineering.
+- **Enforcement**: Deep static governance belongs strictly to Ring 4 (CI/CD Quality Gates), not GravityGuard.
+
+### ❌ Anti-Goal 2: Heavy In-Hook AST & Cross-File Taint Tracking
+- **Why**: The synchronous `PreToolUse` fast guard path operates under a strict **< 10ms execution budget** (measured typical: 0.1ms - 2ms). Running full cross-file dependency graph resolution or global symbol tables in Tier 1 would cause noticeable agent stuttering and prompt developers to bypass the gatekeeper.
+- **Enforcement**: Fast guard checks must remain localized to ephemeral tool diffs and lightweight regex/shallow AST checks.
+
+### ❌ Anti-Goal 3: Code Formatting & Stylistic Linting
+- **Why**: Line lengths, trailing commas, indentation, and variable naming styles are solved deterministically by existing formatters (`Prettier`, `Ruff format`, `Black`). GravityGuard must not warn or block on superficial formatting matters.
+
+### ❌ Anti-Goal 4: Replacing Behavioral Test Execution
+- **Why**: Static code inspection (AST/regex) can verify structural presence (e.g. T1 test file existence, T2 assertion counts, T3 symbol names), but can **never** verify behavioral correctness or runtime contracts. GravityGuard verifies test evidence presence, but defers behavioral proof to native test runners (`vitest`, `pytest`).
+
+### ❌ Anti-Goal 5: Autonomous AI Self-Exemption
+- **Why**: An AI agent must never be permitted to weaken or bypass blocking integrity rules (`G0`, `G1`, `G2`, `G4`) autonomously through synthetic escape comments or self-authorizing config flags. A guard that an agent can talk itself out of is not a security boundary.

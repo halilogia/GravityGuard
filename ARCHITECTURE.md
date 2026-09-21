@@ -219,3 +219,78 @@ becomes a hard tool failure.
 4. **Zero Host File Patching**: No files in the host IDE installation are modified; all integration is handled through officially supported VS Code extension interfaces.
 5. **Architectural Airbag Principle**: GravityGuard acts as a deterministic seatbelt; it prevents secret leaks and silent errors with BLOCK, while guiding architecture and test evidence through informative WARN signals without paralyzing developer velocity.
 
+---
+
+## 5. Architectural Decision Record (ADR-001)
+
+### ADR-001: Pre-Tool Gatekeeper vs. Static Analysis Engine (Why GravityGuard is NOT SonarQube)
+
+- **Status**: Accepted & Invariant
+- **Context**: As AI-assisted development ("vibecoding") scales, agents produce code at unprecedented velocity. A common temptation is to evolve GravityGuard into an all-encompassing static code analyzer (detecting code smells, cyclomatic complexity, dead code, duplication, or deep taint analysis) similar to **SonarQube**, **CodeQL**, or **Semgrep**.
+- **Decision**: GravityGuard **must never** attempt to become a general-purpose static analysis platform or SonarQube clone. GravityGuard is strictly an **AI-Native Pre-Write Gatekeeper / Airbag**, operating synchronously before files touch the disk. Deep static analysis belongs to asynchronous post-write tooling in the developer's defense-in-depth pipeline.
+
+#### 5.1. The 4-Layer Defense-in-Depth Topology
+
+In modern AI agent workflows, software integrity is maintained across four distinct, non-overlapping defense rings:
+
+```mermaid
+flowchart TD
+    subgraph Ring1 ["Ring 1: Pre-Write Gatekeeper (GravityGuard)"]
+        direction TB
+        R1A["PreToolUse Hook (<5ms latency)"]
+        R1B["Prevents Secret Leaks (G0)"]
+        R1C["Prevents Silent Catch / Fallbacks (G1)"]
+        R1D["Prevents Test Deletion / Silencing (G2)"]
+        R1E["Enforces Layer Boundaries (G4 / SRP)"]
+        R1F["Tracks Stateful Test Evidence (T1 Deferred)"]
+    end
+
+    subgraph Ring2 ["Ring 2: Post-Write Fast Compilers & Linters"]
+        direction TB
+        R2A["tsc --noEmit (Type soundness)"]
+        R2B["Ruff / ESLint (Syntax & local idioms)"]
+        R2C["Triggered asynchronously via Tier 2/3 Runner"]
+        R2D["Results surfaced into next prompt via diagnostics.json"]
+    end
+
+    subgraph Ring3 ["Ring 3: Behavioral Proof (Test Runners)"]
+        direction TB
+        R3A["vitest / pytest (Unit & Integration)"]
+        R3B["Proves code actually runs and satisfies contracts"]
+        R3C["Resolves pending T1 test evidence in GravityGuard"]
+    end
+
+    subgraph Ring4 ["Ring 4: Deep Static Analysis & Governance (CI/CD)"]
+        direction TB
+        R4A["SonarQube / Semgrep / CodeQL"]
+        R4B["Cyclomatic & Cognitive Complexity"]
+        R4C["Code Duplication & Cross-file Dataflow Taint"]
+        R4D["CVE Vulnerability & Security Hotspots"]
+        R4E["Runs asynchronously in minutes, not milliseconds"]
+    end
+
+    ToolIntent["AI Agent File Write Intent"] --> Ring1
+    Ring1 -->|ALLOW| DiskWrite["File Written to Disk"]
+    DiskWrite --> Ring2
+    DiskWrite --> Ring3
+    DiskWrite -.->|Pull Request / Git Push| Ring4
+```
+
+#### 5.2. Boundary & Responsibility Matrix
+
+| Dimension | Ring 1: GravityGuard | Ring 2: Linters / Compilers (`tsc`, `ruff`) | Ring 4: SonarQube / Semgrep |
+|---|---|---|---|
+| **Execution Point** | **Pre-Write** (Tool invocation interception before disk I/O) | **Post-Write** (After file lands on disk) | **Post-Commit / CI/CD** (Entire repo scan) |
+| **Latency Budget** | **< 10ms** (Typical: 0.1ms - 2ms) | **300ms - 5s** (Debounced) | **30s - 15 minutes** |
+| **Primary Failure Mode Addressed** | Destructive / deceptive AI agent shortcuts (secret commits, empty catches, deleting tests to pass CI, god-file creep) | Syntax errors, type mismatches, unmet compiler contracts | Architecture decay, technical debt, code smells, CVEs, cognitive complexity |
+| **Enforcement Style** | Synchronous Gatekeeping (`ALLOW` / `BLOCK` / `WARN`) | Diagnostic feedback | Quality gates, PR blocks, compliance dashboards |
+| **State Tracking** | Ephemeral tool diffs + lightweight session evidence (`test_evidence_state.json`) | None (per-run file analysis) | Full persistent database of historic codebase metrics |
+
+#### 5.3. Why Becoming SonarQube Destroys GravityGuard's Core Value
+
+1. **Latency Budget Annihilation**: SonarQube performs cross-file AST traversal, symbol resolution, and dataflow graph generation. Running this in a synchronous `PreToolUse` hook would introduce 5-30 second latencies on every single file write, causing the developer or AI agent to disable the hook immediately.
+2. **Reinventing Decades of Mature Tooling**: SonarQube, Semgrep, and CodeQL represent hundreds of engineer-years of rule development for thousands of language edge cases. Duplicating a lightweight, buggy subset of these in a Python script creates maintenance debt without delivering industrial-grade depth.
+3. **Misaligned Purpose**: SonarQube answers: *"Is this entire codebase maintainable, secure, and compliant with enterprise standards over time?"* GravityGuard answers: *"Is the AI agent about to commit an irreversible, sloppy, or hazardous act right this millisecond?"*
+4. **The Airbag Principle**: GravityGuard is an airbag, not a full annual vehicle inspection. An airbag must deploy in 5 milliseconds when a crash (secret leak, silent error, test destruction) occurs. It does not inspect whether the car's upholstery matches or if the engine oil has 10% wear.
+
+
