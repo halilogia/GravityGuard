@@ -33,3 +33,6 @@ Thumbs.db
 !.vscode/launch.json
 !.vscode/extensions.json
 .idea/
+
+# Agent Internal Brain & Scratch
+brain/
