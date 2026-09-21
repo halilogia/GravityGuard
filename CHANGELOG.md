@@ -5,6 +5,38 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.7] - 2026-09-21
+
+### Fixed
+- **G0 Secret Leak Fast-Pass Bypass (Critical Security Boundary)**:
+  - In v1.2.6 and earlier, `is_vendor_or_cache` and `is_data_or_doc` bypassed the validator prior to running `check_g0_secret_leak()`. This allowed plaintext secrets and tokens to be written without inspection into configuration files (`.json`, `.yaml`, `.yml`, `.toml`, `.ini`), documentation (`.md`, `.txt`), vectors (`.svg`), lockfiles (`.lock`), or vendor/cache paths (`node_modules`, `venv`).
+  - Fix: The pipeline order was inverted. Fast-pass is now strictly restricted to non-text pure binary assets (`.png`, `.jpg`, `.blend`, `.exe`, etc.). All text files (code, config, docs, vendor) are unconditionally scanned by G0. Only after G0 passes are non-code/vendor files fast-passed.
+  - Added AWS Access Key ID regex (`\b(?:AKIA|ASIA|ABIA|ACCA)[0-9A-Z]{16}\b`) with dummy placeholder tolerance.
+
+- **T1 Premature PreToolUse Warnings (Stateful Test Evidence Airbag)**:
+  - In v1.2.6, when an AI agent created a new production file (e.g. `service.ts`), `check_t1_missing_test()` executed during `PreToolUse` before the file was written to disk. Because test files (`service.test.ts`) are typically created in subsequent tool calls, T1 emitted an immediate `T1_MISSING_RELATED_TEST` warning on every new file write, creating false noise.
+  - Fix: T1 is now stateful. When production code is written or updated without immediate test evidence, the pending expectation is saved to `.gravityguard/runtime/test_evidence_state.json`.
+  - When the corresponding test file is written or updated in subsequent tool calls, the pending entry is automatically resolved.
+  - Consolidated unresolved T1 warnings are surfaced during final evaluation (`Stop` / `PostInvocation` hook or `--stop` CLI flag).
+  - Backward compatibility: `testEvidence.deferredMode: false` in `.gravityguard.json` restores legacy immediate PreToolUse warnings.
+  - Added fnmatch glob pattern support to `testEvidence.exemptPatterns` (e.g. `src/components/*`, `*.config.ts`).
+
+- **Test File Path Classification Refinement**:
+  - `is_test_file` previously checked `"test_"` as an arbitrary substring of the full path, causing files within temporary directories containing `test_` in their parent path to be misclassified as test files. Path classification now isolates filename tokens (`test_*`, `*_test.*`, `*.test.*`, `*.spec.*`) from directory segments (`/tests/`, `/test/`, `/__tests__/`).
+
+### Added
+- **`TestV127G0ZeroBypassAndStatefulEvidence`** (11 tests):
+  - G0 secret scans in `.json`, `.yaml`, `.svg`, `.md`, and vendor paths are blocked.
+  - G0 AWS access key detection and placeholder tolerance.
+  - G0 clean non-code files pass without false positives.
+  - Stateful T1 lifecycle: pending state creation, auto-resolution on test write, clean Stop hook.
+  - Glob support in `testEvidence.exemptPatterns`.
+  - Backward compatibility test for `deferredMode: false`.
+
+### Changed
+- Test Count: **104/104 passing** (was 93/93; +11 new regression and lifecycle tests).
+- Anti-bloat invariant intact: in-memory guard logic execution avg **0.029–0.030 ms** (bound < 10 ms).
+
 ## [1.2.6] - 2026-09-21
 
 ### Fixed

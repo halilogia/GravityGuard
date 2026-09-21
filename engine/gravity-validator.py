@@ -6,6 +6,7 @@ import ast
 import time
 import difflib
 import subprocess
+import fnmatch
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -303,6 +304,13 @@ def check_g0_secret_leak(added_text: str) -> Tuple[bool, str, Optional[str]]:
         if not is_placeholder(raw_token):
             return True, f"Slack Token tespit edildi: {redact_token(raw_token)}. Ortam değişkeni kullanın.", None
 
+    # G) AWS Access Key ID (AKIA, ASIA, ABIA, ACCA)
+    aws_match = re.search(r"\b(?:AKIA|ASIA|ABIA|ACCA)[0-9A-Z]{16}\b", added_text)
+    if aws_match:
+        raw_token = aws_match.group(0)
+        if not is_placeholder(raw_token):
+            return True, f"AWS Access Key ID tespit edildi: {redact_token(raw_token)}. Ortam değişkeni (AWS_ACCESS_KEY_ID) veya IAM role kullanın.", None
+
     # 2. MEDIUM-CONFIDENCE WARNING RULES (WARN ONLY, Never Blocks)
     warn_reason: Optional[str] = None
 
@@ -481,7 +489,8 @@ def check_g3_compiler_bypass(added_text: str) -> List[str]:
 def load_gravityguard_config(target_file: str) -> Optional[dict]:
     """Traverse upward looking for .gravityguard.json config."""
     try:
-        current_dir = Path(target_file).parent if os.path.isfile(target_file) else Path(target_file)
+        p = Path(target_file)
+        current_dir = p if p.is_dir() else p.parent
     except (ValueError, OSError):
         current_dir = Path(os.getcwd())
 
@@ -955,6 +964,114 @@ def analyze_python_srp_regex_fallback(content: str, file_path: str = "") -> Tupl
 # 5. PHASE 2: TEST EVIDENCE AIRBAG (T1, T2, T3) — WARN ONLY
 # ============================================================================
 
+# ============================================================================
+# 5.1 STATEFUL TEST EVIDENCE ENGINE (v1.2.7 Pending State Management)
+# ============================================================================
+
+def get_test_evidence_file_path(project_root: Optional[Path] = None) -> Path:
+    override_dir = os.environ.get("GRAVITYGUARD_LOG_DIR")
+    if override_dir:
+        return Path(override_dir) / "test_evidence_state.json"
+    if project_root is None:
+        project_root = Path.cwd()
+    runtime_dir = project_root / ".gravityguard" / "runtime"
+    try:
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+    except (IOError, OSError):
+        return runtime_dir / "test_evidence_state.json"
+    return runtime_dir / "test_evidence_state.json"
+
+
+def load_test_evidence_state(project_root: Optional[Path] = None) -> Dict[str, Any]:
+    path = get_test_evidence_file_path(project_root)
+    if not path.exists():
+        return {"version": 1, "pending": {}}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (IOError, OSError, json.JSONDecodeError, ValueError):
+        return {"version": 1, "pending": {}}
+
+
+def save_test_evidence_state(state: Dict[str, Any], project_root: Optional[Path] = None) -> None:
+    path = get_test_evidence_file_path(project_root)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, ensure_ascii=False)
+        tmp.replace(path)
+    except (IOError, OSError):
+        return
+
+
+def record_pending_test_evidence(
+    target_file: str,
+    candidate_path: Optional[str],
+    expected_name: str,
+    reason: str,
+    project_root: Optional[Path] = None
+) -> None:
+    norm = target_file.replace("\\", "/")
+    state = load_test_evidence_state(project_root)
+    state.setdefault("pending", {})[norm] = {
+        "candidate_path": candidate_path.replace("\\", "/") if candidate_path else None,
+        "expected_name": expected_name,
+        "timestamp": time.time(),
+        "reason": reason
+    }
+    save_test_evidence_state(state, project_root)
+
+
+def resolve_pending_test_evidence(test_file: str, project_root: Optional[Path] = None) -> List[str]:
+    norm_test = test_file.replace("\\", "/").lower()
+    test_path_obj = Path(norm_test)
+    test_stem = test_path_obj.stem.lower()
+
+    base_stem = test_stem
+    if base_stem.startswith("test_"):
+        base_stem = base_stem[5:]
+    if base_stem.endswith((".test", ".spec", "_test")):
+        for sfx in (".test", ".spec", "_test"):
+            if base_stem.endswith(sfx):
+                base_stem = base_stem[:-len(sfx)]
+                break
+
+    state = load_test_evidence_state(project_root)
+    pending = state.get("pending", {})
+    resolved = []
+
+    for prod_path, entry in list(pending.items()):
+        cand = (entry.get("candidate_path") or "").lower()
+        exp = (entry.get("expected_name") or "").lower()
+        prod_stem = Path(prod_path).stem.lower()
+
+        matched = False
+        if cand and (norm_test.endswith(cand) or cand.endswith(norm_test) or Path(cand).name == Path(norm_test).name):
+            matched = True
+        elif exp and (norm_test.endswith(exp) or Path(norm_test).name == exp):
+            matched = True
+        elif base_stem == prod_stem:
+            matched = True
+
+        if matched:
+            resolved.append(prod_path)
+            del pending[prod_path]
+
+    if resolved:
+        save_test_evidence_state(state, project_root)
+    return resolved
+
+
+def get_unresolved_test_evidence(project_root: Optional[Path] = None) -> Dict[str, Any]:
+    state = load_test_evidence_state(project_root)
+    return state.get("pending", {})
+
+
+def clear_test_evidence_state(project_root: Optional[Path] = None) -> None:
+    save_test_evidence_state({"version": 1, "pending": {}}, project_root)
+
+
 DEFAULT_EXEMPT_PATTERNS: List[str] = [
     "types", "constants", "index", ".d.ts", "config", "interfaces", "schemas",
     "migration", "migrations", "fixtures", "mock", "mocks"
@@ -963,6 +1080,7 @@ DEFAULT_EXEMPT_PATTERNS: List[str] = [
 def is_exempt_from_test_evidence(target_file: str, cfg: Optional[dict] = None) -> bool:
     """
     Checks if a target file is exempt from test evidence verification (e.g. types, constants, configs).
+    Supports substring patterns and fnmatch glob patterns.
     """
     normalized = target_file.replace("\\", "/").lower()
     basename = Path(normalized).name.lower()
@@ -974,7 +1092,15 @@ def is_exempt_from_test_evidence(target_file: str, cfg: Optional[dict] = None) -
             exempt_patterns = [p.lower() for p in te_cfg["exemptPatterns"]]
 
     for pat in exempt_patterns:
-        if pat in basename or f"/{pat}/" in normalized:
+        pat_clean = pat.lstrip("/")
+        if (
+            pat in basename or
+            f"/{pat}/" in normalized or
+            fnmatch.fnmatch(basename, pat) or
+            fnmatch.fnmatch(normalized, pat) or
+            fnmatch.fnmatch(normalized, f"*/{pat_clean}") or
+            fnmatch.fnmatch(normalized, f"*{pat_clean}")
+        ):
             return True
 
     if normalized.endswith(".d.ts"):
@@ -1355,6 +1481,10 @@ def evaluate_test_evidence(
             return warnings
 
     if is_test_file:
+        resolved = resolve_pending_test_evidence(target_file)
+        if resolved:
+            log_event("edit", "APPROVED", target_file, f"Resolved pending test evidence for: {', '.join(resolved)}", rule_id="T1_RESOLVED")
+
         t2_warn, t2_msg = check_t2_observable_assertion(
             added_lines, added_text, is_python, is_ts,
             projected_content=projected_content,
@@ -1365,7 +1495,16 @@ def evaluate_test_evidence(
     else:
         t1_warn, t1_msg, candidate_path = check_t1_missing_test(target_file, added_text, cfg)
         if t1_warn:
-            warnings.append(("T1_MISSING_RELATED_TEST", t1_msg))
+            deferred = True
+            if cfg and isinstance(cfg, dict):
+                deferred = cfg.get("testEvidence", {}).get("deferredMode", True)
+
+            if deferred:
+                candidate_p, expected_n = resolve_candidate_test_file(target_file, cfg)
+                record_pending_test_evidence(target_file, candidate_p, expected_n, t1_msg)
+                log_event("edit", "APPROVED", target_file, f"Pending test evidence recorded ({expected_n})", rule_id="T1_PENDING")
+            else:
+                warnings.append(("T1_MISSING_RELATED_TEST", t1_msg))
 
         if candidate_path and os.path.isfile(candidate_path):
             t3_warn, t3_msg = check_t3_symbol_to_test_link(
@@ -1397,6 +1536,18 @@ def validate_gravityguard():
         print(json.dumps({"decision": "allow"}))
         sys.exit(0)
 
+    # 0. Lifecycle Hook Check: Stop / PostInvocation or CLI --stop flag
+    if payload.get("terminationReason") or "--stop" in sys.argv:
+        unresolved = get_unresolved_test_evidence()
+        if unresolved:
+            missing_items = [f"'{p}' (beklenen test: {info.get('expected_name', 'test')})" for p, info in unresolved.items()]
+            warn_reason = f"Test Kanıtı Uyarısı (T1): Oturum tamamlandı ancak şu üretim kodları için test kanıtı bulunamadı: {', '.join(missing_items)}"
+            log_event("stop", "WARNING", "workspace", warn_reason, rule_id="T1_FINAL_UNRESOLVED")
+            print(json.dumps({"decision": "allow", "reason": warn_reason}))
+        else:
+            print(json.dumps({"decision": "allow"}))
+        sys.exit(0)
+
     tool_call = payload.get("toolCall", {})
     args = tool_call.get("args", {})
     target_file = args.get("TargetFile") or args.get("target_file") or args.get("file_path") or ""
@@ -1406,21 +1557,35 @@ def validate_gravityguard():
     normalized_path = target_file.replace("\\\\", "/").replace("\\", "/")
     file_lower = normalized_path.lower()
 
-    # 2. Path classification
-    is_test_file = any(m in file_lower for m in ["/tests/", "/test/", "/__tests__/", "test_", "_test.", ".spec.", ".test."])
+    path_obj = Path(normalized_path)
+    file_name_lower = path_obj.name.lower()
+    parent_parts_lower = [part.lower() for part in path_obj.parent.parts]
+
+    is_in_test_dir = any(d in parent_parts_lower for d in ("tests", "test", "__tests__"))
+    is_test_name = (
+        "test_" in file_name_lower or
+        "_test" in file_name_lower or
+        ".test." in file_name_lower or
+        ".spec." in file_name_lower
+    )
+    is_test_file = is_in_test_dir or is_test_name
     is_vendor_or_cache = any(m in file_lower for m in [
         "/node_modules/", "/venv/", "/.venv/", "/env/", "/.env/", "/dist/", "/build/",
         "/.git/", "/__pycache__/", "/runs/", "/scratch/", "/brain/", "/.gemini/"
     ])
     is_data_or_doc = file_lower.endswith((
         ".json", ".css", ".scss", ".md", ".txt", ".yaml", ".yml", ".toml", ".ini",
-        ".lock", ".svg", ".png", ".jpg", ".blend", ".gitignore"
+        ".lock", ".svg", ".gitignore"
+    ))
+    is_binary_asset = file_lower.endswith((
+        ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".blend", ".exe", ".dll",
+        ".so", ".bin", ".wasm", ".zip", ".tar", ".gz"
     ))
 
-    # Fast-pass for vendor, cache, and non-code assets
-    if is_vendor_or_cache or (is_data_or_doc and not file_lower.endswith((".py", ".ts", ".tsx", ".js", ".jsx"))):
+    # Fast-pass for pure binary assets (diffing binary content is meaningless and unsafe)
+    if is_binary_asset:
         if target_file:
-            log_event(tool_name, "APPROVED", target_file, "Exempt file (Vendor/Cache/Asset)", rule_id="EXEMPT")
+            log_event(tool_name, "APPROVED", target_file, "Exempt file (Binary Asset)", rule_id="EXEMPT")
         print(json.dumps({"decision": "allow"}))
         sys.exit(0)
 
@@ -1428,13 +1593,11 @@ def validate_gravityguard():
     old_full_content, projected_content = get_projected_and_old_content(target_file, tool_name, args)
     added_lines, added_text, added_line_numbers = get_diff_analysis(old_full_content, projected_content)
 
-    is_python = file_lower.endswith(".py")
-    is_ts = file_lower.endswith((".ts", ".tsx", ".js", ".jsx"))
-
     all_warnings: List[Tuple[str, str]] = []
 
     # ========================================================================
     # GUARD 0: G0 — SECRET LEAK GUARD (BLOCK / WARN)
+    # Executed for ALL text files (code, config, docs, vendor, cache)
     # ========================================================================
     g0_violated, g0_reason, g0_warn = check_g0_secret_leak(added_text)
     if g0_warn:
@@ -1447,6 +1610,20 @@ def validate_gravityguard():
             "reason": f"🛑 [G0_SECRET_LEAK]: '{target_file}' - {g0_reason}"
         }))
         sys.exit(0)
+
+    # Fast-pass for vendor, cache, and non-code text assets (ONLY AFTER G0 IS CLEAN)
+    if is_vendor_or_cache or (is_data_or_doc and not file_lower.endswith((".py", ".ts", ".tsx", ".js", ".jsx"))):
+        if target_file:
+            log_event(tool_name, "APPROVED", target_file, "Exempt file (Vendor/Cache/Asset)", rule_id="EXEMPT")
+        if all_warnings:
+            warn_parts = [f"[{wid}] {wmsg}" for wid, wmsg in all_warnings]
+            print(json.dumps({"decision": "allow", "reason": " ⚠ ".join(warn_parts)}))
+        else:
+            print(json.dumps({"decision": "allow"}))
+        sys.exit(0)
+
+    is_python = file_lower.endswith(".py")
+    is_ts = file_lower.endswith((".ts", ".tsx", ".js", ".jsx"))
 
     # ========================================================================
     # GUARD 1: G1 — SILENT EXCEPTION (BLOCK)

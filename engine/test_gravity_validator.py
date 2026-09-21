@@ -901,7 +901,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
         self.assertNotIn("T1_MISSING_RELATED_TEST", rule_ids)
 
     def test_t1_warn_when_candidate_test_absent(self):
-        """When production code changes and no test file exists on disk, T1 must WARN (not block)"""
+        """v1.2.7: When production code changes and no test exists on disk, T1 defers warning to Stop hook"""
         payload = {
             "toolCall": {
                 "name": "replace_file_content",
@@ -915,7 +915,11 @@ class TestGravityGuardPhase2(unittest.TestCase):
         res, _ = run_validator(payload)
         self.assertEqual(res.get("decision"), "allow", "T1 must never block production changes")
         rule_ids = _warnings_from(res)
-        self.assertIn("T1_MISSING_RELATED_TEST", rule_ids)
+        self.assertNotIn("T1_MISSING_RELATED_TEST", rule_ids, "v1.2.7: No premature warning during PreToolUse")
+
+        # Final evaluation surfaces the single consolidated warning
+        stop_res, _ = run_validator({"terminationReason": "model_stop"})
+        self.assertIn("Test Kanıtı Uyarısı (T1)", _warnings_from(stop_res))
 
     def test_t1_allow_when_candidate_test_recently_touched(self):
         """When candidate test file exists and was touched in this session, T1 must NOT warn"""
@@ -952,7 +956,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_t1_warn_when_candidate_test_untouched_in_session(self):
-        """When candidate test file exists but was not touched in session window, T1 must WARN"""
+        """v1.2.7: When candidate test file exists but was not touched in session window, T1 defers warning to Stop hook"""
         temp_dir = tempfile.mkdtemp()
         try:
             src_dir = os.path.join(temp_dir, "src")
@@ -984,7 +988,11 @@ class TestGravityGuardPhase2(unittest.TestCase):
             res, _ = run_validator(payload)
             self.assertEqual(res.get("decision"), "allow")
             rule_ids = _warnings_from(res)
-            self.assertIn("T1_MISSING_RELATED_TEST", rule_ids)
+            self.assertNotIn("T1_MISSING_RELATED_TEST", rule_ids, "v1.2.7: Stale test is deferred to pending, no premature warning in PreToolUse")
+
+            # Final evaluation surfaces the warning
+            stop_res, _ = run_validator({"terminationReason": "model_stop"})
+            self.assertIn("Test Kanıtı Uyarısı (T1)", _warnings_from(stop_res))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -2413,6 +2421,240 @@ class TestWindowsEncodingRegression(unittest.TestCase):
         finally:
             shutil.rmtree(log_dir, ignore_errors=True)
             shutil.rmtree(proj_root, ignore_errors=True)
+
+
+class TestV127G0ZeroBypassAndStatefulEvidence(unittest.TestCase):
+    """
+    v1.2.7 Regression and Feature Test Suite:
+      1. G0 Zero-Bypass: Secrets in .json, .yaml, .svg, .md, and vendor/cache paths are strictly BLOCKED.
+      2. G0 AWS Access Key detection + placeholder tolerance.
+      3. Stateful T1 Test Evidence: PreToolUse defers warning to pending state, auto-resolves when test is written,
+         and surfaces consolidated warning only on Stop/final check.
+      4. Glob pattern support in testEvidence.exemptPatterns.
+      5. Backward compatibility for immediate mode when deferredMode: False.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="gg_v127_test_")
+        os.environ["GRAVITYGUARD_LOG_DIR"] = self.temp_dir
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_g0_secret_in_json_file_blocked(self):
+        secret = "sk-proj-" + "abc1234567890123456789012345"
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": os.path.join(self.temp_dir, "config.json"),
+                    "CodeContent": f'{{\n  "apiKey": "{secret}"\n}}\n'
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "deny", "G0 must block secret in .json config files")
+        self.assertIn("G0_SECRET_LEAK", res.get("reason", ""))
+
+    def test_g0_secret_in_yaml_file_blocked(self):
+        secret = "sk-ant-api03-" + "abcdefghijklmnopqrstuvwxyz1234567890"
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": os.path.join(self.temp_dir, "settings.yaml"),
+                    "CodeContent": f"auth:\n  claude_key: {secret}\n"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "deny", "G0 must block secret in .yaml files")
+        self.assertIn("G0_SECRET_LEAK", res.get("reason", ""))
+
+    def test_g0_secret_in_svg_file_blocked(self):
+        secret = "AIza" + "SyD123456789012345678901234567890123"
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": os.path.join(self.temp_dir, "logo.svg"),
+                    "CodeContent": f'<svg><!-- {secret} --></svg>'
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "deny", "G0 must block secret in .svg files")
+        self.assertIn("G0_SECRET_LEAK", res.get("reason", ""))
+
+    def test_g0_secret_in_markdown_file_blocked(self):
+        secret = "ghp_" + "12345678901234567890"
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": os.path.join(self.temp_dir, "README.md"),
+                    "CodeContent": f"# Setup\nToken: {secret}\n"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "deny", "G0 must block secret in .md files")
+        self.assertIn("G0_SECRET_LEAK", res.get("reason", ""))
+
+    def test_g0_secret_in_vendor_path_blocked(self):
+        secret = "sk-proj-" + "abc1234567890123456789012345"
+        vendor_file = os.path.join(self.temp_dir, "node_modules", "package", "index.js")
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": vendor_file,
+                    "CodeContent": f"const key = '{secret}';"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "deny", "G0 must block secret even in vendor/cache paths")
+        self.assertIn("G0_SECRET_LEAK", res.get("reason", ""))
+
+    def test_g0_aws_access_key_blocked(self):
+        key = "AKIA" + "1234567890ABCDEF"
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": os.path.join(self.temp_dir, "aws_client.py"),
+                    "CodeContent": f'AWS_KEY = "{key}"\n'
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "deny", "G0 must block real AWS Access Key ID")
+        self.assertIn("AWS Access Key ID", res.get("reason", ""))
+
+    def test_g0_aws_placeholder_allowed(self):
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": os.path.join(self.temp_dir, "aws_client.py"),
+                    "CodeContent": 'AWS_KEY = "AKIAIOSFODNN7EXAMPLE"\n'
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow", "G0 must permit AWS placeholder/example fixture")
+
+    def test_g0_clean_data_and_vendor_allowed_as_exempt(self):
+        payload_json = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": os.path.join(self.temp_dir, "normal.json"),
+                    "CodeContent": '{\n  "theme": "dark",\n  "version": 1\n}\n'
+                }
+            }
+        }
+        res, _ = run_validator(payload_json)
+        self.assertEqual(res.get("decision"), "allow")
+        self.assertEqual(_warnings_from(res), "")
+
+    def test_t1_stateful_lifecycle_resolve_flow(self):
+        """Full lifecycle: Prod write (deferred) -> Stop hook warns -> Test write -> Stop hook clean"""
+        src_file = os.path.join(self.temp_dir, "src", "payment.ts")
+        test_file = os.path.join(self.temp_dir, "tests", "payment.test.ts")
+        os.makedirs(os.path.dirname(src_file), exist_ok=True)
+        os.makedirs(os.path.dirname(test_file), exist_ok=True)
+
+        # 1. Write production file: should be ALLOWED without premature T1 warning
+        payload_prod = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": src_file,
+                    "CodeContent": "export function processPayment() { return true; }\n"
+                }
+            }
+        }
+        res1, _ = run_validator(payload_prod)
+        self.assertEqual(res1.get("decision"), "allow")
+        self.assertNotIn("T1_MISSING_RELATED_TEST", _warnings_from(res1), "v1.2.7: PreToolUse must not prematurely warn")
+
+        # 2. Stop hook at this moment: should report missing test for payment.ts
+        stop_res1, _ = run_validator({"terminationReason": "model_stop"})
+        self.assertIn("Test Kanıtı Uyarısı (T1)", _warnings_from(stop_res1))
+        self.assertIn("payment.ts", _warnings_from(stop_res1))
+
+        # 3. Agent writes the test file in subsequent tool call
+        payload_test = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": test_file,
+                    "CodeContent": "import { processPayment } from '../src/payment';\ntest('pay', () => { expect(processPayment()).toBe(true); });\n"
+                }
+            }
+        }
+        res2, _ = run_validator(payload_test)
+        self.assertEqual(res2.get("decision"), "allow")
+
+        # 4. Stop hook now: should be completely CLEAN because test evidence was resolved!
+        stop_res2, _ = run_validator({"terminationReason": "model_stop"})
+        self.assertEqual(_warnings_from(stop_res2), "", "Pending test evidence was resolved; Stop hook must be clean")
+
+    def test_t1_exempt_patterns_glob_support(self):
+        """testEvidence.exemptPatterns must support glob patterns like src/components/*"""
+        cfg_path = os.path.join(self.temp_dir, ".gravityguard.json")
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "testEvidence": {
+                    "exemptPatterns": ["src/components/*", "*.config.ts"]
+                }
+            }, f)
+
+        card_file = os.path.join(self.temp_dir, "src", "components", "Card.tsx")
+        os.makedirs(os.path.dirname(card_file), exist_ok=True)
+
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": card_file,
+                    "CodeContent": "export function Card() { return <div>Card</div>; }\n"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+        # Check Stop hook: should NOT have Card.tsx because it's glob-exempt!
+        stop_res, _ = run_validator({"terminationReason": "model_stop"})
+        self.assertNotIn("Card.tsx", _warnings_from(stop_res))
+
+    def test_t1_immediate_mode_backward_compatibility(self):
+        """When deferredMode is explicitly set to False, PreToolUse emits immediate T1 warning (legacy)"""
+        cfg_path = os.path.join(self.temp_dir, ".gravityguard.json")
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "testEvidence": {
+                    "deferredMode": False
+                }
+            }, f)
+
+        service_file = os.path.join(self.temp_dir, "src", "legacy_service.ts")
+        os.makedirs(os.path.dirname(service_file), exist_ok=True)
+
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": service_file,
+                    "CodeContent": "export function legacy() { return 1; }\n"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+        self.assertIn("T1_MISSING_RELATED_TEST", _warnings_from(res), "immediate mode must surface warning on PreToolUse")
 
 
 if __name__ == "__main__":
