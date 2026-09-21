@@ -355,8 +355,12 @@ def check_g1_silent_exception(
             r"except(?:\s+[^:]+)?:\s*(?:\r?\n\s*)+(?:pass|\.\.\.)(?!\w)",
             re.MULTILINE
         )
-        if py_empty_pattern.search(added_text):
-            return True, "Yeni eklenen boş exception handler tespit edildi ('except: pass' / 'except: ...'). Hatalar sessizce yutulamaz; hata loglanmalı, anlamlı bir kurtarma/fallback davranışı tanımlanmalı veya yeniden fırlatılmalıdır."
+        py_m = py_empty_pattern.search(added_text)
+        if py_m:
+            base_txt = projected_content if projected_content and py_empty_pattern.search(projected_content) else added_text
+            m_found = py_empty_pattern.search(base_txt)
+            line_num = base_txt[:m_found.start()].count("\n") + 1 if m_found else 1
+            return True, f"Yeni eklenen boş exception handler tespit edildi (Satır {line_num}: 'except: pass' / 'except: ...'). Hatalar sessizce yutulamaz; hata loglanmalı, anlamlı bir kurtarma/fallback davranışı tanımlanmalı veya yeniden fırlatılmalıdır."
 
         # 2. AST inspection on projected content: verify line numbers intersect with added_line_numbers
         try:
@@ -380,7 +384,7 @@ def check_g1_silent_exception(
                         handler_lines = set(range(start_line, end_line + 1))
                         # Trigger only if this handler is part of newly added/modified lines
                         if handler_lines.intersection(added_line_numbers):
-                            return True, "Yeni eklenen boş exception handler (AST: except pass/ellipsis). Hatalar sessizce yutulamaz; hata loglanmalı, anlamlı bir kurtarma/fallback davranışı tanımlanmalı veya yeniden fırlatılmalıdır."
+                            return True, f"Yeni eklenen boş exception handler (Satır {start_line}: except pass/ellipsis). Hatalar sessizce yutulamaz; hata loglanmalı, anlamlı bir kurtarma/fallback davranışı tanımlanmalı veya yeniden fırlatılmalıdır."
         except (SyntaxError, ValueError):
             tree = None
 
@@ -392,7 +396,10 @@ def check_g1_silent_exception(
             re.MULTILINE
         )
         if ts_empty_pattern.search(added_text):
-            return True, "Yeni eklenen boş catch bloğu tespit edildi ('catch {}'). Hatalar sessizce yutulamaz; hata loglanmalı, anlamlı bir kurtarma/fallback davranışı tanımlanmalı veya yeniden fırlatılmalıdır."
+            base_txt = projected_content if projected_content and ts_empty_pattern.search(projected_content) else added_text
+            m_found = ts_empty_pattern.search(base_txt)
+            line_num = base_txt[:m_found.start()].count("\n") + 1 if m_found else 1
+            return True, f"Yeni eklenen boş catch bloğu tespit edildi (Satır {line_num}: 'catch {{}}'). Hatalar sessizce yutulamaz; hata loglanmalı, anlamlı bir kurtarma/fallback davranışı tanımlanmalı veya yeniden fırlatılmalıdır."
 
     return False, ""
 
