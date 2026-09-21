@@ -2656,6 +2656,112 @@ class TestV127G0ZeroBypassAndStatefulEvidence(unittest.TestCase):
         self.assertEqual(res.get("decision"), "allow")
         self.assertIn("T1_MISSING_RELATED_TEST", _warnings_from(res), "immediate mode must surface warning on PreToolUse")
 
+    def test_t1_duplicate_writes_do_not_duplicate_pending(self):
+        """Repeated writes to the same production file do not generate duplicate pending records"""
+        src = os.path.join(self.temp_dir, "src", "order.ts")
+        os.makedirs(os.path.dirname(src), exist_ok=True)
+
+        for i in range(3):
+            payload = {
+                "toolCall": {
+                    "name": "write_to_file",
+                    "args": {
+                        "TargetFile": src,
+                        "CodeContent": f"export function createOrder() {{ return {i}; }}\n"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "allow")
+
+        state_path = os.path.join(self.temp_dir, "test_evidence_state.json")
+        with open(state_path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+
+        pending = state.get("pending", {})
+        self.assertEqual(len(pending), 1, "Only 1 pending entry must exist for order.ts despite 3 writes")
+
+    def test_t1_corrupted_state_file_fail_safe(self):
+        """Corrupted or truncated state file is safely recovered without blocking writes"""
+        state_path = os.path.join(self.temp_dir, "test_evidence_state.json")
+        with open(state_path, "w", encoding="utf-8") as f:
+            f.write("{corrupted_json: true, [unterminated")
+
+        src = os.path.join(self.temp_dir, "src", "safe.ts")
+        os.makedirs(os.path.dirname(src), exist_ok=True)
+
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": src,
+                    "CodeContent": "export const safe = 42;\n"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow", "Guard must not crash when state file is corrupted")
+
+    def test_t1_stale_records_auto_pruned(self):
+        """Pending records older than 3600 seconds are pruned upon load"""
+        state_path = os.path.join(self.temp_dir, "test_evidence_state.json")
+        now = time.time()
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "version": 1,
+                "pending": {
+                    "src/ancient.ts": {
+                        "candidate_path": "tests/ancient.test.ts",
+                        "expected_name": "ancient.test.ts",
+                        "timestamp": now - 7200,  # 2 hours old
+                        "reason": "stale item"
+                    },
+                    "src/fresh.ts": {
+                        "candidate_path": "tests/fresh.test.ts",
+                        "expected_name": "fresh.test.ts",
+                        "timestamp": now - 60,  # 1 min old
+                        "reason": "fresh item"
+                    }
+                }
+            }, f)
+
+        # Stop hook loads state and prunes ancient.ts
+        stop_res, _ = run_validator({"terminationReason": "model_stop"})
+        reason = _warnings_from(stop_res)
+        self.assertNotIn("ancient.ts", reason, "Stale record older than TTL must be pruned")
+        self.assertIn("fresh.ts", reason, "Fresh record must be preserved")
+
+    def test_t1_modified_prod_file_with_old_test_deferred(self):
+        """When modifying an existing prod file whose test exists but has old mtime, warning is deferred"""
+        src = os.path.join(self.temp_dir, "src", "user.ts")
+        test = os.path.join(self.temp_dir, "tests", "user.test.ts")
+        os.makedirs(os.path.dirname(src), exist_ok=True)
+        os.makedirs(os.path.dirname(test), exist_ok=True)
+
+        # Test exists but was created outside session window (e.g. 1000s ago)
+        with open(test, "w", encoding="utf-8") as f:
+            f.write("test('user', () => {});\n")
+        old_time = time.time() - 1000
+        os.utime(test, (old_time, old_time))
+
+        # Modifying user.ts
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": src,
+                    "CodeContent": "export function getUser() { return { id: 1 }; }\n"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+        self.assertNotIn("T1_MISSING_RELATED_TEST", _warnings_from(res), "PreToolUse must defer warning")
+
+        # Stop hook surfaces T1 warning for user.ts
+        stop_res, _ = run_validator({"terminationReason": "model_stop"})
+        self.assertIn("user.ts", _warnings_from(stop_res), "Stop hook must report un-updated test")
+
 
 if __name__ == "__main__":
     unittest.main()

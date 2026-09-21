@@ -988,7 +988,19 @@ def load_test_evidence_state(project_root: Optional[Path] = None) -> Dict[str, A
         return {"version": 1, "pending": {}}
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            if not isinstance(data, dict):
+                return {"version": 1, "pending": {}}
+            # Prune stale pending entries older than session TTL (3600s)
+            now = time.time()
+            pending = data.get("pending", {})
+            if isinstance(pending, dict):
+                fresh_pending = {
+                    k: v for k, v in pending.items()
+                    if isinstance(v, dict) and (now - v.get("timestamp", now)) < 3600
+                }
+                data["pending"] = fresh_pending
+            return data
     except (IOError, OSError, json.JSONDecodeError, ValueError):
         return {"version": 1, "pending": {}}
 
