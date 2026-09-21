@@ -356,7 +356,7 @@ def check_g1_silent_exception(
             re.MULTILINE
         )
         if py_empty_pattern.search(added_text):
-            return True, "Yeni eklenen boş exception handler tespit edildi ('except: pass' / 'except: ...'). Hatalar loglanmalı veya fırlatılmalıdır."
+            return True, "Yeni eklenen boş exception handler tespit edildi ('except: pass' / 'except: ...'). Hatalar sessizce yutulamaz; hata loglanmalı, anlamlı bir kurtarma/fallback davranışı tanımlanmalı veya yeniden fırlatılmalıdır."
 
         # 2. AST inspection on projected content: verify line numbers intersect with added_line_numbers
         try:
@@ -380,7 +380,7 @@ def check_g1_silent_exception(
                         handler_lines = set(range(start_line, end_line + 1))
                         # Trigger only if this handler is part of newly added/modified lines
                         if handler_lines.intersection(added_line_numbers):
-                            return True, "Yeni eklenen boş exception handler (AST: except pass/ellipsis). Sessizce yutulan hatalar yasaktır."
+                            return True, "Yeni eklenen boş exception handler (AST: except pass/ellipsis). Hatalar sessizce yutulamaz; hata loglanmalı, anlamlı bir kurtarma/fallback davranışı tanımlanmalı veya yeniden fırlatılmalıdır."
         except (SyntaxError, ValueError):
             tree = None
 
@@ -392,7 +392,7 @@ def check_g1_silent_exception(
             re.MULTILINE
         )
         if ts_empty_pattern.search(added_text):
-            return True, "Yeni eklenen boş catch bloğu tespit edildi ('catch {}'). Hatalar sessizce yutulamaz."
+            return True, "Yeni eklenen boş catch bloğu tespit edildi ('catch {}'). Hatalar sessizce yutulamaz; hata loglanmalı, anlamlı bir kurtarma/fallback davranışı tanımlanmalı veya yeniden fırlatılmalıdır."
 
     return False, ""
 

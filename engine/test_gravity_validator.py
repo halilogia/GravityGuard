@@ -2762,6 +2762,80 @@ class TestV127G0ZeroBypassAndStatefulEvidence(unittest.TestCase):
         stop_res, _ = run_validator({"terminationReason": "model_stop"})
         self.assertIn("user.ts", _warnings_from(stop_res), "Stop hook must report un-updated test")
 
+    def test_g1_variable_naming_tricks_still_blocked(self):
+        """Variable name tricks like catch (_expectedErr) {} or catch (_ignored) {} must NOT bypass G1"""
+        src = os.path.join(self.temp_dir, "src", "trick.ts")
+        os.makedirs(os.path.dirname(src), exist_ok=True)
+
+        for var_name in ["_expectedErr", "_ignored", "_err", "unused"]:
+            payload = {
+                "toolCall": {
+                    "name": "write_to_file",
+                    "args": {
+                        "TargetFile": src,
+                        "CodeContent": f"try {{ localStorage.clear(); }} catch ({var_name}) {{}}\n"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "deny", f"catch ({var_name}) {{}} must be BLOCKED")
+            self.assertIn("G1_SILENT_EXCEPTION", res.get("reason", ""))
+
+    def test_g1_remediation_hint_in_reason(self):
+        """G1 block reason must include actionable remediation advice without mandating specific APIs"""
+        src = os.path.join(self.temp_dir, "src", "hint_check.ts")
+        os.makedirs(os.path.dirname(src), exist_ok=True)
+
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": src,
+                    "CodeContent": "try { doSomething(); } catch {}\n"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "deny")
+        reason = res.get("reason", "")
+        self.assertIn("G1_SILENT_EXCEPTION", reason)
+        self.assertIn("kurtarma/fallback", reason)
+        self.assertIn("fırlatılmalıdır", reason)
+
+    def test_g1_allow_meaningful_recovery_ts(self):
+        """Meaningful fallback recovery in TS catch block must be ALLOWED"""
+        src = os.path.join(self.temp_dir, "src", "recovery.ts")
+        os.makedirs(os.path.dirname(src), exist_ok=True)
+
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": src,
+                    "CodeContent": "export function getSetting() {\n  try { return localStorage.getItem('k'); }\n  catch { return 'default_value'; }\n}\n"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow", "Fallback return in catch block must be allowed")
+
+    def test_g1_allow_meaningful_handling_ts(self):
+        """Catch blocks that log or handle the error must be ALLOWED"""
+        src = os.path.join(self.temp_dir, "src", "handled.ts")
+        os.makedirs(os.path.dirname(src), exist_ok=True)
+
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": src,
+                    "CodeContent": "export function run() {\n  try { compute(); }\n  catch (err) { console.error('Failed to compute', err); }\n}\n"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow", "Handler with logging must be allowed")
+
 
 if __name__ == "__main__":
     unittest.main()
