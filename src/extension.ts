@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as http from 'http';
+import { buildOfflinePrompt, buildSystemPrompt, classifyIntent, modeLabel, IntentMode } from './intent';
 
 interface LogEvent {
   status?: string;
@@ -20,19 +21,37 @@ interface GuardianData {
   events?: LogEvent[];
 }
 
+class RouterUnreachableError extends Error {}
+
+interface EnhancementResult {
+  text: string;
+  offline: boolean;
+  mode: IntentMode;
+}
+
 function getRouterConfig() {
   const config = vscode.workspace.getConfiguration('gravityguard');
   const host = config.get<string>('routerHost') || process.env.ROUTER_HOST || '127.0.0.1';
   const port = config.get<number>('routerPort') || (process.env.ROUTER_PORT ? parseInt(process.env.ROUTER_PORT, 10) : 20128);
   const token = config.get<string>('routerToken') || process.env.GRAVITYGUARD_ROUTER_TOKEN || process.env.ROUTER_TOKEN || '';
-  return { host, port, token };
+  const timeoutMs = config.get<number>('routerTimeoutMs') || parseInt(process.env.ROUTER_TIMEOUT_MS || '', 10) || 12000;
+  const configuredModels = config.get<string[]>('models') || [];
+  const envModels = (process.env.ROUTER_MODELS || '').split(',').map(m => m.trim()).filter(Boolean);
+  const models = (configuredModels.length ? configuredModels : (envModels.length ? envModels : DEFAULT_MODELS))
+    .map(m => m.trim())
+    .filter(Boolean);
+  return { host, port, token, timeoutMs, models };
 }
 
-const CANDIDATE_MODELS = [
+const DEFAULT_MODELS = [
   'ag/gemini-3.8-flash-low',
   'ag/gemini-3.7-flash-medium',
   'all'
 ];
+
+const CONNECTION_ERROR_CODES = new Set([
+  'ECONNREFUSED', 'ENOTFOUND', 'EHOSTUNREACH', 'ENETUNREACH', 'EAI_AGAIN', 'ECONNRESET', 'EPIPE'
+]);
 
 export function activate(context: vscode.ExtensionContext): void {
   console.log('[GravityGuard] Extension activated successfully!');
@@ -50,14 +69,21 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   promptStatusBarItem.command = 'antigravityBridge.enhancePrompt';
   promptStatusBarItem.text = '$(sparkle) Prompt Geliştir';
-  promptStatusBarItem.tooltip = 'GravityGuard: 9Router AI ile Promptu Geliştir (Ctrl+Alt+E)';
+  promptStatusBarItem.tooltip = 'GravityGuard: Yerel AI ağ geçidi ile Promptu Geliştir (Ctrl+Alt+E)';
   promptStatusBarItem.show();
   context.subscriptions.push(promptStatusBarItem);
 
   // 3. Register Commands
   context.subscriptions.push(
-    vscode.commands.registerCommand('antigravityBridge.ping', () => {
-      vscode.window.showInformationMessage('🚀 GravityGuard is Live!');
+    vscode.commands.registerCommand('antigravityBridge.ping', async () => {
+      const health = await probeRouter();
+      if (health.ok) {
+        vscode.window.showInformationMessage(`🚀 GravityGuard is Live — yerel AI geçidi: ${health.detail}`);
+      } else {
+        vscode.window.showWarningMessage(
+          `GravityGuard aktif, ancak yerel AI geçidine ulaşılamıyor: ${health.detail}. Prompt Geliştir yine de çalışır (çevrimdışı şablon modu).`
+        );
+      }
     }),
     vscode.commands.registerCommand('antigravityBridge.refreshLogs', () => {
       provider.updateHtml();
@@ -81,7 +107,7 @@ async function handleEnhancePrompt(): Promise<void> {
 
   const inputPrompt = await vscode.window.showInputBox({
     prompt: 'Geliştirmek istediğiniz prompt veya talimatı girin (GravityGuard AI):',
-    placeHolder: 'Örn: SRP kuralına uygun websocket bağlantı yöneticisi oluştur...',
+    placeHolder: 'Örn: SRP kuralına uygun websocket bağlantı yöneticisi oluştur...  |  Mod sabitlemek için: "#denetle: ..."',
     value: initialText,
     ignoreFocusOut: true
   });
@@ -90,23 +116,27 @@ async function handleEnhancePrompt(): Promise<void> {
     return;
   }
 
+  const classification = classifyIntent(inputPrompt.trim());
+
   try {
-    let enhancedResult = '';
+    let result: EnhancementResult | undefined;
     await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
-        title: 'GravityGuard: Prompt analiz ediliyor ve aşırı geliştiriliyor...',
+        title: `GravityGuard: ${modeLabel(classification.mode)} modunda prompt hazırlanıyor...`,
         cancellable: false
       },
       async () => {
-        enhancedResult = await requestPromptEnhancement(inputPrompt.trim());
+        result = await requestPromptEnhancement(inputPrompt.trim(), classification.mode);
       }
     );
 
-    if (!enhancedResult) {
-      vscode.window.showErrorMessage('Prompt geliştirilemedi. 9Router boş yanıt döndü.');
+    if (!result || !result.text) {
+      vscode.window.showErrorMessage('Prompt geliştirilemedi.');
       return;
     }
+
+    const enhancedResult = result.text;
 
     // 1. Copy directly to clipboard
     await vscode.env.clipboard.writeText(enhancedResult);
@@ -119,8 +149,9 @@ async function handleEnhancePrompt(): Promise<void> {
     }
 
     // 3. Inform user with action button
+    const originNote = result.offline ? ' — çevrimdışı şablon modu' : '';
     const action = await vscode.window.showInformationMessage(
-      '✨ Prompt aşırı geliştirildi ve panoya kopyalandı! (Chat penceresine Ctrl+V ile yapıştırabilirsiniz)',
+      `✨ Prompt geliştirildi ve panoya kopyalandı (${modeLabel(result.mode)}${originNote})`,
       'Yeni Belgede Aç'
     );
 
@@ -134,42 +165,78 @@ async function handleEnhancePrompt(): Promise<void> {
   } catch (error: any) {
     console.error('[Prompt Enhancer Error]:', error);
     vscode.window.showErrorMessage(
-      `Prompt geliştirme hatası: ${error?.message || error}. 9Router servisinin çalıştığından emin olun.`
+      `Prompt geliştirme hatası: ${error?.message || error}`
     );
   }
 }
 
-async function requestPromptEnhancement(rawPrompt: string): Promise<string> {
-  const systemPrompt = 
-`Sen kıdemli bir yazılım mimarı ve prompt mühendisisin. Kullanıcının verdiği ham/kısa prompt'u analiz et ve Antigravity IDE içindeki AI asistanına (Agent) verilecek en mükemmel PROMPT'a dönüştür.
-
-ZORUNLU KURALLAR:
-1. KULLANICININ NİYETİNİ (INTENT) TESPİT ET:
-   - A) İSTİŞARE / FİKİR / BEYİN FIRTINASI: Eğer kullanıcı 'Fikirlerin neler?', 'Nasıl yapmalıyız?', 'Ne önerirsin?', 'Mantıklı mı?' gibi sorular soruyorsa, ASLA KÖRÜ KÖRÜNE 'Şunları kodla, şu dosyaları aç' şeklinde icraat emri verme! Bunun yerine promptu; 'Kod yazma, mimari analiz ve strateji sun' şartıyla alternatifleri (Seçenek A, B, C), trade-off'ları, over-engineering risklerini ve aşamalı karar destek analizini talep eden derinlemesine bir İSTİŞARE / DANIŞMANLIK PROMPTUNA dönüştür.
-   - B) UYGULAMA / KODLAMA: Yalnızca kullanıcı açıkça 'Şunu yap', 'Şu kodu yaz', 'Şu modülü ekle' dediğinde savunmacı teknik inşaat şartnamesine (Amaç, Mimari, SRP sınırları, Hata Yönetimi, Testler) dönüştür.
-2. MİMARİ VE MODÜLERLİK DİREKTİFLERİ (ARCH_FILE_GROWTH & SRP KORUMASI):
-   - Tek bir dosyayı kontrolsüzce şişirmek (monolith accumulation) yerine bağımsız sorumlulukları ayrı, cohesive modüllere ayırmayı şart koş.
-   - Mevcut büyük bir dosyaya yeni bir ana sorumluluk eklemek yerine yeni modül oluşturmayı tercih ettir.
-   - Ancak yapay/gereksiz parçalamadan (over-splitting/over-engineering) kaçın; yalnızca belirgin sorumluluk ve katman sınırlarında ayır.
-   - En az dosya sayısıyla en net sorumluluk ayrımını hedefle.
-3. Doğrudan geliştirilmiş prompt metnini ver. Başında veya sonunda gereksiz meta konuşmalar, giriş-çıkış tebrikleri yapma.
-4. Dil: Kullanıcının girdiği dille (Türkçe veya İngilizce) aynı dilde cevap ver.`;
+async function requestPromptEnhancement(rawPrompt: string, mode: IntentMode): Promise<EnhancementResult> {
+  const classification = classifyIntent(rawPrompt);
+  const systemPrompt = buildSystemPrompt(mode);
+  const { host, port, models } = getRouterConfig();
 
   let lastError: Error | null = null;
 
-  for (const model of CANDIDATE_MODELS) {
+  for (const model of models) {
     try {
       const response = await postChatCompletion(model, systemPrompt, rawPrompt);
       if (response && response.trim().length > 0) {
-        return response.trim();
+        return { text: response.trim(), offline: false, mode };
       }
     } catch (err: any) {
-      console.warn(`[Prompt Enhancer] Model ${model} failed, trying fallback. Error:`, err.message);
+      console.warn(`[Prompt Enhancer] Model ${model} failed:`, err?.message);
       lastError = err;
+      if (err instanceof RouterUnreachableError) {
+        console.warn(`[Prompt Enhancer] ${host}:${port} erişilemiyor, kalan modlar atlanıyor.`);
+        break;
+      }
     }
   }
 
-  throw lastError || new Error('Tüm 9Router model adayları başarısız oldu.');
+  console.warn(
+    `[Prompt Enhancer] Yerel model yanıt vermedi (${lastError?.message || 'bilinmiyor'}). Çevrimdışı şablona geçiliyor.`
+  );
+  return { text: buildOfflinePrompt(rawPrompt, classification), offline: true, mode };
+}
+
+function probeRouter(): Promise<{ ok: boolean; detail: string }> {
+  return new Promise(resolve => {
+    const { host, port, token } = getRouterConfig();
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const req = http.request(
+      { hostname: host, port: port, path: '/v1/models', method: 'GET', headers, timeout: 3000 },
+      res => {
+        let data = '';
+        res.setEncoding('utf8');
+        res.on('data', chunk => (data += chunk));
+        res.on('end', () => {
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            let count = 0;
+            try {
+              count = JSON.parse(data)?.data?.length ?? 0;
+            } catch {
+              count = 0;
+            }
+            resolve({ ok: true, detail: `${host}:${port} yanıt verdi${count ? ` (${count} model)` : ''}` });
+          } else {
+            resolve({
+              ok: true,
+              detail: `${host}:${port} erişilebilir, /v1 models uç noktası yok (HTTP ${res.statusCode})`
+            });
+          }
+        });
+      }
+    );
+    req.on('error', e => resolve({ ok: false, detail: `${host}:${port} — ${(e as NodeJS.ErrnoException).code || e.message}` }));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve({ ok: false, detail: `${host}:${port} — zaman aşımı` });
+    });
+    req.end();
+  });
 }
 
 function postChatCompletion(model: string, systemPrompt: string, userPrompt: string): Promise<string> {
@@ -184,7 +251,7 @@ function postChatCompletion(model: string, systemPrompt: string, userPrompt: str
       temperature: 0.4
     });
 
-    const { host, port, token } = getRouterConfig();
+    const { host, port, token, timeoutMs } = getRouterConfig();
     const headers: Record<string, string | number> = {
       'Content-Type': 'application/json',
       'Content-Length': Buffer.byteLength(payload)
@@ -199,7 +266,7 @@ function postChatCompletion(model: string, systemPrompt: string, userPrompt: str
       path: '/v1/chat/completions',
       method: 'POST',
       headers: headers,
-      timeout: 12000
+      timeout: timeoutMs
     };
 
     const req = http.request(options, (res) => {
@@ -230,12 +297,17 @@ function postChatCompletion(model: string, systemPrompt: string, userPrompt: str
     });
 
     req.on('error', (e) => {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code && CONNECTION_ERROR_CODES.has(code)) {
+        reject(new RouterUnreachableError(`${code} (${host}:${port})`));
+        return;
+      }
       reject(e);
     });
 
     req.on('timeout', () => {
       req.destroy();
-      reject(new Error(`9Router yanıt zaman aşımına uğradı (${model})`));
+      reject(new Error(`Yerel AI yanıt zaman aşımına uğradı (${model}, ${timeoutMs}ms)`));
     });
 
     req.write(payload);

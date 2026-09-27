@@ -37,7 +37,9 @@
   "main": "./dist/extension.js",
   "scripts": {
     "build": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "test": "npm run build && node --test \"tests/**/*.test.mjs\"",
+    "test:engine": "python -m unittest discover -s engine -p test_*.py"
   },
   "contributes": {
     "viewsContainers": {
@@ -61,12 +63,12 @@
     "commands": [
       {
         "command": "antigravityBridge.enhancePrompt",
-        "title": "GravityGuard: Prompt Geliştir / Enhance (9Router AI)",
+        "title": "GravityGuard: Prompt Geliştir / Enhance",
         "icon": "$(sparkle)"
       },
       {
         "command": "antigravityBridge.ping",
-        "title": "GravityGuard: Ping Status"
+        "title": "GravityGuard: Ping Status (yerel AI geçidi kontrolü)"
       },
       {
         "command": "antigravityBridge.refreshLogs",
@@ -92,17 +94,34 @@
         "gravityguard.routerToken": {
           "type": "string",
           "default": "",
-          "description": "Bearer token for 9Router API (Local LLM / Router). If empty, GRAVITYGUARD_ROUTER_TOKEN or ROUTER_TOKEN env var is used."
+          "description": "Bearer token for the local AI gateway. If empty, GRAVITYGUARD_ROUTER_TOKEN or ROUTER_TOKEN env var is used."
         },
         "gravityguard.routerHost": {
           "type": "string",
           "default": "127.0.0.1",
-          "description": "Hostname for 9Router API."
+          "description": "Hostname of the local AI gateway (9Router, Ollama, LM Studio, llama.cpp — any OpenAI-compatible /v1 endpoint)."
         },
         "gravityguard.routerPort": {
           "type": "number",
           "default": 20128,
-          "description": "Port for 9Router API."
+          "description": "Port of the local AI gateway."
+        },
+        "gravityguard.routerTimeoutMs": {
+          "type": "number",
+          "default": 12000,
+          "description": "Per-model request timeout in milliseconds. A connection-level failure (gateway down) skips the remaining models immediately instead of waiting for each timeout."
+        },
+        "gravityguard.models": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "ag/gemini-3.8-flash-low",
+            "ag/gemini-3.7-flash-medium",
+            "all"
+          ],
+          "description": "Model cascade, tried in order. Any OpenAI-compatible model id works (e.g. ollama: \"llama3.1\", LM Studio: \"local-model\"). When every model fails, GravityGuard falls back to the offline deterministic composer instead of erroring."
         }
       }
     }

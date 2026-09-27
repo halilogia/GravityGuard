@@ -214,18 +214,116 @@ def should_wait_for_target_file(target_exists: bool, waited_seconds: float,
 # PATH RESOLUTION & STATE UTILITIES
 # ============================================================================
 
+# Project-root markers, in addition to .gravityguard.json / .git. The previous
+# two-marker set only ever matched git checkouts, so every non-git project
+# (a Godot project, a bare npm package, a standalone Python tool) fell through
+# to the file's own parent directory and got its own .gravityguard tree.
+_PROJECT_ROOT_MARKERS = (
+    ".gravityguard.json",
+    ".git",
+    ".hg",
+    ".svn",
+    # Game / engine manifests
+    "project.godot",
+    # JS / TS
+    "package.json",
+    "tsconfig.json",
+    # Python
+    "pyproject.toml",
+    "setup.py",
+    "setup.cfg",
+    # Other ecosystems
+    "Cargo.toml",
+    "go.mod",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "composer.json",
+    "Gemfile",
+)
+
+
+def _has_project_marker(directory: Path) -> bool:
+    """True if directory carries any recognized project-root marker."""
+    for marker in _PROJECT_ROOT_MARKERS:
+        try:
+            if (directory / marker).exists():
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _is_ancestor_or_self(candidate: Path, path: Path) -> bool:
+    """True if candidate is path itself or one of its ancestors."""
+    return candidate == path or candidate in path.parents
+
+
 def find_project_root(target_file: str) -> Path:
-    """Finds the nearest directory containing .gravityguard.json or .git, or falls back to file parent."""
+    """Finds the nearest project root for target_file.
+
+    Resolution order:
+      1. Nearest ancestor carrying a project-root marker (.gravityguard.json,
+         .git, project.godot, package.json, pyproject.toml, ...).
+      2. The process working directory, when it is genuinely an ancestor of the
+         target file. The working directory is the workspace the agent was
+         launched in, which is the authoritative notion of "this project" even
+         when the tree carries no manifest at all.
+      3. The file's own directory. This is a guess, not a root -- see
+         is_trusted_project_root() before creating anything there.
+    """
     p = Path(target_file).resolve()
-    for parent in [p.parent] + list(p.parents):
-        if (parent / ".gravityguard.json").exists() or (parent / ".git").exists():
+
+    for parent in p.parents:
+        if _has_project_marker(parent):
             return parent
+
+    try:
+        cwd = Path.cwd().resolve()
+    except (OSError, RuntimeError):
+        cwd = None
+
+    if cwd is not None and _is_ancestor_or_self(cwd, p):
+        return cwd
+
     return p.parent if p.is_file() else p
 
 
+def is_trusted_project_root(project_root: Path) -> bool:
+    """Whether state may be *created* under project_root.
+
+    The distinction matters because GravityGuard runs as a PreToolUse hook:
+    get_runtime_dir() mkdir's its directories, so an untrusted root does not
+    merely misread state, it writes a fresh .gravityguard tree into the user's
+    source tree. This predicate MUST agree with find_project_root(): a directory
+    that root resolution can return is trusted, otherwise state is created in
+    one place and read back from nowhere.
+
+    A root is trusted when it is marker-anchored, when it already holds a
+    .gravityguard directory, or when it is the process working directory (the
+    workspace the agent was launched in). The untrusted remainder is the
+    file's own parent in a tree with no project structure at all.
+    """
+    if _has_project_marker(project_root):
+        return True
+
+    try:
+        if (project_root / ".gravityguard").is_dir():
+            return True
+    except OSError:
+        return False
+
+    try:
+        return project_root == Path.cwd().resolve()
+    except (OSError, RuntimeError):
+        return False
+
+
 def get_runtime_dir(project_root: Path) -> Path:
+    """Returns the runtime state directory, creating it only for a trusted root."""
     runtime_dir = project_root / ".gravityguard" / "runtime"
-    runtime_dir.mkdir(parents=True, exist_ok=True)
+    if is_trusted_project_root(project_root):
+        runtime_dir.mkdir(parents=True, exist_ok=True)
     return runtime_dir
 
 

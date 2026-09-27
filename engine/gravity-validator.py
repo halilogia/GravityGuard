@@ -599,19 +599,86 @@ def check_g4_import_matrix(target_file: str, added_text: str) -> Tuple[bool, str
     return False, ""
 
 
+# --- COMPLEXITY THRESHOLDS (tunable per project via .gravityguard.json) ---
+# WHY A CONFIG BLOCK AND NOT HARD-CODED NUMBERS:
+#   These six numbers encode a judgement about how large a module may become
+#   before the guard comments. That judgement is not universal: a data table
+#   module, a generated-client file and a hand-written domain model have
+#   genuinely different healthy sizes. The numbers are now defaults rather
+#   than constants, so a project can state its own policy without forking the
+#   engine. Defaults are the values that were measured against 6,404 real
+#   production file-writes (see CHANGELOG "Complexity threshold calibration"),
+#   so the out-of-the-box behaviour is unchanged from v1.2.7.
+DEFAULT_COMPLEXITY_THRESHOLDS: Dict[str, int] = {
+    "monolithLoc": 1000,              # projected LOC that makes a file a monolith
+    "singleWriteLoc": 180,            # one tool call adding this much to an EXISTING file
+    "creepBaseLoc": 800,              # file size above which additions are "creep"
+    "creepAddedLoc": 80,              # addition that counts as creep on such a file
+    "overEngineeringMaxLoc": 50,      # "small change" window for the abstraction spike
+    "overEngineerAbstractions": 2,    # declarations inside that window that trip it
+}
+
+# A configured value below the floor cannot express the rule it belongs to
+# (monolithLoc: 3 would flag every file). Invalid values are ignored rather
+# than raising: .gravityguard.json is a convenience, not a security boundary,
+# and a typo must never turn a WARN-only rule into an error.
+_COMPLEXITY_THRESHOLD_FLOORS: Dict[str, int] = {
+    "monolithLoc": 100,
+    "singleWriteLoc": 10,
+    "creepBaseLoc": 100,
+    "creepAddedLoc": 10,
+    "overEngineeringMaxLoc": 5,
+    "overEngineerAbstractions": 2,
+}
+
+
+def resolve_complexity_thresholds(cfg: Optional[dict]) -> Dict[str, int]:
+    """Merges the `complexity` block of .gravityguard.json over the defaults.
+
+    Unknown keys are ignored, non-numeric and out-of-range values are ignored,
+    and a malformed block degrades to the defaults rather than to an exception:
+    this runs inside the pre-tool hook, where raising would fail the write open.
+
+    When nothing overrides a value the shared default mapping is returned as-is
+    (callers must treat it as read-only): copying it per call measurably moved
+    the core evaluator, and this function sits in the hot path.
+    """
+    block = cfg.get("complexity") if isinstance(cfg, dict) else None
+    if not isinstance(block, dict):
+        return DEFAULT_COMPLEXITY_THRESHOLDS
+
+    resolved = dict(DEFAULT_COMPLEXITY_THRESHOLDS)
+    for key, floor in _COMPLEXITY_THRESHOLD_FLOORS.items():
+        value = block.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        if value < floor:
+            continue
+        resolved[key] = int(value)
+
+    return resolved
+
+
 # --- OE_SPIKE: OVER-ENGINEERING DETECTION (WARN ONLY) ---
-def check_oe_spike(added_text: str) -> Tuple[bool, str]:
+def check_oe_spike(added_text: str, thresholds: Optional[Dict[str, int]] = None) -> Tuple[bool, str]:
     """
     Lightweight heuristic for premature abstraction spikes in small changes.
     Never blocks; only produces an informative warning.
-    Criteria: small change (< 50 LOC) introducing 2+ new abstractions (classes/interfaces).
+    Criteria: a change inside `overEngineeringMaxLoc` introducing
+    `overEngineerAbstractions`+ new classes/interfaces.
+    `thresholds` is a resolved mapping (see resolve_complexity_thresholds).
     """
+    if thresholds is None:
+        thresholds = DEFAULT_COMPLEXITY_THRESHOLDS
+    max_loc = thresholds["overEngineeringMaxLoc"]
+    min_abstractions = thresholds["overEngineerAbstractions"]
+
     lines = [line.strip() for line in added_text.splitlines() if line.strip() and not line.strip().startswith(("#", "//", "/*"))]
     loc_count = len(lines)
 
-    if 0 < loc_count <= 50:
+    if 0 < loc_count <= max_loc:
         abstractions = re.findall(r"\b(?:class|interface|abstract\s+class)\s+([A-Za-z0-9_]+)", added_text)
-        if len(abstractions) >= 2:
+        if len(abstractions) >= min_abstractions:
             return True, (
                 f"Aşırı Soyutlama Uyarısı (OE_SPIKE): Küçük bir kod değişikliğinde ({loc_count} LOC) "
                 f"{len(abstractions)} yeni soyutlama ({', '.join(abstractions)}) eklendi. "
@@ -621,29 +688,58 @@ def check_oe_spike(added_text: str) -> Tuple[bool, str]:
     return False, ""
 
 
+def _has_declared_cohesion_marker(content: str) -> bool:
+    """True when the file declares itself a deliberate monolith.
+
+    Same marker vocabulary the SRP boundary rule already honours, so there is
+    one escape hatch to learn rather than two: `srp: allow-monolith`,
+    `srp: cohesive-monolith`, `srp: bypass`, `srp: noqa` (Python also accepts
+    `noqa: srp`). This is a WARN-only size rule, so the marker costs a
+    suggestion, never a write.
+    """
+    if re.search(
+        r"(?://|/\*|#)\s*srp\s*:\s*(?:allow-monolith|cohesive-monolith|bypass|noqa)\b",
+        content, re.IGNORECASE
+    ):
+        return True
+    return bool(re.search(r"#\s*noqa\s*:\s*srp\b", content, re.IGNORECASE))
+
+
 # --- ARCH_FILE_GROWTH: LARGE FILE & RAPID GROWTH DETECTION (WARN ONLY) ---
 def check_arch_file_growth(
     target_file: str,
     old_full_content: str,
     projected_content: str,
     added_lines: List[str],
-    is_test_file: bool = False
+    is_test_file: bool = False,
+    thresholds: Optional[Dict[str, int]] = None
 ) -> Tuple[bool, str]:
     """
     Lightweight heuristic to prevent monolithic file accumulation.
     Never blocks; produces an informative warning to guide AI toward modularity.
     Exempts test files, minified/vendor or explicitly exempted cohesive modules.
 
-    Criteria (any of the following):
-    A) projected_loc >= 1000
-    B) single tool-call additions >= 180 LOC
-    C) old_loc >= 800 AND added_lines >= 80 LOC
+    Criteria (first match wins), with every LOC number coming from the resolved
+    `complexity` thresholds (see resolve_complexity_thresholds):
+      A) this write CROSSES the monolith line: old_loc < monolithLoc <= projected_loc
+      B) old_loc >= creepBaseLoc AND added >= creepAddedLoc
+      C) one tool call adds >= singleWriteLoc to an EXISTING file
+    B and C are skipped for a file that does not exist yet: a new module's size
+    is the result of modularisation, not accumulation. A is not skipped for
+    them, because a brand-new 1,000+ line file is still a monolith.
     """
     if is_test_file:
         return False, ""
 
     if is_cohesive_module_by_filename(target_file):
         return False, ""
+
+    if thresholds is None:
+        thresholds = DEFAULT_COMPLEXITY_THRESHOLDS
+    monolith_loc = thresholds["monolithLoc"]
+    single_write_loc = thresholds["singleWriteLoc"]
+    creep_base_loc = thresholds["creepBaseLoc"]
+    creep_added_loc = thresholds["creepAddedLoc"]
 
     old_lines = [line for line in old_full_content.splitlines() if line.strip()]
     proj_lines = [line for line in projected_content.splitlines() if line.strip()]
@@ -654,12 +750,34 @@ def check_arch_file_growth(
     added_count = len(added_clean)
 
     reasons = []
-    if projected_loc >= 1000:
-        reasons.append(f"toplam satır sayısı 1000 sınırını aşıyor ({projected_loc} LOC)")
-    elif old_loc >= 800 and added_count >= 80:
-        reasons.append(f"800+ satırlık mevcut dosyaya belirgin ekleme yapıldı ({old_loc} -> {projected_loc} LOC, +{added_count} LOC)")
-    elif added_count >= 180:
-        reasons.append(f"tek seferde büyük kod bloğu eklendi (+{added_count} LOC)")
+    if old_loc < monolith_loc <= projected_loc:
+        reasons.append(
+            f"toplam satır sayısı {monolith_loc} sınırını aşıyor ({projected_loc} LOC)"
+        )
+    elif not old_full_content.strip():
+        # A new module's size is the result of modularisation, not accumulation,
+        # so the growth rules do not apply. Rule A above still covers the case of
+        # a file that is born over the monolith line.
+        pass
+    else:
+        if old_loc >= creep_base_loc and added_count >= creep_added_loc:
+            reasons.append(
+                f"{creep_base_loc}+ satırlık mevcut dosyaya belirgin ekleme yapıldı "
+                f"({old_loc} -> {projected_loc} LOC, +{added_count} LOC)"
+            )
+        elif added_count >= single_write_loc:
+            reasons.append(
+                f"tek seferde büyük kod bloğu eklendi (+{added_count} LOC)"
+            )
+        # A file may declare itself a deliberate monolith with the same marker the
+        # SRP boundary rule honours, so there is one escape hatch to learn. The
+        # scan runs only when a growth rule actually fired: it walks the whole
+        # projected file, and the marker can only ever suppress these reasons.
+        # NOTE: is_ts_cohesive_monolith() is deliberately NOT used for this — it
+        # answers a different question ("is this an ordinary module rather than
+        # a tabbed web page?") and is true for nearly every TypeScript file.
+        if reasons and _has_declared_cohesion_marker(projected_content):
+            reasons = []
 
     if reasons:
         reason_str = "; ".join(reasons)
@@ -1614,6 +1732,13 @@ def validate_gravityguard():
 
     all_warnings: List[Tuple[str, str]] = []
 
+    # Loaded once, before the first rule that consults it, and reused by both the
+    # complexity heuristics and the test evidence rules further down. The
+    # thresholds are resolved once for the same reason: the fast path is the
+    # product, and a per-rule dict copy is measurable at this scale.
+    cfg = load_gravityguard_config(target_file)
+    complexity_thresholds = resolve_complexity_thresholds(cfg)
+
     # ========================================================================
     # GUARD 0: G0 — SECRET LEAK GUARD (BLOCK / WARN)
     # Executed for ALL text files (code, config, docs, vendor, cache)
@@ -1701,7 +1826,7 @@ def validate_gravityguard():
     # ========================================================================
     # GUARD 5: OE_SPIKE — OVER-ENGINEERING (WARN ONLY)
     # ========================================================================
-    oe_triggered, oe_msg = check_oe_spike(added_text)
+    oe_triggered, oe_msg = check_oe_spike(added_text, complexity_thresholds)
     if oe_triggered:
         log_event(tool_name, "WARNING", target_file, oe_msg, rule_id="OE_SPIKE")
         all_warnings.append(("OE_SPIKE", oe_msg))
@@ -1714,7 +1839,8 @@ def validate_gravityguard():
         old_full_content=old_full_content,
         projected_content=projected_content,
         added_lines=added_lines,
-        is_test_file=is_test_file
+        is_test_file=is_test_file,
+        thresholds=complexity_thresholds
     )
     if arch_triggered:
         log_event(tool_name, "WARNING", target_file, arch_msg, rule_id="ARCH_FILE_GROWTH")
@@ -1753,7 +1879,6 @@ def validate_gravityguard():
     # ========================================================================
     # GUARD 8: PHASE 2 TEST EVIDENCE AIRBAG (T1, T2, T3) — WARN ONLY
     # ========================================================================
-    cfg = load_gravityguard_config(target_file)
     test_evidence_warnings = evaluate_test_evidence(
         target_file=target_file,
         is_test_file=is_test_file,

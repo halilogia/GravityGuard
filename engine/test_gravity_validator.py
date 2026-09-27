@@ -1459,20 +1459,223 @@ class TestGravityGuardPhase2(unittest.TestCase):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_arch_file_growth_single_addition_over_180_loc_triggers_warn(self):
-        """When a single tool-call adds 180+ clean lines, ARCH_FILE_GROWTH warns"""
-        big_block = "\n".join([f"var_{i} = {i}" for i in range(200)])
-        payload = {
+        """A single tool-call adding 180+ clean lines to an EXISTING file warns.
+
+        v1.2.7 asserted this on a file that did not exist. Calibrated against
+        1,636 real file creations, 359 of which add 180+ lines: warning on a
+        brand-new module penalises exactly the modularisation the rule asks
+        for, and creations now fall under the crossing rule instead (a new file
+        still warns once it passes the monolith line). See
+        test_arch_file_growth_new_large_file_does_not_warn_but_monolith_does.
+        """
+        temp_dir = tempfile.mkdtemp()
+        try:
+            prod_file = os.path.join(temp_dir, "existing_service.py")
+            with open(prod_file, "w", encoding="utf-8") as f:
+                f.write("def anchor():\n    return 0\n")
+
+            big_block = "\n".join([f"var_{i} = {i}" for i in range(200)])
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": prod_file,
+                        "TargetContent": "def anchor():\n    return 0\n",
+                        "ReplacementContent": "def anchor():\n    return 0\n" + big_block
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "allow")
+            self.assertIn("ARCH_FILE_GROWTH", _warnings_from(res))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_arch_file_growth_new_large_file_does_not_warn_but_monolith_does(self):
+        """A NEW file of 200 lines is silent; a NEW file past the monolith line is not.
+
+        This is the calibration in both directions: creation size is not
+        accumulation, but a file that is born over `monolithLoc` is still a
+        monolith and must be reported.
+        """
+        moderate = {
             "toolCall": {
                 "name": "write_to_file",
                 "args": {
-                    "TargetFile": "C:/fake_project/src/new_monolith.py",
-                    "CodeContent": big_block
+                    "TargetFile": "C:/fake_project/src/fresh_module.py",
+                    "CodeContent": "\n".join([f"var_{i} = {i}" for i in range(200)])
                 }
             }
         }
-        res, _ = run_validator(payload)
+        res, _ = run_validator(moderate)
+        self.assertEqual(res.get("decision"), "allow")
+        self.assertNotIn("ARCH_FILE_GROWTH", _warnings_from(res))
+
+        monolith = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": "C:/fake_project/src/fresh_monolith.py",
+                    "CodeContent": "\n".join([f"var_{i} = {i}" for i in range(1100)])
+                }
+            }
+        }
+        res, _ = run_validator(monolith)
         self.assertEqual(res.get("decision"), "allow")
         self.assertIn("ARCH_FILE_GROWTH", _warnings_from(res))
+
+    def test_arch_file_growth_is_a_growth_event_not_a_file_state(self):
+        """An already-monolithic file warns when it grows, not on every later touch.
+
+        v1.2.7 evaluated `projected_loc >= 1000`, which is a *state* check: a
+        three-line fix to a 1,200-line file produced the same modularity warning
+        as the write that created the monolith, and would produce it again on
+        the next one, forever. Measured over 6,404 production file-writes, 60
+        of them land on files already past the line and only 30 of those carry
+        a material addition — half of the fires told the agent nothing it had
+        not already been told. The rule now fires on the crossing write, and
+        the creep rule (old >= 800, added >= 80) still covers real growth.
+        """
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("gravity_validator", VALIDATOR_PATH)
+        gv = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gv)
+
+        old = "\n".join(f"line_{i} = {i}" for i in range(1200)) + "\n"
+        small_fix = old + "line_extra = 1\n"
+        added_lines, _added_text, _nums = gv.get_diff_analysis(old, small_fix)
+        self.assertEqual(
+            gv.check_arch_file_growth("src/legacy_service.py", old, small_fix, added_lines, False),
+            (False, ""),
+            "a two-line edit to a 1,200-line file must not repeat the monolith warning"
+        )
+
+        big_addition = old + "\n".join(f"new_line_{i} = {i}" for i in range(120)) + "\n"
+        added_lines, _added_text, _nums = gv.get_diff_analysis(old, big_addition)
+        triggered, reason = gv.check_arch_file_growth(
+            "src/legacy_service.py", old, big_addition, added_lines, False
+        )
+        self.assertTrue(triggered, "material growth on a monolithic file must still warn")
+        self.assertIn("ARCH_FILE_GROWTH", reason)
+
+    def test_arch_file_growth_respects_declared_cohesion_marker(self):
+        """`srp: allow-monolith` in the content silences the growth rules.
+
+        The escape hatch already exists for the SRP boundary rule; reusing the
+        same marker vocabulary is what makes it discoverable. Without this, a
+        file that is intentionally one large unit (a generated table, a
+        hand-rolled parser) is nagged on every write forever.
+        """
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("gravity_validator", VALIDATOR_PATH)
+        gv = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gv)
+
+        old = "\n".join(f"line_{i} = {i}" for i in range(820)) + "\n"
+        new = old + "\n".join(f"extra_{i} = {i}" for i in range(100)) + "\n"
+        added_lines, _added_text, _nums = gv.get_diff_analysis(old, new)
+        self.assertTrue(
+            gv.check_arch_file_growth("src/table_module.py", old, new, added_lines, False)[0],
+            "precondition: an 820-line file growing by 100 lines must warn",
+        )
+
+        marked_new = "# srp: allow-monolith\n" + new
+        added_lines, _added_text, _nums = gv.get_diff_analysis(old, marked_new)
+        self.assertEqual(
+            gv.check_arch_file_growth("src/table_module.py", old, marked_new, added_lines, False),
+            (False, ""),
+        )
+
+    def test_complexity_thresholds_are_configurable_and_validated(self):
+        """`complexity` in .gravityguard.json retunes the heuristics; bad values are ignored."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("gravity_validator", VALIDATOR_PATH)
+        gv = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gv)
+
+        self.assertEqual(
+            gv.resolve_complexity_thresholds(None),
+            gv.DEFAULT_COMPLEXITY_THRESHOLDS,
+            "a project without a config must keep the calibrated defaults",
+        )
+        self.assertEqual(
+            gv.resolve_complexity_thresholds({"complexity": {"monolithLoc": 2000}}),
+            {**gv.DEFAULT_COMPLEXITY_THRESHOLDS, "monolithLoc": 2000},
+        )
+        for bad in (
+            {"complexity": {"monolithLoc": 3}},                 # below the floor: rule would be meaningless
+            {"complexity": {"monolithLoc": "big"}},            # wrong type
+            {"complexity": {"monolithLoc": True}},             # bool is not a threshold
+            {"complexity": {"overEngineerAbstractions": 1}},   # would fire on every single class
+            {"complexity": "not-an-object"},
+            {"complexity": None},
+        ):
+            self.assertEqual(
+                gv.resolve_complexity_thresholds(bad),
+                gv.DEFAULT_COMPLEXITY_THRESHOLDS,
+                f"invalid config must degrade to defaults, got {bad}",
+            )
+
+    def test_configured_complexity_threshold_actually_changes_the_verdict(self):
+        """A project that allows 2,000-line modules stops being warned at 1,000.
+
+        The case is a file CREATION, which is the only shape where the monolith
+        line can fire on its own: for a modification, passing 1,000 lines always
+        implies an addition big enough to trip the creep or single-write rule
+        anyway, so the crossing event is only load-bearing here.
+        """
+        body = "\n".join(f"var_{i} = {i}" for i in range(1100))
+
+        def payload_for(path: str) -> dict:
+            return {
+                "toolCall": {
+                    "name": "write_to_file",
+                    "args": {"TargetFile": path, "CodeContent": body}
+                }
+            }
+
+        temp_dir = tempfile.mkdtemp()
+        try:
+            res, _ = run_validator(payload_for(os.path.join(temp_dir, "default_module.py")))
+            self.assertEqual(res.get("decision"), "allow")
+            self.assertIn("ARCH_FILE_GROWTH", _warnings_from(res), "precondition: default warns")
+
+            with open(os.path.join(temp_dir, ".gravityguard.json"), "w", encoding="utf-8") as f:
+                json.dump({"complexity": {"monolithLoc": 2000}}, f)
+
+            res, _ = run_validator(payload_for(os.path.join(temp_dir, "relaxed_module.py")))
+            self.assertEqual(res.get("decision"), "allow")
+            self.assertNotIn("ARCH_FILE_GROWTH", _warnings_from(res))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_oe_spike_threshold_is_configurable(self):
+        """`complexity.overEngineerAbstractions` retunes the abstraction-spike window."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("gravity_validator", VALIDATOR_PATH)
+        gv = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gv)
+
+        two_classes = "class Alpha:\n    pass\n\nclass Beta:\n    pass\n"
+        self.assertTrue(gv.check_oe_spike(two_classes)[0], "precondition: 2 classes trip the default")
+        self.assertFalse(
+            gv.check_oe_spike(
+                two_classes, gv.resolve_complexity_thresholds({"complexity": {"overEngineerAbstractions": 3}})
+            )[0],
+            "a project that tolerates three declarations must not be warned here",
+        )
+
+        longer = (
+            "class Alpha:\n    def __init__(self):\n        self.value = 1\n\n"
+            "class Beta:\n    def __init__(self):\n        self.value = 2\n"
+        )
+        self.assertTrue(gv.check_oe_spike(longer)[0], "precondition: still inside the 50-LOC window")
+        self.assertFalse(
+            gv.check_oe_spike(
+                longer, gv.resolve_complexity_thresholds({"complexity": {"overEngineeringMaxLoc": 5}})
+            )[0],
+            "a project that only calls a change 'small' below 6 LOC is not warned here",
+        )
 
     def test_arch_file_growth_creeping_growth_800_plus_80_triggers_warn(self):
         """When an 800+ LOC file receives 80+ lines, ARCH_FILE_GROWTH warns"""
@@ -1680,7 +1883,11 @@ class TestGravityGuardPhase2(unittest.TestCase):
             import async_runner
             from pathlib import Path
 
-            p_root = Path(temp_dir)
+            p_root = Path(temp_dir).resolve()
+            # A real manifest anchors the temp dir as a legitimate project
+            # root: get_runtime_dir() only creates state for a trusted root,
+            # and an un-anchored temp dir is deliberately not one.
+            (p_root / "package.json").write_text("{}", encoding="utf-8")
             d_path = async_runner.get_debounce_file_path(p_root)
 
             # Initial state
@@ -1740,6 +1947,9 @@ class TestGravityGuardPhase2(unittest.TestCase):
             from pathlib import Path
 
             p_root = Path(temp_dir).resolve()
+            # Anchor the temp dir as a real project root so the runtime state
+            # directory is actually created (see test_async_runner_debounce_state_management).
+            (p_root / "package.json").write_text("{}", encoding="utf-8")
             diag_path = async_runner.get_diagnostics_file_path(p_root)
 
             auth_file = p_root / "src" / "auth.ts"
@@ -2835,6 +3045,138 @@ class TestV127G0ZeroBypassAndStatefulEvidence(unittest.TestCase):
         }
         res, _ = run_validator(payload)
         self.assertEqual(res.get("decision"), "allow", "Handler with logging must be allowed")
+
+
+class TestProjectRootResolution(unittest.TestCase):
+    """Regression cover for the stray-.gravityguard-directory defect.
+
+    Reported symptom: a non-git Godot project grew one .gravityguard directory
+    per edited file (src/, src/data/, tools/, tools/fixtures/...), each holding a
+    lone debounce_state.json. find_project_root() only recognized .gravityguard.json
+    and .git, so every non-git tree fell through to the file's own parent and
+    get_runtime_dir() then mkdir'd a fresh state tree there.
+
+    These tests pin the three properties that fix it: a manifest anchors the
+    root, the working directory is a valid anchor, and an unanchored guess is
+    never created into.
+    """
+
+    def setUp(self):
+        from pathlib import Path
+        sys.path.insert(0, os.path.dirname(VALIDATOR_PATH))
+        import async_runner
+        self.ar = async_runner
+        self._orig_cwd = os.getcwd()
+        # .resolve(): Windows expands temp dirs to 8.3 short names, which
+        # break equality and relative_to comparisons.
+        self.base = Path(tempfile.mkdtemp(prefix="gg_root_")).resolve()
+
+    def tearDown(self):
+        os.chdir(self._orig_cwd)
+        shutil.rmtree(self.base, ignore_errors=True)
+
+    def _project(self, name, marker=None):
+        root = self.base / name
+        (root / "src" / "map").mkdir(parents=True, exist_ok=True)
+        if marker is not None:
+            (root / marker).write_text("{}", encoding="utf-8")
+        return root
+
+    def test_godot_project_root_is_anchored_by_manifest(self):
+        """project.godot must anchor the root, as it does for a real Godot project."""
+        root = self._project("godot_proj", marker="project.godot")
+        target = root / "src" / "map" / "map_compiler.gd"
+        target.write_text("extends RefCounted\n", encoding="utf-8")
+
+        found = self.ar.find_project_root(str(target))
+        self.assertEqual(found, root, "project.godot must anchor the project root")
+        self.assertTrue(self.ar.is_trusted_project_root(found))
+
+    def test_non_git_project_gets_exactly_one_runtime_dir(self):
+        """The reported bug: N files must yield 1 runtime dir, not N."""
+        root = self._project("multi", marker="project.godot")
+        targets = []
+        for rel in ("src/map/a.gd", "src/data/b.gd", "tools/c.gd", "tools/fixtures/d.py"):
+            p = root / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("x = 1\n", encoding="utf-8")
+            targets.append(p)
+
+        os.chdir(root)
+        roots = set()
+        for t in targets:
+            r = self.ar.find_project_root(str(t))
+            self.ar.get_runtime_dir(r)
+            roots.add(r)
+
+        self.assertEqual(len(roots), 1, "all edits must resolve to a single project root")
+        self.assertEqual(roots.pop(), root)
+        found = [p for p in root.rglob(".gravityguard") if p.is_dir()]
+        self.assertEqual(len(found), 1, f"exactly one state tree expected, got {found}")
+
+    def test_working_directory_anchors_a_markerless_project(self):
+        """A real but manifest-less project still anchors on the working directory."""
+        root = self._project("bare", marker=None)
+        target = root / "src" / "map" / "a.py"
+        target.write_text("x = 1\n", encoding="utf-8")
+
+        os.chdir(root)
+        found = self.ar.find_project_root(str(target))
+        self.assertEqual(found, root, "cwd must anchor a markerless project")
+        self.assertTrue(self.ar.is_trusted_project_root(found))
+
+    def test_unrelated_cwd_is_not_adopted_as_root(self):
+        """A cwd that is not an ancestor of the target must be rejected."""
+        root = self._project("anchored", marker="project.godot")
+        target = root / "src" / "map" / "a.gd"
+        target.write_text("extends RefCounted\n", encoding="utf-8")
+        elsewhere = self.base / "unrelated"
+        elsewhere.mkdir(parents=True, exist_ok=True)
+        (elsewhere / "project.godot").write_text("{}", encoding="utf-8")
+
+        os.chdir(elsewhere)
+        found = self.ar.find_project_root(str(target))
+        self.assertEqual(found, root, "an unrelated cwd must never win over the marker walk")
+
+    def test_untrusted_root_is_never_created_into(self):
+        """The file-parent fallback must not mkdir a state tree into user source."""
+        bare = self.base / "nobody" / "deep"
+        bare.mkdir(parents=True, exist_ok=True)
+        target = bare / "a.py"
+        target.write_text("x = 1\n", encoding="utf-8")
+
+        # The cwd must NOT be an ancestor of the target, otherwise it is itself
+        # a legitimate anchor and root resolution legitimately stops there.
+        # A sibling branch is what forces the untrusted file-parent fallback.
+        sibling = self.base / "sibling"
+        sibling.mkdir(parents=True, exist_ok=True)
+        os.chdir(sibling)
+
+        found = self.ar.find_project_root(str(target))
+        self.assertEqual(found, bare, "markerless target falls back to its own parent")
+        self.assertFalse(self.ar.is_trusted_project_root(found),
+                         "a file-parent fallback is a guess, not a root")
+        self.ar.get_runtime_dir(found)
+        self.assertFalse((bare / ".gravityguard").exists(),
+                         "untrusted root must not be created into")
+
+    def test_root_resolution_and_trust_agree(self):
+        """A root that find_project_root can return must also be writable.
+
+        The two functions once disagreed: resolution accepted the working
+        directory while the trust check rejected it, so state was written in one
+        place and read back from nowhere -- a silent no-op.
+        """
+        root = self._project("agree", marker=None)
+        target = root / "src" / "map" / "a.py"
+        target.write_text("x = 1\n", encoding="utf-8")
+        os.chdir(root)
+
+        found = self.ar.find_project_root(str(target))
+        self.assertTrue(self.ar.is_trusted_project_root(found),
+                        "root resolution and trust check must return the same verdict")
+        runtime = self.ar.get_runtime_dir(found)
+        self.assertTrue(runtime.is_dir(), "a trusted root must actually get its state dir")
 
 
 if __name__ == "__main__":

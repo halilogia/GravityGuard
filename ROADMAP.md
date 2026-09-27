@@ -38,7 +38,7 @@ This document outlines the strategic evolution, architectural milestones, and pl
   - Integrated 9Router local AI pipeline with sub-3s model failover.
 - [x] **Live Security Monitor Webview**:
   - Real-time Activity Bar panel streaming audit events from `~/.gemini/logs/srp_guardian_live.json`.
-- [x] **92/92 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`).
+- [x] **92/92 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`) — now **124/124**, plus 14 TypeScript tests for the classifier (`npm test`).
 
 ---
 
@@ -66,12 +66,37 @@ This document outlines the strategic evolution, architectural milestones, and pl
 
 
 ### 2.2. Intent-Aware Prompt Enhancer
-- [~] Intent-aware enhancement — **partially implemented, and NOT automated**:
-  - The `systemPrompt` in `src/extension.ts` instructs the *downstream* model to classify intent itself. There is no local classifier, no keyword analysis and no programmatic routing in the extension, so the `[ ] Automated` label was overstated.
-  - [x] **Consulting / Brainstorming Mode** — present as directive A ("İSTİŞARE / FİKİR / BEYİN FIRTINASI"): demands options, trade-offs and over-engineering risks, and explicitly forbids issuing build orders.
-  - [x] **Implementation Mode** — present as directive B ("UYGULAMA / KODLAMA"): demands a defensive specification (purpose, architecture, SRP boundaries, error handling, tests).
-  - [ ] **Audit / Refactoring Mode** — **absent.** No directive covers boundary compliance, dead-code removal or test integrity.
-  - [ ] No verification that the classifier actually behaves as instructed; behaviour depends entirely on the model's compliance.
+- [x] **Intent classification is local, deterministic and testable** — the `[~]` gap is closed:
+  - `classifyIntent()` in `src/intent.ts` decides the mode in the extension with a weighted Turkish + English signal score, in under a millisecond and with no network call. The result carries `{ mode, confidence, score, runnerUpScore, signals, source }`, so every decision is explainable.
+  - The system prompt no longer *asks* the model to classify the user's intent; it **declares** the mode and sends only that mode's directive. The three directives are mutually exclusive, so the model cannot drift into a mode the user did not ask for.
+  - The user can override the classifier with a `#denetle:` / `#danış:` / `#kodla:` prefix, reported as `source: 'override'`. A heuristic the user cannot contradict is a heuristic the user will stop trusting.
+  - Covered by `tests/intent.test.mjs` (14 tests, zero dependencies, `npm test`), including determinism and mode exclusivity of the emitted prompt.
+  - **Known limit, stated rather than hidden:** it is a keyword heuristic, not a language model. Unusual phrasings fall through to `implement` with `confidence: 'low'`. The override prefix exists for exactly that case.
+- [x] **Consulting / Brainstorming Mode** — directive A ("İSTİŞARE / FİKİR / BEYİN FIRTINASI"): demands options, trade-offs and over-engineering risks, and explicitly forbids issuing build orders.
+- [x] **Implementation Mode** — directive B ("UYGULAMA / KODLAMA"): demands a defensive specification (purpose, architecture, SRP boundaries, error handling, tests).
+- [x] **Audit / Refactoring Mode** — directive C ("DENETİM / REFACTOR"): forbids new production code, requires findings with `dosya:satır` evidence plus an impact rating, keeps unverifiable suspicions in a separate list, names the inspection targets (layer/SRP violations, dead code, duplicated logic, swallowed errors, embedded credentials, comment/behaviour divergence, test integrity), and requires refactor advice to be split into small revertible steps with a verification method each.
+- [x] **Verification is no longer the model's compliance** — the mode is decided before the request leaves the extension, and the emitted system prompt is asserted to contain exactly one directive.
+
+---
+
+## 2.3. Prompt Enhancer Offline Degradation
+
+- [x] **The local gateway is optional, not required.** `gravityguard.models` and `gravityguard.routerTimeoutMs` are configurable, and any OpenAI-compatible `/v1` endpoint works (9Router, Ollama, LM Studio, llama.cpp). The feature is no longer coupled to one gateway or to its model naming.
+- [x] **Connection failures abort the model cascade.** `ECONNREFUSED` / `ENOTFOUND` / `EHOSTUNREACH` skip the remaining candidates instead of each burning a full timeout; model-level failures (HTTP error, empty content, timeout) still fall through, which is what a cascade is for.
+- [x] **Deterministic offline composer.** When no model answers, `buildOfflinePrompt()` returns a structured, mode-correct brief instead of an error. This is what makes ARCHITECTURE invariant 2 true for the enhancer instead of aspirational.
+- [x] **`antigravityBridge.ping` performs a real health check** (`GET /v1/models`) and reports the endpoint, model count, or the exact connection error. It used to report success unconditionally, which said nothing about the dependency the feature has.
+
+---
+
+## 2.4. Complexity Threshold Calibration
+
+- [x] **Calibrated against 6,404 real production file-writes** across 11 repositories (method, results and limitations in the CHANGELOG).
+- [x] **ARCH_FILE_GROWTH rule A is now a growth event, not a file state.** It fires on the write that crosses the monolith line instead of on every subsequent touch of an already-large file. Half of its previous fires (30 of 60) told the agent nothing it had not already been told, on repeat.
+- [x] **ARCH_FILE_GROWTH rule B no longer fires on file creation.** 359 of 1,636 real creations added 180+ lines; a brand-new cohesive module is the outcome the rule asks for. The rule now applies to additions to an existing file.
+- [x] **`srp: allow-monolith` silences the growth rules**, reusing the marker vocabulary the SRP boundary rule already documents instead of inventing a second escape hatch.
+- [x] **OE_SPIKE deliberately left unchanged.** 1.27% fire rate, and only 2 of 59 fires are attributable to conventional scaffolding — a scaffolding exemption would change 3% of fires. Raising the declaration threshold would cut fires by 68% but would also drop genuinely coupled pairs. Tuning a number that measurement says is already right is not tuning.
+- [x] **All six thresholds are per-project configurable** via the `complexity` block of `.gravityguard.json`, with floors, type checks and a defaults fallback: the block is a convenience, and a typo must never turn a WARN-only rule into a hook error.
+- [x] **Latency held.** Interleaved A/B against `git HEAD` (4,000 iterations each): median ratio 1.015x, within noise. An earlier 1.35x regression from per-call dict copies is what drove resolving the thresholds once per tool call.
 
 ---
 
