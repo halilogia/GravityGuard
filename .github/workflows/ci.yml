@@ -54,5 +54,5 @@ jobs:
       - name: TypeScript tests (intent classifier, prompt composer)
         run: npm test
 
-      - name: Engine tests (124 guards, schema contract, perf invariants)
+      - name: Engine tests (125: guards, schema contract, perf invariants)
         run: npm run test:engine
