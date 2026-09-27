@@ -7,7 +7,8 @@ const {
   classifyIntent,
   buildSystemPrompt,
   buildOfflinePrompt,
-  modeLabel
+  modeLabel,
+  shouldAskForMode
 } = require('../dist/intent.js');
 
 test('implementation order is classified as implement (Turkish)', () => {
@@ -112,4 +113,24 @@ test('the offline composer asks for evidence in audit mode', () => {
   const raw = 'bu dosyadaki hataları incele';
   const brief = buildOfflinePrompt(raw, classifyIntent(raw));
   assert.ok(/kanıt|dosya:satır/.test(brief));
+});
+
+test('a low-confidence guess is questioned instead of obeyed', () => {
+  // No signal at all: the classifier falls back to `implement` and says so.
+  const vague = classifyIntent('websocket manager');
+  assert.equal(vague.mode, 'implement');
+  assert.equal(vague.confidence, 'low');
+  assert.equal(shouldAskForMode(vague), true, 'a guess must be confirmed by the user');
+});
+
+test('a high-confidence decision is not questioned', () => {
+  const clear = classifyIntent('SRP kuralına uygun websocket bağlantı yöneticisi oluştur ve testlerini yaz');
+  assert.equal(clear.confidence, 'high');
+  assert.equal(shouldAskForMode(clear), false, 'a confident classification must not add a click');
+});
+
+test('an explicit override is never questioned', () => {
+  const override = classifyIntent('#denetle: sadece bir isim yeter');
+  assert.equal(override.source, 'override');
+  assert.equal(shouldAskForMode(override), false, 'the user already decided; do not ask again');
 });

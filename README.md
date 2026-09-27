@@ -5,7 +5,7 @@
 [English](#english) | [Türkçe](#türkçe)
 
 [![Antigravity Compatible](https://img.shields.io/badge/Antigravity%20IDE-Compatible-blue.svg)](https://antigravity.google/)
-[![Tests](https://img.shields.io/badge/Engine%20124%20%2B%20TS%2014-Passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Engine%20125%20%2B%20TS%2020-Passing-brightgreen.svg)]()
 [![Core Evaluator](https://img.shields.io/badge/Core%20Benchmark-Avg%20~0.1ms%20%7C%20p95%20%3C0.5ms-blue.svg)]()
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9%20%7C%20ES2022-blue.svg)](https://www.typescriptlang.org/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B%20%7C%20Zero%20Dependencies-brightgreen.svg)](https://www.python.org/)
@@ -47,7 +47,7 @@ GravityGuard operates an ordered, zero-overhead pipeline before any file modific
 ### ✨ 2. Status Bar Prompt Enhancer (`Ctrl + Alt + E`)
 - **Interactive Status Bar Item**: Click `$(sparkle) Prompt Geliştir` on the bottom right or press **`Ctrl + Alt + E`** (`Cmd + Alt + E` on macOS) anywhere in the IDE.
 - **Active Selection Aware**: Automatically detects text highlighted in your active editor or prompts via a clean modal input box.
-- **Local Intent Classifier (no LLM)**: Every request is classified locally, in under a millisecond, into **İSTİŞARE** (brainstorm), **UYGULAMA** (build) or **DENETİM / REFACTOR** (audit). Only the selected mode's directive is sent, so the model no longer has to guess what was asked. Override the decision with a `#denetle:`, `#danış:` or `#kodla:` prefix.
+- **Local Intent Classifier (no LLM)**: Every request is classified locally, in under a millisecond, into **İSTİŞARE** (brainstorm), **UYGULAMA** (build) or **DENETİM / REFACTOR** (audit). Only the selected mode's directive is sent, so the model no longer has to guess what was asked. Override the decision with a `#denetle:`, `#danış:` or `#kodla:` prefix. When the classifier is not confident it *asks* instead of guessing, and a 32-prompt hand-labelled corpus keeps the signals honest across every change.
 - **Local AI Accelerated**: Talks to any OpenAI-compatible local gateway (9Router, Ollama, LM Studio, llama.cpp) over `http://127.0.0.1:20128`, with a configurable model cascade and automatic failover. A gateway that is not running is detected immediately instead of being retried per model, and the enhancer then falls back to a deterministic offline brief — the command never fails because a local service is down.
 - **Direct Clipboard Integration**: The enhanced prompt is automatically copied to your system clipboard. Simply press **`Ctrl + V`** in the chat panel to instruct the AI with a defensive, production-ready specification.
 - **Review in Document**: Includes an optional *"Yeni Belgede Aç"* (Open in New Document) button to inspect or tweak the enhanced prompt before execution.

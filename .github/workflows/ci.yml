@@ -1,0 +1,58 @@
+name: CI
+
+# The suite was 124 engine + 14 TypeScript tests that only ever ran by hand, on
+# one machine. This workflow exists because that is invisible debt: nothing
+# fails when a rule regresses, the failure surfaces weeks later in a real IDE
+# session. See ROADMAP section 0.1.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Deliberately not a single OS: the engine is a Windows-first product
+        # (hooks.json invokes a bare `python`, the plugin path is a Windows
+        # user profile) but it is pure standard-library Python and the tests
+        # spawn real subprocesses. Cross-platform is a claim that has to be
+        # kept true, not assumed.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # `npm ci` is impossible here: package-lock.json is gitignored, so there
+      # is no lockfile to install from. `npm install` it is.
+      - uses: actions/setup-node@v4
+        with:
+          # Node 22+ is required by the test script's glob argument
+          # (`node --test "tests/**/*.test.mjs"`); Node 20 treats it as a
+          # literal module path and fails.
+          node-version: '22'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build
+        run: npm run build
+
+      - name: TypeScript tests (intent classifier, prompt composer)
+        run: npm test
+
+      - name: Engine tests (124 guards, schema contract, perf invariants)
+        run: npm run test:engine

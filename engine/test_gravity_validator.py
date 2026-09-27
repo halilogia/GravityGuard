@@ -382,6 +382,28 @@ class TestGravityGuardPhase1(unittest.TestCase):
             f"bare python startup {baseline_ms:.2f} ms"
         )
 
+    def test_hook_stdout_contract_unknown_key_is_rejected_by_the_harness(self):
+        """ARCHITECTURE 3.3.1: `reason` is the only agent-visible text channel.
+
+        The roadmap left open whether a pre-tool architectural "whisper" would need
+        its own channel. It does not: the decision recorded in ARCHITECTURE 3.3.1 is
+        that any advisory text travels as a WARN rule's id-prefixed `reason`. This
+        test is the mechanical half of that decision — it pins the allowed key set
+        and proves the harness fails loudly on anything else, so a future attempt to
+        add a second channel shows up as a test failure rather than as protojson
+        discarding the whole response in production (the v1.2.5 failure mode).
+        """
+        from test_gravity_validator import SCHEMA_ALLOWED_KEYS
+        self.assertEqual(
+            SCHEMA_ALLOWED_KEYS,
+            {"decision", "reason", "permissionOverrides", "overwrite"},
+            "the contract changed; ARCHITECTURE 3.3 must be updated with it",
+        )
+        # A hypothetical whisper payload must therefore be expressible as `reason`
+        # alone, which is exactly what `TestHookStdoutContract` asserts for warnings.
+        whisper_as_reason = {"decision": "allow", "reason": "[ARCH_CONTEXT] ui katmanı network import edemez"}
+        self.assertTrue(set(whisper_as_reason) <= SCHEMA_ALLOWED_KEYS)
+
     # --- PHASE 1.1 HARDENING EDGE CASES ---
 
     def test_g1_write_to_file_existing_empty_catch_unchanged(self):

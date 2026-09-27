@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as http from 'http';
-import { buildOfflinePrompt, buildSystemPrompt, classifyIntent, modeLabel, IntentMode } from './intent';
+import { buildOfflinePrompt, buildSystemPrompt, classifyIntent, modeLabel, shouldAskForMode, IntentClassification, IntentMode } from './intent';
 
 interface LogEvent {
   status?: string;
@@ -117,17 +117,18 @@ async function handleEnhancePrompt(): Promise<void> {
   }
 
   const classification = classifyIntent(inputPrompt.trim());
+  const mode = await resolveMode(classification);
 
   try {
     let result: EnhancementResult | undefined;
     await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
-        title: `GravityGuard: ${modeLabel(classification.mode)} modunda prompt hazırlanıyor...`,
+        title: `GravityGuard: ${modeLabel(mode)} modunda prompt hazırlanıyor...`,
         cancellable: false
       },
       async () => {
-        result = await requestPromptEnhancement(inputPrompt.trim(), classification.mode);
+        result = await requestPromptEnhancement(inputPrompt.trim(), mode);
       }
     );
 
@@ -168,6 +169,35 @@ async function handleEnhancePrompt(): Promise<void> {
       `Prompt geliştirme hatası: ${error?.message || error}`
     );
   }
+}
+
+async function resolveMode(classification: IntentClassification): Promise<IntentMode> {
+  if (!shouldAskForMode(classification)) {
+    return classification.mode;
+  }
+
+  const MODES: IntentMode[] = ['consult', 'implement', 'audit'];
+  const pick = await vscode.window.showQuickPick(
+    [
+      {
+        label: `$(sparkle) Otomatik — ${modeLabel(classification.mode)}`,
+        description: 'Sınıflandırıcının tahmini (düşük güven)',
+        mode: classification.mode
+      },
+      ...MODES.filter(mode => mode !== classification.mode).map(mode => ({
+        label: modeLabel(mode),
+        description: mode === 'consult'
+          ? 'Fikir, seçenek ve trade-off iste'
+          : mode === 'implement'
+            ? 'Savunmacı teknik şartname üret'
+            : 'Kod değiştirmeden, kanıtlı bulgu listesi üret',
+        mode
+      }))
+    ],
+    { placeHolder: 'Niyet belirsiz — modu seçin (varsayılan: Otomatik)' }
+  );
+
+  return pick ? pick.mode : classification.mode;
 }
 
 async function requestPromptEnhancement(rawPrompt: string, mode: IntentMode): Promise<EnhancementResult> {

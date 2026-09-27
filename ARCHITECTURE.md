@@ -235,6 +235,26 @@ becomes a hard tool failure.
   harness gates every response against the allowed key set. A plain `json.loads` accepts
   any key — which is why the suite stayed green while production writes were blocked.
 
+#### 3.3.1. The One-Channel Decision (settles the "whisper vs warning" ambiguity)
+
+`reason` is the **only** agent-visible text channel in the contract, and a second channel
+would mean changing a schema the IDE side validates. So the question the roadmap left open
+— *is a pre-tool architectural whisper a warning, or a new mechanism?* — is answered here:
+
+> **A whisper IS a warning.** Any pre-tool advisory text is delivered as a WARN-only rule's
+> `[RULE_ID] ...` payload in `reason`.
+
+Consequences, binding on future work:
+
+- A new advisory capability (the architecture-context whisperer) is added as a **WARN rule
+  with its own rule id**, not as a side channel. It therefore inherits the same guarantees
+  as every other warning: never blocks, phrased as actionable advice, machine-identifiable
+  by its id.
+- It must **never** be the only carrier of a blocking decision. Anti-Goal 5 applies: an
+  advisory the agent can ignore is fine, one that hides a BLOCK is a security hole.
+- Every new WARN rule must add a case to `TestHookStdoutContract`, so the id-prefixed
+  `reason` format is proven per rule rather than assumed.
+
 ### 3.4. Hidden Background Orchestration & Debounce Worker
 1. **Fire-and-Forget Trigger (`trigger_background_validation`)**:
    - Executed on `ALLOW` decisions in `engine/gravity-validator.py`.

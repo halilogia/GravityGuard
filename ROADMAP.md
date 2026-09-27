@@ -18,70 +18,54 @@ aşağıdaki anti-hedefler. Bir fikir bu çerçeveyi ihlal ediyorsa fikir değil
 
 ## 0. Kesim Sonrası Kalan İki Madde
 
-- [ ] **Eksik etiketler ve release'ler:** `v1.2.6` ve `v1.2.7` CHANGELOG'da tam
-      sürüm olarak var, ama git etiketi ve GitHub Release'leri yok (v1.2.5'e kadar
-      etiketliydi). Geriye dönük etiketlemek bir sürüm kararıdır — imzalanmamış
-      etiketle de olur, ama karar kullanıcının. Kapsam: etiket + Release + notlar.
+- [ ] **`v1.2.6` / `v1.2.7` GitHub Release'leri yok.** Etiketler geriye dönük atıldı
+      (v1.2.6 → a8f55a3, v1.2.7 → 46f82f4, ikisi de annotated ve "retroactive"
+      notlu). Release'lerinin yayınlanması bilinçli olarak yapılmadı: eski sürümleri
+      kullanıcıya göstermek muhasebe düzeltmesi değil, ürün kararıdır.
 - [ ] **Sürüm numarası ritmi.** v1.3.0 birden fazla commit'i biriktirdikten sonra
       kesildi. Karar: her davranış değişikliği mi sürüm ister (şeffaf ama pahalı),
       yoksa biriktirme mi (ucuz ama sürüm notu yazmak zorlaşır)? Şu an ikincisi
       uygulanıyor ve 1.3.0'ın Upgrade Notes bölümü bu yüzden uzun.
-
-## 0.1 CI eksikliği (kimseye görünmüyor, ama en pahalı borç bu)
-
-- [ ] Depoda **hiç CI yok**. 124 engine + 14 TypeScript testi yalnızca elle,
-      bu makinede çalışıyor. `npm test` ve `npm run test:engine` GitHub Actions'a
-      taşınsın.
-- [ ] Windows + macOS + Linux matrisi: `GRAVITYGUARD_LOG_DIR` yönlendirmesi ve
-      `GRAVITYGUARD_DISABLE_ASYNC=1` kill switch'i sayesinde testler platformdan
-      bağımsız olmalı; bu matris ilk kez çalıştığında çıkacak kırılmaların de
-      kaydedilmesi gerekir.
-- [ ] `tools/sync_plugin.py --check` CI'da **başarısız olmamalı** (canlı plugin
-      dizini CI'da yok) — bu yüzden `--check` uygun bir gate değil, gerçek gate
-      `ast.parse` + testler.
+- [ ] **CI'ın ilk koşu sonuçlarını kaydet.** İş akışı eklendi; henüz hiç koşmadı.
+      İlk koşuda çıkacak platform kırılmaları `CHANGELOG`'a yazılmalı, yoksa
+      "platformdan bağımsız" iddiası test edilmemiş bir iddia olarak kalır.
 
 ---
 
 ## 1. Intent Classifier Follow-Up'ları (v1.4.0 adayı)
 
-- [ ] **Düşük güvende tahmin etme, sor.** `classifyIntent()` `confidence: 'low'`
-      döndüğünde (sinyal yok veya berabere) şu an `implement` seçiliyor ve bu
-      tahmin kullanıcıya yalnızca mod etiketi olarak gösteriliyor. Doğru davranış
-      `showQuickPick` ile tek tıkla seçim: `Otomatik (şu an: UYGULAMA)` /
-      `İSTİŞARE` / `UYGULAMA` / `DENETİM / REFACTOR`. Bir seçicinin tahmin ettiği
-      şeyi kullanıcı onaylaması, heuristiğin kendisinden daha değerlidir.
-- [ ] **Sinyal kapsamını ölçerek genişlet.** Bugün 14 test var, hepsi elle
-      yazılmış cümleler. Gerçek kullanım için: `.gemini/logs/srp_guardian_live.json`
-      prompt **içermiyor** (sadece dosya olayları), yani gerçek ground truth
-      kaynağı yok. Önce elle etiketlenmiş bir fixture seti (`tests/fixtures/*.txt`,
-      her satır `prompt → beklenen mod`), sonra kapsam genişletme. Etiketleme
-      kuralı: mod ne olsa da kullanıcının istediği şey ne?
 - [ ] **4. mod eklenmeli mi?** Aday: `test` (yalnızca test yaz/sar, üretim koduna dokunma)
       ve `explain` (kod oku, hiçbir şey değiştirme). Karar ölçütü: yönlendirme
       direktifi gerçekten farklı davranış üretiyor mu, yoksa sadece isim mi değişiyor?
       Fark üretmiyorsa eklenmemeli — üç moddan fazlası modelin değil prompt'un
       seçeneğidir.
+- [ ] **Kapsam genişletme artık veri ister, tahmin değil.** Elle etiketlenmiş korpus
+      (`tests/fixtures/intent-corpus.txt`, 32 madde, %100 gate) regresyonu yakalar ama
+      gerçek kullanımı temsil etmez — canlı log prompt içermiyor. Sinyal eklerken
+      önce korpusa, sonra gerçek bir oturumda gözle doğrulamak gerekiyor; bu yüzden
+      her yeni sinyal için "hangi cümle bunu kandırırdı?" sorusu korpusa girmeli.
 
 ---
 
-## 2. Pre-Hook Architecture Whisperer (v1.4.0 adayı — tasarım engelli)
+## 2. Pre-Hook Architecture Whisperer (v1.4.0 adayı)
 
 Amaç: agent kodu yazmadan **önce** aktif katman sınırlarını ve mimari kuralları
 prompt bağlamına sokmak.
 
-- [ ] **Önce kanal engeli çözülmeli.** Hook yanıt şeması yalnızca
-      `decision`, `reason`, `permissionOverrides`, `overwrite` kabul ediyor
-      (bkz. `CHANGELOG` 1.2.5: fazladan alan → protojson tüm yanıtı çöpe atar).
-      Bir "fısıltı" da `reason` içinden geçmek zorunda — ama `reason` **zaten**
-      uyarıların kanalı. Yani fısıltı ile uyarı aynı yerde durur ve ayırt
-      edilemez. Çözülmesi gereken soru: *fısıltı bir uyarı mıdır, yoksa ayrı bir
-      kanal mı aranmalı?* İkinci seçenek şema değişikliği gerektirir ve Antigravity
-      tarafında karşı tarafta doğrulanması gerekir.
-- [ ] İçerik kaynağı hazır: `.gravityguard.json` → `layers`, `testEvidence.sourceRoots`,
-      `complexity` bloğu. Fısıltı bu dosyadan okunmalı, hard-code edilmemeli.
-- [ ] Boyut sınırı: fısıltı her tool-call'de tekrar edilirse prompt şişer.
-      Sadece katman ihlali *riski* taşıyan hedefler için (yeni dosya, yeni import,
-      hedef dizin `layers` içinde) gönderilmeli.
+- [x] ~~Kanal sorusu karara bağlandı~~ — `ARCHITECTURE` 3.3.1: fısıltı ayrı bir kanal
+      değil, **kendi `RULE_ID`'li bir WARN kuralıdır**; `reason` tek ajan-görünür
+      metin kanalıdır ve yeni bir şema değişikliği gerekmez. Kural böylece diğer tüm
+      uyarıların garantilerini devralır: asla engellemez, aksiyon önerir, id ile
+      makine-ayırt edilebilir.
+- [ ] **Kuralı yaz:** `ARCH_CONTEXT` (WARN). İçerik kaynağı hazır: `.gravityguard.json`
+      → `layers`, `testEvidence.sourceRoots`, `complexity` bloğu. Fısıltı bu dosyadan
+      okunmalı, hard-code edilmemeli.
+- [ ] **Boyut sınırı:** fısıltı her tool-call'de tekrar edilirse prompt şişer. Sadece
+      katman ihlali *riski* taşıyan hedefler için (yeni dosya, yeni import, hedef dizin
+      `layers` içinde) gönderilmeli.
+- [ ] **Kapsam tuzağı:** fısıltı hiçbir zaman bir BLOCK kararının tek taşıyıcısı
+      olamaz (Anti-Goal 5). `G4` engellemeye devam ederken `ARCH_CONTEXT` yalnızca
+      bağlam verir.
 
 ## 2.1 Complexity Heuristics — Yeni Kural Eklemeden Önce Ölçüm (v1.4.0 adayı)
 
@@ -138,27 +122,25 @@ bağımlılık artışı (dependency creep).
 
 ---
 
-## 3. Bilinen Borç ve Sınırlar (kaybolmasın diye açıkça listelendi)
+## 3. Bilinen Borç ve Sınırlar
 
-| # | Borç / sınır | Nerede | Durum |
-|---|---|---|---|
-| 1 | Intent classifier anahtar kelime heuristiği; sıra dışı ifadeler `implement`'e düşüyor (`confidence: 'low'` ile işaretlenir) | `src/intent.ts` | açık — §1 |
-| 2 | Engine iki kopyada yaşıyor: `engine/gravity-validator.py` ↔ plugin `scripts/srp-validator.py`. `hooks.json` eski adı çağırıyor, iki isim arasında hiçbir çapraz referans yok | `CHANGELOG` P3-04 | açık — aşağıda |
-| 3 | `loss-guard`'ın 5 kontrolünden 4'ü web/React'a özgü; Python projelerinde yalnızca secret taraması anlamlı | `~/.git-template/hooks` | kabul edildi, kapatılmayacak |
-| 4 | Boş `.gravityguard/runtime/` dizinleri motor yeniden oluşturuyor; silmek anlamsız | motor | kabul edildi |
-| 5 | CI yok (§0.1) | repo | açık |
-| 6 | Hook'un `reason` alanı hem uyarı hem (gelecekte) fısıltı kanalı; ayrım yok | `CHANGELOG` 1.2.5 | açık — §2 |
-| 7 | T1 deferred mode: test dosyası hiç olmayan bir projede gerçek uyarı verir (WARN, engellemez). Susturmak ya test yazmak ya `.gravityguard.json` istisnası — bilinçli bir tercih | `CHANGELOG` 1.2.6 Notes | bilinçli kabul |
+Kapatılanlar işaretli, kalanlar açık. Kapatma kanıtı `CHANGELOG.md` → `[Unreleased]`.
 
-### 3.1 İsim borcu (en ucuz çözümden başlayarak)
+| # | Borç / sınır | Durum |
+|---|---|---|
+| 1 | ~~Classifier anahtar kelime heuristiği; sıra dışı ifade → `implement` (`low` işaretli)~~ | **kapatıldı** — düşük güvende artık tahmin etmiyor, `showQuickPick` ile soruyor. Elle etiketlenmiş 32 maddelik korpus %100 ve 0 düşük güven; korpusun ilk koşusunda çıkan 4 gerek hata düzeltildi (regex kaçışı, çift sayım, TR ek düşmesi, `-ebil` potansiyel eki) |
+| 2 | ~~Engine iki kopyada (`gravity-validator.py` ↔ `srp-validator.py`), çapraz referans yok~~ | **kısmen kapandı** — iki dosya da canlı kopyayı, kaynak-önceliğini ve senkron aracını başlıkta söylüyor. Adlandırmanın kendisi bilinçli yapılmadı: canlı korumayı kırabilir |
+| 3 | `loss-guard` 5 kontrolünün 4'ü web/React'a özgü | **kabul** — `~/.git-template` içinde, 12 repo'ya uygulanmış kullanıcı-makine katmanı; ürün değişikliği değil. Python projelerinde yalnızca secret taraması anlamlı ve zararsız |
+| 4 | Boş `.gravityguard/runtime/` dizinleri kendini yeniden oluşturuyor | **kabul** — motorun çalışma zamanı dizinlerini `mkdir` ile kurması bir özellik; silmek kalıcı çözüm değil, `KNOWLEDGE` §2.1'de yazılı |
+| 5 | ~~CI yok~~ | **kapatıldı** — `.github/workflows/ci.yml`, ubuntu/windows/macos matrisi, `npm test` + `npm run test:engine` |
+| 6 | ~~`reason` hem uyarı hem (gelecekte) fısıltı kanalı~~ | **karara bağlandı** — `ARCHITECTURE` 3.3.1: fısıltı ayrı kanal değil, kendi `RULE_ID`'li bir WARN kuralı. Kardeş test izinli anahtar kümesini sabitliyor |
+| 7 | T1 deferred mode: testi hiç olmayan projede gerçek uyarı (WARN, engellemez) | **kabul** — susturmanın iki yolu da kasıtlı ve mevcut: test yazmak ya da `testEvidence.exemptPatterns` / `deferredMode` (`KNOWLEDGE` §2.4) |
 
-1. **Ucuz:** her iki dosyaya da kutu başı yorum satırı — "bu dosyanın canlı
-   kopyası şurada, `tools/sync_plugin.py` ikisini eşitliyor". Tek satırlık,
-   yanlış anlaşılma riski sıfır.
-2. **Pahalı:** plugin tarafında `srp-validator.py` → `gravity-validator.py`
-   yeniden adlandırmak + `hooks.json`'u güncellemek + `sync_plugin.py` eşlemesini
-   değiştirmek + 12 repo hook kopyasını doğrulamak. Yeniden adlandırma canlı
-   korumayı kırarsa kullanıcı korumasız kalır; bu yüzden ayrı, ölçülmüş bir adım.
+### 3.1 İsim borcu — kalan kısım
+
+Adlandırma (`srp-validator.py` → `gravity-validator.py`) yapılmadı: `hooks.json` o yolu
+çağırıyor, `sync_plugin.py` eşlemesi ve 12 repo hook kopyası değişecek. Yanlış yapılırsa
+kullanıcının canlı koruması sessizce düşer. Adım adım ölçülmüş, ayrı bir iş.
 
 ---
 

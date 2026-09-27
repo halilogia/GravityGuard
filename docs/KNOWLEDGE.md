@@ -40,7 +40,12 @@ This document serves as the persistent engineering knowledge repository for **Gr
   2. **Implementation / Coding ("Şunu yaz", "Modül ekle")** — directive B: defensive specification (purpose, scope, module and SRP boundaries, error handling, tests).
   3. **Audit / Refactoring ("Denetle", "ölü kodları incele")** — directive C: no new production code, findings with `dosya:satır` evidence plus an impact rating, unverifiable suspicions in a separate list, refactor advice split into small revertible steps with a verification method each.
 - **The user can override the classifier** with a `#denetle:` / `#danış:` / `#kodla:` prefix; the result is reported as `source: 'override'`. A heuristic the user cannot contradict is a heuristic the user will stop trusting.
+- **Below the high band the user is asked, not guessed.** `shouldAskForMode()` is true unless the classification is high-confidence, and a `showQuickPick` presents the current guess as the default. An override is never questioned.
 - **Why not ask the model?** It was the previous design, and it was unverifiable: the repository could not prove compliance, so a directive was a request rather than a decision. `tests/intent.test.mjs` asserts that exactly one directive is emitted per prompt.
+- **Signals are scored, not counted, and the ordering rule is: specific beats generic.** A build verb or audit verb (weight 4) outranks a question marker (1–2); a named assessment topic such as "quality / risk / correctness" (5) outranks both. Three consequences that were bugs first:
+  - Turkish keywords are matched as **stems with a bounded suffix allowance** (`tr()`), because `\b`-anchored literals silently fail on "teknik borcu" (ç→c softening) and "ölü kodu". The potential suffix *-A-bil-* is excluded: "yaz**a**biliriz" is a hypothesis, not an order.
+  - A question mark is **syntactic**, not semantic. It says the request is a question, never which kind, so it must not outrank a real signal — and it must be counted **once**: `?` and a trailing `mı/mi/mu/mü` are the same evidence, not two.
+  - One word must never fire two patterns of the same mode. English "unused" appearing in both the Turkish and the English smell list doubled its weight and outranked a build order.
 
 ---
 
@@ -118,6 +123,7 @@ The Python engine enforces checks through an ordered, high-to-low priority pipel
 | `layers` | `G4_IMPORT_MATRIX` (BLOCK) | Forbidden import targets per layer. Exact path-segment matching. |
 | `testEvidence` | `T1` / `T2` / `T3` (WARN) | `sourceRoots`, `testRoots`, `sessionWindowSeconds` (default 300), `exemptPatterns` (fnmatch globs), `deferredMode`. |
 | `complexity` | `OE_SPIKE`, `ARCH_FILE_GROWTH` (WARN only) | `monolithLoc` (1000), `singleWriteLoc` (180), `creepBaseLoc` (800), `creepAddedLoc` (80), `overEngineeringMaxLoc` (50), `overEngineerAbstractions` (2). |
+| *(none)* | `hooks.json` in the live plugin | The plugin invokes `python scripts/srp-validator.py`, which is why the repo's `engine/gravity-validator.py` is renamed there. Both entry points state this in their header; `tools/sync_plugin.py` keeps them equal. |
 
 **Configuration is a convenience, never a security boundary.** Every numeric key has a floor (`monolithLoc: 3` would flag every file), non-numeric values, booleans and malformed blocks are ignored, and a bad config degrades to the defaults instead of raising — this code runs inside the pre-tool hook, where an exception means the write proceeds unguarded.
 

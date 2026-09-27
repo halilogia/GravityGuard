@@ -1,3 +1,18 @@
+# ============================================================================
+# GRAVITYGUARD GUARD ENGINE — repo source of truth
+# ============================================================================
+#   Live copy: ~/.gemini/config/plugins/srp-swarm-guardian/scripts/
+#              srp-validator.py   (renamed: hooks.json invokes
+#              `python scripts/srp-validator.py`)
+#   These are two different files on purpose — the plugin directory is a
+#   separate deployment target — and a search for either name finds no
+#   reference to the other, which made the relationship invisible to anyone
+#   reading one side. It is now stated here, in async_runner.py, and in
+#   tools/sync_plugin.py.
+#   EDIT THIS FILE, never the live copy. tools/sync_plugin.py copies this file
+#   to the plugin on every commit (pre-commit hook) and
+#   `python tools/sync_plugin.py --check` reports drift.
+# ============================================================================
 import sys
 import json
 import os

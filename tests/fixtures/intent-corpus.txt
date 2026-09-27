@@ -1,0 +1,49 @@
+# Hand-labelled intent corpus. Format: <expected-mode> <TAB> <prompt>
+#
+# WHY THIS FILE IS HAND-WRITTEN AND NOT SAMPLED
+#   There is no ground truth to sample from: the live audit stream
+#   (~/.gemini/logs/srp_guardian_live.json) records file events, never prompts.
+#   So the corpus is hand-written, which means it cannot prove the classifier is
+#   right about REAL users — only that a change to the signals does not break
+#   what the author already understood. That is the honest claim, and it is
+#   still worth a gate: signal edits are exactly the kind of change that
+#   silently flips a mode and nobody notices until a prompt comes out wrong.
+#
+# One prompt per line. No tabs inside the prompt. Blank lines and #-comments are
+# skipped. Expectations are the MODE a competent agent should act in, not the
+# words used to express it — "how should I..." is a question, not a build order.
+
+consult	bunu nasıl yaparız, hangi yaklaşım daha sağlıklı?
+consult	bu projede websocket mi grpc mi kullansak, artıları eksileri neler?
+consult	fikirlerin neler, cache katmanını nasıl kurgulamalıyız?
+consult	şu modülü 3 farklı şekilde yazabiliriz, hangisi daha okunur olur?
+consult	what do you think about moving the auth layer into a separate package?
+consult	brainstorm some approaches for background job scheduling, pros and cons
+consult	teknik borç mu çözelim, yoksa yine mi yazalım? bir tavsiyen var mı?
+consult	hangi veritabanını kullanalım, mysql mi sqlite mi?
+consult	bir sorum var: bu yapı ileride ölçeklenir mi?
+consult	şu kodu incelerken hangi noktalara dikkat etmeliyim?
+consult	is it worth supporting websockets here, or is polling enough?
+
+implement	websocket bağlantı yöneticisi oluştur ve testlerini yaz
+implement	add a retry helper to the http client and update the existing tests
+implement	bu modüle loglama ekle, level'a göre filtrele
+implement	şu testi düzelt, beklenen değer yanlış hesaplanıyor
+implement	create a migration for the new index and apply it
+implement	delete the unused feature flag and its config entry
+implement	async runner'daki dosya biriktirme mantığını düzelt
+implement	implement pagination for the user list endpoint
+implement	yeni dosyaya bir dataclass yaz ve __init__'te varsayılan değerleri ata
+implement	refactor this function into a pure helper and keep the behaviour
+implement	bu endpoint'in response modelini pydantic ile tanımla
+implement	svelte bileşenine loading state ekle, spinner göster
+
+audit	bu modülde ölü kod var mı, biraz incele
+audit	#denetle: src/network klasöründeki katman ihlallerini raporla
+audit	review this module for code smells, do not change anything
+audit	bu dosyada testler neden sessizleşmiş, kontrol et
+audit	what's wrong with this file, any issues?
+audit	[audit] check the boundary between ui and network
+audit	bu projedeki teknik borcu listele, önceliklendir
+audit	inspect the import matrix, are there layer violations
+audit	bu kodun kalitesi nasıl, risk var mı?

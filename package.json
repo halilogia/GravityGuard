@@ -39,7 +39,7 @@
     "build": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "test": "npm run build && node --test \"tests/**/*.test.mjs\"",
-    "test:engine": "python -m unittest discover -s engine -p test_*.py",
+    "test:engine": "python -m unittest discover -s engine -t engine -p \"test_*.py\"",
     "package": "vsce package --no-git-tag-version",
     "verify:package": "python tools/verify_package.py"
   },
