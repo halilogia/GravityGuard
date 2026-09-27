@@ -138,3 +138,38 @@ The Python engine enforces checks through an ordered, high-to-low priority pipel
 4. **One escape-hatch vocabulary.** A new marker or config key must reuse an existing one (`srp: allow-monolith`) or justify why it cannot.
 5. **WARN rules may accept a human exemption; BLOCK rules may not.** Extending `complexity` or the marker to a blocking rule re-opens Anti-Goal 5 and must be argued explicitly.
 6. **Schema is a contract.** The hook stdout permits only `decision`, `reason`, `permissionOverrides`, `overwrite`; protojson discards the entire response for an unknown field, and a test harness using plain `json.loads` cannot observe that class of bug. `run_validator()` gates every response against the allowed key set for this reason.
+
+---
+
+## 5. Release Cutting Ritual (repeatable — proven on v1.3.0)
+
+A release is not "bump the version". In order, with the command that proves each step:
+
+1. `npm test` and `npm run test:engine` — both green. If a perf test fails, check whether the machine is loaded before touching any bound: on this host the core evaluator measures 0.10 ms idle and 2.3 ms under three competing builds, and a random failure is not a regression.
+2. `python tools/sync_plugin.py --check` — the live plugin must already match the repo engine.
+3. `vsce package --no-git-tag-version`, then **`npm run verify:package`**. This is the gate: it compares the packaged engine's md5 against the repo and rejects forbidden content by allowlist. On the 1.3.0 cut it immediately failed — the artifact was 15 files / 80.33 KB instead of 10 / 54.69 KB, because `.vscodeignore` had never been touched since `tests/` and `docs/` came into existence.
+4. Update `package.json` version, `README.md` header + badges, and the `ROADMAP` status table **in the same commit**.
+5. `CHANGELOG.md`: `[Unreleased]` → `## [x.y.z] - <date>`, with a **separate Upgrade Notes block** for anything a user would notice. The block is not optional: two of 1.3.0's changes altered what warnings appear, and a project with its own thresholds in `.gravityguard.json` is affected by them.
+6. Commit, tag, push, then `gh release create v1.3.0 gravityguard-1.3.0.vsix --title "v1.3.0" --notes-file notes.md --verify-tag`.
+7. **Download the released asset back and compare its md5** with the local build. "The upload succeeded" is not the same claim as "the artifact on the release page is the one this tree produced".
+
+`gh` is installed user-scope via winget (`winget install --id GitHub.cli -e --scope user`) — no admin required — and is authenticated to `halilogia` with `repo` + `workflow`.
+
+---
+
+## 6. Documentation Discipline
+
+The doc set is six files, and they fail in different ways, so each has a rule:
+
+| File | What it is for | Update rule |
+|---|---|---|
+| `CHANGELOG.md` | What happened, with the measurement and the reasoning | Every behavioural change. If a rule's *semantics* change, the old meaning must be stated, not just the new one. |
+| `ROADMAP.md` | **Unfinished work only** | A completed item moves to the CHANGELOG, not a checkbox. |
+| `ARCHITECTURE.md` | How the system is wired right now | Any new module, config key, or pipeline stage. |
+| `docs/KNOWLEDGE.md` | Invariants, mechanics, and how work gets done here | Any new standing procedure or lesson (§4, §5, §6). |
+| `README.md` | What a user sees and installs | Version header, rule matrix rows, feature descriptions. |
+| `.vscodeignore` | What the artifact contains | Any new top-level directory. Verified by `npm run verify:package`, not by reading. |
+
+**Same-commit rule**: a change that alters a rule's behaviour updates `CHANGELOG` + `ARCHITECTURE`/`KNOWLEDGE` in the same commit that changes the code. A rule documented one release later is a rule someone will have already worked around.
+
+`brain/knowledge.md` is an untracked mirror of `docs/KNOWLEDGE.md`; when the tracked copy changes, copy it over (it is not version-controlled, so git will not remind anyone).
