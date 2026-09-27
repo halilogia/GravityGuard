@@ -16,16 +16,15 @@ aşağıdaki anti-hedefler. Bir fikir bu çerçeveyi ihlal ediyorsa fikir değil
 
 ---
 
-## 0. Kesim Sonrası Kalan İki Madde
+## 0. Kesim Sonrası Kalan Madde
 
-- [ ] **`v1.2.6` / `v1.2.7` GitHub Release'leri yok.** Etiketler geriye dönük atıldı
-      (v1.2.6 → a8f55a3, v1.2.7 → 46f82f4, ikisi de annotated ve "retroactive"
-      notlu). Release'lerinin yayınlanması bilinçli olarak yapılmadı: eski sürümleri
-      kullanıcıya göstermek muhasebe düzeltmesi değil, ürün kararıdır.
 - [ ] **Sürüm numarası ritmi.** v1.3.0 birden fazla commit'i biriktirdikten sonra
       kesildi. Karar: her davranış değişikliği mi sürüm ister (şeffaf ama pahalı),
       yoksa biriktirme mi (ucuz ama sürüm notu yazmak zorlaşır)? Şu an ikincisi
-      uygulanıyor ve 1.3.0'ın Upgrade Notes bölümü bu yüzden uzun.
+      uygulanıyor ve 1.3.0'ın Upgrade Notes bölümü bu yüzden uzun. Gözlem:
+      geriye dönük bir release yayınlamak, `gh`'in "Latest" işaretini en yeni
+      sürümden çalıyor — ritim kararının bir yan etkisi değil, yayınlama
+      sırasının bir tuzağı.
 
 ---
 
