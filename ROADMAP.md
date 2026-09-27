@@ -26,10 +26,6 @@ aşağıdaki anti-hedefler. Bir fikir bu çerçeveyi ihlal ediyorsa fikir değil
       kesildi. Karar: her davranış değişikliği mi sürüm ister (şeffaf ama pahalı),
       yoksa biriktirme mi (ucuz ama sürüm notu yazmak zorlaşır)? Şu an ikincisi
       uygulanıyor ve 1.3.0'ın Upgrade Notes bölümü bu yüzden uzun.
-- [x] ~~**CI'ın ilk koşu sonuçlarını kaydet**~~ — ilk koşu (run 36304712956) üç
-      platformda da **yeşil**: ubuntu / windows / macos, her adım başarılı, platform
-      kırılması çıkmadı. Yani "saf standart kütüphane, platformdan bağımsız" iddiası
-      artık test edilmiş bir iddia, varsayım değil.
 
 ---
 
@@ -51,13 +47,9 @@ aşağıdaki anti-hedefler. Bir fikir bu çerçeveyi ihlal ediyorsa fikir değil
 ## 2. Pre-Hook Architecture Whisperer (v1.4.0 adayı)
 
 Amaç: agent kodu yazmadan **önce** aktif katman sınırlarını ve mimari kuralları
-prompt bağlamına sokmak.
+prompt bağlamına sokmak. Kanal kararı verildi (`ARCHITECTURE` 3.3.1 → `CHANGELOG`
+`[Unreleased]`): fısıltı ayrı bir kanal değil, kendi `RULE_ID`'li bir WARN kuralıdır.
 
-- [x] ~~Kanal sorusu karara bağlandı~~ — `ARCHITECTURE` 3.3.1: fısıltı ayrı bir kanal
-      değil, **kendi `RULE_ID`'li bir WARN kuralıdır**; `reason` tek ajan-görünür
-      metin kanalıdır ve yeni bir şema değişikliği gerekmez. Kural böylece diğer tüm
-      uyarıların garantilerini devralır: asla engellemez, aksiyon önerir, id ile
-      makine-ayırt edilebilir.
 - [ ] **Kuralı yaz:** `ARCH_CONTEXT` (WARN). İçerik kaynağı hazır: `.gravityguard.json`
       → `layers`, `testEvidence.sourceRoots`, `complexity` bloğu. Fısıltı bu dosyadan
       okunmalı, hard-code edilmemeli.
@@ -123,19 +115,21 @@ bağımlılık artışı (dependency creep).
 
 ---
 
-## 3. Bilinen Borç ve Sınırlar
+## 3. Borç Kaydı
 
-Kapatılanlar işaretli, kalanlar açık. Kapatma kanıtı `CHANGELOG.md` → `[Unreleased]`.
+Kapatılan borçler burada **kalmaz** — kanıtları `CHANGELOG.md` → `[Unreleased]`
+içindedir. Aşağıdaki tablo yalnızca **hâlâ borç olan** ve **kabul edilmiş
+sınırları** tutar.
 
 | # | Borç / sınır | Durum |
 |---|---|---|
-| 1 | ~~Classifier anahtar kelime heuristiği; sıra dışı ifade → `implement` (`low` işaretli)~~ | **kapatıldı** — düşük güvende artık tahmin etmiyor, `showQuickPick` ile soruyor. Elle etiketlenmiş 32 maddelik korpus %100 ve 0 düşük güven; korpusun ilk koşusunda çıkan 4 gerek hata düzeltildi (regex kaçışı, çift sayım, TR ek düşmesi, `-ebil` potansiyel eki) |
-| 2 | ~~Engine iki kopyada (`gravity-validator.py` ↔ `srp-validator.py`), çapraz referans yok~~ | **kısmen kapandı** — iki dosya da canlı kopyayı, kaynak-önceliğini ve senkron aracını başlıkta söylüyor. Adlandırmanın kendisi bilinçli yapılmadı: canlı korumayı kırabilir |
+| 2 | Engine iki kopyada (`gravity-validator.py` ↔ `srp-validator.py`) | **kısmen açık** — çapraz referans eklendi, adlandırma yapılmadı (§3.1) |
 | 3 | `loss-guard` 5 kontrolünün 4'ü web/React'a özgü | **kabul** — `~/.git-template` içinde, 12 repo'ya uygulanmış kullanıcı-makine katmanı; ürün değişikliği değil. Python projelerinde yalnızca secret taraması anlamlı ve zararsız |
 | 4 | Boş `.gravityguard/runtime/` dizinleri kendini yeniden oluşturuyor | **kabul** — motorun çalışma zamanı dizinlerini `mkdir` ile kurması bir özellik; silmek kalıcı çözüm değil, `KNOWLEDGE` §2.1'de yazılı |
-| 5 | ~~CI yok~~ | **kapatıldı** — `.github/workflows/ci.yml`, ubuntu/windows/macos matrisi, `npm test` + `npm run test:engine` |
-| 6 | ~~`reason` hem uyarı hem (gelecekte) fısıltı kanalı~~ | **karara bağlandı** — `ARCHITECTURE` 3.3.1: fısıltı ayrı kanal değil, kendi `RULE_ID`'li bir WARN kuralı. Kardeş test izinli anahtar kümesini sabitliyor |
 | 7 | T1 deferred mode: testi hiç olmayan projede gerçek uyarı (WARN, engellemez) | **kabul** — susturmanın iki yolu da kasıtlı ve mevcut: test yazmak ya da `testEvidence.exemptPatterns` / `deferredMode` (`KNOWLEDGE` §2.4) |
+
+Kapanmış borçlar (karşılaştırma için): 1 classifier (korpus + onay akışı), 5 CI,
+6 kanal kararı. Kayıt: `CHANGELOG.md` → `[Unreleased]`.
 
 ### 3.1 İsim borcu — kalan kısım
 
