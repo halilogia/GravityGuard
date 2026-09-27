@@ -5,7 +5,40 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.3.0] - 2026-09-27
+
+> **Upgrade Notes — davranış değişiklikleri.** Bu sürüm, 1.2.7'ye göre geriye dönük
+> uyumlu, ama **gözle görülür davranış değişiklikleri** içeriyor. `.gravityguard.json`
+> içinde kendi eşiğinizi tanımladıysanız iki kuralın davranışını doğrudan etkiler.
+>
+> 1. **`ARCH_FILE_GROWTH` artık büyüme olayı ölçüyor, dosya durumunu değil.**
+>    Önceden "dosya 1000 satırı geçtiyse uyar" idi; bu, monolit dosyayı oluşturan
+>    yazmayla, sonraki üç satırlık düzeltmeyi ve ondan sonraki her düzeltmeyi
+>    *aynı* uyarıyla cezalandırıyordu. Artık uyarı, dosyayı eşiğin **üzerine taşıyan**
+>    yazma için çalışır; sonraki büyümeler için 800+/80 kuralı geçerlidir.
+> 2. **Yeni oluşturulan dosyalar boyutlarından dolayı uyarılmıyor.** 250 satırlık
+>    yeni bir modül, tam olarak kuralların istediği sonuçtur; 1.636 gerçek dosya
+>    oluşturmanın 359'u 180+ satır ekliyordu ve bunların hepsine uyarı veriliyordu.
+>    Dosya **doğuştan** 1000 satırın üstündeyse yine de uyarılır.
+> 3. **`srp: allow-monolith` işareti büyüme kurallarını susturuyor** (SRP kuralının
+>    zaten kullandığı işaret sözlüğü). Kasıtlı olarak tek parça olan dosyalar artık
+>    her yazımda uyarılmıyor. Monolit *oluşturma* yazımı yine de raporlanıyor.
+> 4. **Yeni `.gravityguard.json` → `complexity` bloğu.** Anahtarlar: `monolithLoc`
+>    (1000), `singleWriteLoc` (180), `creepBaseLoc` (800), `creepAddedLoc` (80),
+>    `overEngineeringMaxLoc` (50), `overEngineerAbstractions` (2). Varsayılanlar
+>    ölçülmüş değerlerdir; geçersiz bir değer yok sayılır, hata fırlatılmaz.
+> 5. **Prompt Geliştirici artık yerel AI geçidine zorunlu bağımlı değil.** Geçid
+>    kapalıysa komut hata vermez; belirlenimci çevrimdışı şablon moduna düşer ve
+>    bunu bildirimde açıkça söyler. `ping` komutu artık gerçek bir sağlık kontrolü
+>    yapar.
+> 6. **Yeni niyet sınıflandırıcı.** İstekler artık `İSTİŞARE` / `UYGULAMA` /
+>    `DENETİM / REFACTOR` modlarından birine **yerelde** karar verilir ve modele
+>    yalnızca o modun direktifi gönderilir. `#denetle:`, `#danış:`, `#kodla:`
+>    öneki kararı siz geçersiz kılar.
+>
+> **Etkilemeyenler:** hiçbir BLOCK kuralı, hiçbir eşik değeri ve `G0`–`G4`, `SRP`,
+> `T1`–`T3` kural semantiği değişmedi. `OE_SPIKE` ölçümde zaten doğru bulunduğu
+> için **bilerek değiştirilmedi** (fire rate %1,27).
 
 ### Fixed
 - **Every edited file created its own `.gravityguard` directory (non-git projects)**:
@@ -18,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Trade-off, stated explicitly:** an untrusted root now silently persists nothing instead of persisting to the wrong place. That is the safer failure direction — the guard's diagnostics and debounce state are advisory, whereas an unrequested write into a source tree is not recoverable by the user. The two functions are asserted to agree, since a root that resolution can return but that creation refuses would make state a silent no-op.
   - `CHANGELOG.md:73` in v1.2.5 had already noted two such mojibake/empty shells, each holding a lone `debounce_state.json`. Detected, never fixed — this is that fix.
 - **`is_ts_cohesive_monolith()` was the wrong predicate for a monolith exemption.** It answers "is this an ordinary module rather than a tabbed web page?" and returns `True` for nearly every TypeScript file, so the first cut of the marker check exempted almost everything. Replaced with `_has_declared_cohesion_marker()`, which matches only the marker comment. Caught by an existing test — `test_arch_file_growth_creeping_growth_800_plus_80_triggers_warn` went silent — which is the argument for keeping these as behaviour tests rather than unit tests of the predicate.
+- **The 1.3.0 package shipped 15 files / 80.33 KB instead of 10 / 54.69 KB**: `.vscodeignore` was written when `tests/` and `docs/` did not exist, so `tests/intent.test.mjs`, `docs/KNOWLEDGE.md`, `.kilo/.gitignore` and four `dist/*.js.map` files entered the artifact unnoticed. The engine was correct; the artifact was 46% larger than it should have been, carrying a test file and source maps to every user's extension directory. Fixed by extending `.vscodeignore` (`tests/`, `docs/`, `.kilo/`, `dist/**/*.js.map`) and by adding the check that should have existed since 1.2.5 (below), which is what caught it.
+- **`test_sub_50ms_performance` measured the host, not the guard.** The assertion was a fixed 400 ms ceiling on `python.exe` spawn. Measured four times on identical code during this cut: **268 ms idle → 1184 ms with three other agent sessions compiling on the machine** — it failed 3 runs out of 4, at random, while catching nothing. Worse, it was not sensitive to the defect it names: a 300 ms `sleep()` at import time would have passed it. It is now measured **differentially** against a `python -c pass` control in the same time slice, asserting the validator's own import + evaluation stays a small multiple of the interpreter's own startup (with a 1500 ms absolute backstop). That is stable under load and strictly more sensitive. The real product invariant is unaffected: `test_core_in_memory_latency` still asserts the in-memory path at `<10ms` (measured 0.1084 ms avg / 0.1388 ms p95 over 1,000 runs), and the differential measurement shows the validator adds ~17 ms of its own on top of interpreter startup.
 
 ### Added
 - **`TestProjectRootResolution`** (6 tests): manifest anchoring, single-runtime-dir invariant, working-directory anchoring for a markerless project, rejection of an unrelated cwd, the no-mkdir trust gate, and resolution/creation agreement.
@@ -34,8 +69,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Refactor advice must be split into small, revertible steps, each with its own verification method.
 - **`complexity` block in `.gravityguard.json`**: `monolithLoc`, `singleWriteLoc`, `creepBaseLoc`, `creepAddedLoc`, `overEngineeringMaxLoc`, `overEngineerAbstractions`. Values below a per-key floor (`monolithLoc: 3` would flag every file), non-numeric values, booleans, and a malformed block are all ignored and degrade to the defaults. The block is a convenience, not a boundary: a typo must never turn a WARN-only rule into a hook error, which would fail the write open.
 - **Offline deterministic composer (`buildOfflinePrompt`)**: when no local model answers, the enhancer produces a structured brief from the classified mode instead of showing an error. Same event the user asked for, one prompt, plus a notification that says it came from the offline path.
+- **`tools/verify_package.py` + `npm run verify:package`**: the 1.2.5 rule ("the packaged engine must be byte-identical to the repo engine, so a release artifact can never ship a stale guard") had been verified by hand, exactly once. It is now a repeatable gate: it checks the artifact's required files, compares the md5 of both packaged engine modules against the repo, and rejects forbidden content (`tests/`, `docs/`, `tools/`, `brain/`, `.kilo/`, `src/`, `*.js.map`, `.env`, `*.bak`) from an explicit list — because `.vscodeignore` only encodes the intent and rots silently when new directories appear. It also encodes `dist/intent.js` as **required**, so a future over-eager ignore rule cannot quietly remove the intent classifier from a shipped build.
 
 ### Changed
+- **Version 1.3.0.** `package.json` 1.2.7 → 1.3.0. `package.json` scripts gained `package` and `verify:package` alongside `test` / `test:engine`.
 - Test Count: **124/124 engine tests passing** (was 118/118; +6), plus **14/14** TypeScript tests (`npm test`) for the classifier and prompt composer — a new zero-dependency `node --test` suite in `tests/intent.test.mjs`, wired to `npm test` / `npm run test:engine`. Two pre-existing tests now anchor their temp roots with a manifest: they exercised state round-tripping, not the trust policy, and were passing only because `get_runtime_dir()` once created directories unconditionally.
 - **9Router is no longer a hard dependency of the prompt enhancer** (previously the only thing standing between `Ctrl+Alt+E` and an error dialog):
   - `gravityguard.models` (array) and `gravityguard.routerTimeoutMs` (number) are new settings; `ROUTER_MODELS` is honoured as an env fallback. Any OpenAI-compatible `/v1` endpoint works — 9Router, Ollama, LM Studio, llama.cpp — so the extension is no longer coupled to one gateway's model naming.

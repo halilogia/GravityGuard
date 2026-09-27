@@ -2,7 +2,7 @@
   "name": "gravityguard",
   "displayName": "GravityGuard — Architecture Airbag & Gatekeeper for AI Agents",
   "description": "Deterministic architectural gatekeeper, test sufficiency analyzer, and prompt engineering copilot for Antigravity IDE & AI Coding Agents.",
-  "version": "1.2.7",
+  "version": "1.3.0",
   "publisher": "halilogia",
   "repository": {
     "type": "git",
@@ -39,7 +39,9 @@
     "build": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "test": "npm run build && node --test \"tests/**/*.test.mjs\"",
-    "test:engine": "python -m unittest discover -s engine -p test_*.py"
+    "test:engine": "python -m unittest discover -s engine -p test_*.py",
+    "package": "vsce package --no-git-tag-version",
+    "verify:package": "python tools/verify_package.py"
   },
   "contributes": {
     "viewsContainers": {

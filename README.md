@@ -1,4 +1,4 @@
-# GravityGuard — v1.2.7
+# GravityGuard — v1.3.0
 
 > Deterministic Architecture Airbag, Secret Leak Airbag & AI Agent Gatekeeper for Antigravity IDE.
 
