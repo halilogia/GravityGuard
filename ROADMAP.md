@@ -18,13 +18,13 @@ aşağıdaki anti-hedefler. Bir fikir bu çerçeveyi ihlal ediyorsa fikir değil
 
 ## 0. Kesim Sonrası Kalan Madde
 
-- [ ] **Sürüm numarası ritmi.** v1.3.0 birden fazla commit'i biriktirdikten sonra
-      kesildi. Karar: her davranış değişikliği mi sürüm ister (şeffaf ama pahalı),
-      yoksa biriktirme mi (ucuz ama sürüm notu yazmak zorlaşır)? Şu an ikincisi
-      uygulanıyor ve 1.3.0'ın Upgrade Notes bölümü bu yüzden uzun. Gözlem:
-      geriye dönük bir release yayınlamak, `gh`'in "Latest" işaretini en yeni
-      sürümden çalıyor — ritim kararının bir yan etkisi değil, yayınlama
-      sırasının bir tuzağı.
+- [ ] **Sürüm numarası ritmi — karar bekliyor.** v1.3.0 birden fazla commit'i
+      biriktirdikten sonra kesildi. İki seçenek: her davranış değişikliği kendi
+      sürümünü ister (şeffaf ama pahalı: her değişiklik paketleme, doğrulama ve
+      release demek), yoksa değişiklikler birikir (ucuz ama sürüm notu yazmak
+      giderek zorlaşır — 1.3.0'ın Upgrade Notes bölümü bu yüzden uzun).
+      Şu an ikincisi uygulanıyor. Bu bir ürün kararı, teknik bir engel değil:
+      benim varsayımım, kullanıcının isteğidir.
 
 ---
 
