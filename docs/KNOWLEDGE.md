@@ -149,6 +149,16 @@ The Python engine enforces checks through an ordered, high-to-low priority pipel
 
 ## 5. Release Cutting Ritual (repeatable — proven on v1.3.0)
 
+### 5.0 When to cut a release (settled policy, not an open question)
+
+- Changes accumulate on `main` under `CHANGELOG.md` → `[Unreleased]`.
+- **Cut a release when there is a coherent set worth shipping AND at least one user-visible behaviour change.** Every behaviour change gets its own Upgrade Notes entry.
+- Bug fixes and debt closures do **not** require a release of their own.
+- **Escalation rule:** if `[Unreleased]` passes ~10 commits or a month, cut a release even without a behaviour change. Accumulation is a default, not a licence to let the section rot.
+- The alternative (a version per behaviour change) costs a packaging and verification cycle per change most users never see. Accumulation pays that cost in a longer notes section — and the notes are the deliverable that makes a release trustworthy, not work to be avoided.
+
+### 5.1 The cut itself, with the command that proves each step
+
 A release is not "bump the version". In order, with the command that proves each step:
 
 1. `npm test` and `npm run test:engine` — both green. If a perf test fails, check whether the machine is loaded before touching any bound: on this host the core evaluator measures 0.10 ms idle and 2.3 ms under three competing builds, and a random failure is not a regression.

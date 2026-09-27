@@ -16,15 +16,25 @@ aşağıdaki anti-hedefler. Bir fikir bu çerçeveyi ihlal ediyorsa fikir değil
 
 ---
 
-## 0. Kesim Sonrası Kalan Madde
+## 0. Kesim Sonrası Kalan: **yok**
 
-- [ ] **Sürüm numarası ritmi — karar bekliyor.** v1.3.0 birden fazla commit'i
-      biriktirdikten sonra kesildi. İki seçenek: her davranış değişikliği kendi
-      sürümünü ister (şeffaf ama pahalı: her değişiklik paketleme, doğrulama ve
-      release demek), yoksa değişiklikler birikir (ucuz ama sürüm notu yazmak
-      giderek zorlaşır — 1.3.0'ın Upgrade Notes bölümü bu yüzden uzun).
-      Şu an ikincisi uygulanıyor. Bu bir ürün kararı, teknik bir engel değil:
-      benim varsayımım, kullanıcının isteğidir.
+Sürüm ritmi artık bir soru değil, bir politika ([Unreleased] biriktir, tutarlı bir
+set oluşunca kes) ve `docs/KNOWLEDGE.md` §5'te yazılı. Kısa özet:
+
+- Değişiklikler `main` üzerinde `[Unreleased]` altında birikir.
+- Kullanıcının **hissedeceği** bir davranış değişikliği varsa, biriken anlamlı bir
+  set olduğunda sürüm kesilir; her davranış değişikliği Upgrade Notes'a girer.
+- Yalnız hata düzeltmeleri ve borç kapanışları kendi sürümünü gerektirmez.
+- `[Unreleased]` ~10 commit'i veya bir ayı aşarsa, davranış değişikliği olmasa bile
+  kesilir — biriktirme bir kural değil, izinsiz bırakılan borçtur.
+
+Ölçülen gerekçe: v1.3.0 sekizden fazla commit biriktirdi. Commit başına sürüm,
+çoğu kullanıcının hiç görmeyeceği değişiklikler için sekiz paketleme + doğrulama
+turu demekti. Biriktirmenin maliyeti uzun bir sürüm notu olarak ödendi — ve not
+sürümü güvenilir kılan şeydir, kaçınılacak bir iş değil.
+
+Diğer seçenek (her davranış değişikliğine ayrı sürüm) istenirse tek satırlık bir
+politika değişikliği; o zaman da buraya bir `[ ]` madde olarak döner.
 
 ---
 
