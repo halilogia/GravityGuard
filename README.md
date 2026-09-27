@@ -120,7 +120,7 @@ GravityGuard, herhangi bir dosya değiştirme aracı çalıştırılmadan önce 
 ## Temel Özellikler
 
 ### 🛡️ 1. Deterministik Mimari Bekçi (Gatekeeper)
-- **Yüksek Güvenilirlikli Hava Yastığı**: Saf bellek içi mantık denetimlerini ortalama `~0.11 ms` (p95 `< 0.25 ms`) sürede tamamlar.
+- **Yüksek Güvenilirlikli Hava Yastığı**: Saf bellek içi mantık denetimlerini ortalama `~0.1 ms` (p95 `< 0.5 ms`) sürede tamamlar (alt süreç yok). Motoru Windows alt süreç olarak çalıştırmak gerçek bir `python.exe` doğurma maliyeti demek — bu makinede medyan ~340–370 ms ölçüldü ve makineye bağlıdır — bu yüzden tüm lint/derleme işi gizli bir arka plan işçisinde çalışır (`CREATE_NO_WINDOW` + `SW_HIDE`, ekranda hiç konsol penceresi açılmaz) ve senkron yol bellek içi kalır.
 - **Akıllı Ölçek Analizi**: Yapay zekanın tek dosyaya aşırı sorumluluk yığarak devasa "god-file" oluşturmasını önler. Mekanik satır sınırı koymak yerine semantik sorumluluk dağılımına bakar.
 - **Sıfır Harici Bağımlılık**: Saf Python ile yazılmış, AST ve regex tabanlı hafif analiz motoru. Ağır kütüphane veya derleme gerektirmez.
 
@@ -128,7 +128,7 @@ GravityGuard, herhangi bir dosya değiştirme aracı çalıştırılmadan önce 
 ### ✨ 2. Status Bar Prompt Geliştirici (`Ctrl + Alt + E`)
 - **Status Bar Erişimi**: Sağ alttaki `✨ Prompt Geliştir` butonuna tıklayın veya dilediğiniz an **`Ctrl + Alt + E`** kısayolunu kullanın.
 - **Seçili Metin Algılama**: Editörde fareyle seçtiğiniz kodu/yorumu otomatik olarak algılar; seçim yoksa şık bir girdi kutusu açar.
-- **Yerel Niyet Sınıflandırıcı (LLM'siz)**: Her istek yerelde, 1 milisaniyenin altında **İSTİŞARE**, **UYGULAMA** veya **DENETİM / REFACTOR** modlarından birine sınıflandırılır. Modele yalnızca seçilen modun direktifi gönderilir; böylece model ne istendiğini kendisi tahmin etmez. Kararı `#denetle:`, `#danış:` veya `#kodla:` önekiyle siz geçersiz kılabilirsiniz.
+- **Yerel Niyet Sınıflandırıcı (LLM'siz)**: Her istek yerelde, 1 milisaniyenin altında **İSTİŞARE**, **UYGULAMA** veya **DENETİM / REFACTOR** modlarından birine sınıflandırılır. Modele yalnızca seçilen modun direktifi gönderilir; böylece model ne istendiğini kendisi tahmin etmez. Kararı `#denetle:`, `#danış:` veya `#kodla:` önekiyle siz geçersiz kılabilirsiniz. Sınıflandırıcı emin değilse tahmin etmez, **soruyor** (tek tıkla seçim, tahmin varsayılan); 32 maddelik elle etiketlenmiş korpus ise her değişiklikte sinyallerin doğru kaldığını garanti eder.
 - **Yerel Yapay Zeka Hızı**: 9Router, Ollama, LM Studio veya llama.cpp gibi herhangi bir OpenAI uyumlu yerel ağ geçidiyle (`127.0.0.1:20128`) çalışır; model kademeleri ayarlanabilir, hata durumunda otomatik yedek modele geçilir. Geçid kapalıysa bu durum model modeline kadar yeniden denemeden anlaşılır ve geliştirici, yerel hizmet kapalıyken de komutun çalışmaya devam etmesini sağlayan belirlenimci (deterministik) çevrimdışı şablon moduna düşer.
 - **Doğrudan Panoya Kopyalama**: Geliştirilen mimari şartname doğrudan Windows/macOS panonuza kopyalanır (`Ctrl+C` yapılmış gibi). Chat kutusuna gidip **`Ctrl + V`** yapmanız yeterlidir.
 - **Ayrı Belgede İnceleme**: İsterseniz gelen bildirimdeki *"Yeni Belgede Aç"* butonuna basarak oluşturulan promptu ayrı bir sekmede düzenleyebilirsiniz.
