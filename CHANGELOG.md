@@ -317,5 +317,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Replaced arbitrary line-count restrictions with intelligent semantic responsibility analysis.
 - **Native Antigravity Skill (`skills/enhance`)**:
   - Added native `/enhance` slash command support for direct in-chat prompt expansion without external popups.
-- **Comprehensive Project Engineering Documentation ("Kutsal 6'lı")**:
+  - **Comprehensive Project Engineering Documentation ("Kutsal 6'lı")**:
   - `README.md` (Bilingual English & Türkçe), `ARCHITECTURE.md`, `ROADMAP.md`, `CHANGELOG.md`, `brain/knowledge.md`, and `LICENSE` (GNU GPL v3.0).
+
+---
+
+## Appendix: Repository & Machine-Layer History (2026-09-20 → 2026-09-21)
+
+> Not a release. These items are **not shipped in the `.vsix`**: they are either
+> repository tooling (`tools/`) or a local machine layer living in `.git/hooks`,
+> which git does not version. They lived only in `ROADMAP.md` until the roadmap
+> was narrowed to unfinished work; this appendix is their record.
+
+### P3-03 · Commit-time secret safety net (local machine layer)
+- **The trigger was dead.** A `lefthook` reference pointed at nothing, so the secret scan had never actually run. Replaced with a portable `loss-guard.py` call with no hardcoded user paths, then applied to `~/.git-template` + **12 repositories** (8 previously dead, 4 previously alive).
+- **Scope widened from 9 file types to a two-list design**: `SECRET_EXTENSIONS` (~30 types, secret scan only) and `STRUCTURAL_EXTENSIONS` (narrow, code files only, the four structural checks). A 16-type probe had shown `.env`, `.json`, `.yaml`, `.toml`, `.ipynb`, `.sh`, `.ps1`, `.bat`, `.gd`, `.godot` passing through completely unscanned. Two lists widen detection without adding a single warning to non-code files.
+- **`secret_checker.py` hardened**: added AWS (`AKIA`), HuggingFace (`hf_`), GitLab (`glpat-`), Stripe (`sk_live_`/`rk_live_`), Telegram bot, npm and PyPI patterns, plus PEM private-key block headers. Placeholder skipping added so `.env.example` and documentation examples do not false-block; value masking and line numbers added to the block message.
+- **The interactive confirmation prompt hung forever** with no console attached (`CONIN$`), so the commit never completed. Removed entirely — warnings are informational and never block. Verified: a warning-producing commit completes in 0.7s.
+- **`pre-push` reverted to a no-op in 9 repositories**: it inspected staged files, which is meaningless at push time.
+- **All 12 repository copies verified byte-identical to `~/.git-template/hooks`.**
+- **`core.excludesFile` was unset** — there was no global protection at all, only per-repo hooks. Created `~/.gitignore_global` (`.env*`, `*.key`, `*.pem`, `credentials.json`, `secrets.*`, `id_rsa`, …) so secrets are not even *staged* across all **55 repositories**; the hook remains the detection layer for `git add -f` overrides.
+- **105 scattered `.bak-before-*` files (161.5 KB)** moved out of hidden `.git/hooks` directories into `~/.git-hook-backups/`, tagged with their originating repository. Nothing deleted.
+- **Verified**: synthetic `.ts` / `.js` / `.py` / `.pyw` commits are blocked; a clean file passes.
+- **Scope limit, still true:** of the 5 checks in `loss-guard`, only the secret check is relevant to Python projects. The other four (visual tags, React hooks, lazy placeholders, `components/` line balance) target web/React code.
+
+### P3-04 · Repo ↔ live plugin synchronisation
+> The engine exists as **two copies** by necessity: the repo source (`engine/gravity-validator.py`) and the live plugin copy (`~/.gemini/config/plugins/srp-swarm-guardian/scripts/srp-validator.py`, renamed because `hooks.json` invokes `python scripts/srp-validator.py`). Separate deployment targets, so the duplicate can only be *kept in check*, not eliminated. Without tooling this is the same failure mode as the dead `lefthook`: one copy gets edited, the other silently rots, and live protection degrades with no signal.
+- **`tools/sync_plugin.py`** — copies repo engine → live plugin: `--check` reports drift and exits `1` (safe for CI), `--dry-run` prints the plan, default mode backs the old target up into `~/.git-hook-backups/plugin-sync/`, validates the source with `ast.parse` **before** copying, and verifies with MD5 **after** (mismatch = exit `2`). Tracked pairs: `gravity-validator.py → srp-validator.py`, `async_runner.py → async_runner.py`.
+- **`tools/autosync_plugin.py`** — wired into `.git/hooks/pre-commit` right after the secret scan, so the repo is the single source of truth at commit time. **Deliberate boundary**: it never blocks a commit when the plugin directory is absent or a copy fails; it stops the commit *only* when a source file fails `ast.parse`, so a broken file can never reach the live hook. Silent when there is no drift.
+- **Verified three ways**: (1) no drift → silent, exit `0`; (2) injected drift (a synthetic 21-byte line) → copied and MD5-confirmed, exit `0`; (3) deliberately broken source → exit `1` **with the live plugin still intact** (`f1bbb2af…`). Also confirmed through a real `git commit` where the hook fired and repaired the drift; all test residue and the temporary commit were reverted.
+- Observed in normal operation: the hook reports `[autosync] DRIFT <file> -> <bytes> (dogrulandi)` and ends with a reload reminder.
+
+### Repository hygiene (2026-09-20)
+- Removed the `.kilo/worktrees/magnificent-earth` git worktree with `git worktree remove --force`. It was **not** a stale copy: it sat on the same commit (`2377035`) with identical line counts, and the 1,526-byte delta exactly matched the line count — a pure CRLF-vs-LF difference under `core.autocrlf=true`.
+- Removed `srp-validator.py.bak-v123` (63,454 B). Confirmed as a manual snapshot of v1.2.3: its size matches `git cat-file -s 8ad8bef:engine/gravity-validator.py` exactly, so it stays recoverable from history. (Its original location was not conclusively re-verified before deletion; the size match is the evidence that matters.)
+- The plugin's `skills/srp-modularizer/` contained five unrelated files (`SKILL (1).md` SOLID Principles, `SKILL (2).md` @json-render/solid, `SKILL(3).md` Requesting Code Review, `solid.md`, `solid-skills-main.zip`). Their word-overlap with the real `SKILL.md` was 7–10% — unrelated content — the `(1)`/`(2)` suffixes indicated browser download duplicates, and no other file referenced them. **Moved (not deleted)** to `Desktop/GG-artik/`, leaving only `SKILL.md` and `Single-Responsibility-Principle.md`.
+- **Note that still holds:** empty `.gravityguard/runtime/` directories regenerate on their own because the engine recreates them. Deleting them is pointless.

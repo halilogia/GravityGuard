@@ -1,176 +1,174 @@
 # Roadmap — GravityGuard
 
-This document outlines the strategic evolution, architectural milestones, and planned releases for **GravityGuard**.
+> **Bu dosya yalnızca yapılmamış işi tutar.** Tamamlanan her şey `CHANGELOG.md`'dedir;
+> teslim edilen sürüm geçmişi, ölçümler ve "bunu neden böyle yaptık" kayıtları orada yaşar.
+> Bir maddeyi buradan silmek, onu kaybetmek demek değildir — taşımak demektir.
+
+| Durum | Sürüm | Nerede |
+|---|---|---|
+| Yayınlandı | **v1.2.7** (2026-09-21) | `CHANGELOG.md` → `## [1.2.7]` |
+| `main` üzerinde, sürümlenmemiş | intent classifier + DENETİM modu + çevrimdışı enhancer + complexity kalibrasyonu | `CHANGELOG.md` → `## [Unreleased]` |
+| Makine katmanı / repo araçları (`.vsix` içinde değil) | secret safety net, plugin senkronizasyonu, hijyen | `CHANGELOG.md` → `Appendix` |
+| Sıradaki hedef | **v1.3.0** | aşağıda |
+
+**Değişmez çerçeve:** 4 katmanlı savunma (ADR-001), `<10ms` hızlı koruma bütçesi ve
+aşağıdaki anti-hedefler. Bir fikir bu çerçeveyi ihlal ediyorsa fikir değildir.
 
 ---
 
-## Current Status: v1.2.6 (Phase 1, Phase 2 & Phase 2.5 Released & Frozen)
+## 0. Hemen Sırada: v1.3.0 Kesimi
 
-### ✅ Phase 1: High-Confidence Integrity & Architecture Guards
-- [x] **Universal Rebranding & Setup**: Standalone repository under `GitHub/Public/GravityGuard` with full TypeScript IDE extension + Python Guard Engine.
-- [x] **G0 — Secret Leak Guard (BLOCK / WARN)**:
-  - High-confidence credential airbag blocking OpenAI, Anthropic/Claude, Google/Gemini, Slack, GitHub tokens, and private keys in diffs.
-  - Audit warnings for raw connection URIs and bearer tokens.
-  - Strict evidence masking (`sk-ant-****...****890`) preventing secondary leaks in logs or stdout.
-- [x] **G1 — Silent Exception Guard (BLOCK)**:
-  - Detects newly added empty exception handlers (`except: pass`, `except: ...`, `catch {}`).
-  - Strict diff-based evaluation via `difflib.SequenceMatcher` (existing unchanged handlers are preserved without false alarms).
-  - Permits recovery fallbacks (`return None`, `return []`).
-- [x] **G2 — Test Integrity Guard (BLOCK / WARN)**:
-  - Blocks newly added test disabling tricks (`.skip()`, `xit()`, `xdescribe()`, `@pytest.mark.skip`, `@unittest.skip`).
-  - Warns on focused tests (`.only()`).
-  - Permits test expected failures (`@pytest.mark.xfail`).
-  - Blocks outright deletion of existing test cases (`def test_...` / `it(...)`) using full-file frequency counters (`collections.Counter`).
-  - Allows normal test body refactoring without false positives.
-- [x] **G3 — Compiler & Linter Bypass Guard (WARN)**:
-  - Detects newly added `# noqa`, `# type: ignore`, `@ts-ignore`, `@ts-nocheck`, `eslint-disable`.
-  - Emits warning audit logs without blocking legitimate workarounds.
-- [x] **G4 — Import Matrix Guard (BLOCK)**:
-  - User-configurable layer boundaries via `.gravityguard.json` (e.g. `ui` forbidden from importing `network` or `database`).
-  - Supports Python relative imports (`from .network import ...`) and TypeScript side-effects (`import './network'`).
-  - Exact path-segment matching prevents false substring collisions.
-  - Blocks illegal cross-layer imports deterministically in < 2ms.
-- [x] **OE_SPIKE — Over-Engineering Heuristic (WARN ONLY)**:
-  - Passive warning when small production changes (<50 LOC) introduce a disproportionate abstraction spike (2+ new classes/interfaces).
-- [x] **SRP Boundary Guard (BLOCK)**:
-  - Blocks single files mixing UI libraries and Network/HTTP libraries, or accumulating 4+ major business classes.
-- [x] **Status Bar Prompt Enhancer (`Ctrl + Alt + E`)**:
-  - Integrated 9Router local AI pipeline with sub-3s model failover.
-- [x] **Live Security Monitor Webview**:
-  - Real-time Activity Bar panel streaming audit events from `~/.gemini/logs/srp_guardian_live.json`.
-- [x] **92/92 Automated Unit Tests Passing** (`engine/test_gravity_validator.py`) — now **124/124**, plus 14 TypeScript tests for the classifier (`npm test`).
+`main` üzerinde sürümlenmemiş özellikler birikiyor. Her commit yeni bir özellik
+getirdiğinde "sürüm nedir?" sorusunun cevabı kayboluyor.
+
+- [ ] `package.json` → `1.3.0`; `README.md` başlık rozetleri ve `CHANGELOG.md`'de
+      `[Unreleased]` → `## [1.3.0] - <tarih>` dönüşümü.
+- [ ] `vsce package` ile `.vsix` üretimi ve GitHub Release'e yükleme. Doğrulama:
+      paket içindeki engine'in `md5` değeri repo engine'iyle **byte-aynı** olmalı
+      (1.2.5'te kurulan kural).
+- [ ] `tools/sync_plugin.py --check` temiz çıkmalı — canlı plugin kopyası bu
+      sürümle eşleşmeli.
+- [ ] Sürüm notu: davranış değişiklikleri (ARCH_FILE_GROWTH artık büyüme olayı
+      ölçüyor, dosya oluşturma uyarı vermiyor) **kırıcı olmayan ama gözle görülür**
+      değişiklikler — release notunda "upgrade notes" başlığı altında ayrı durmalı,
+      çünkü kullanıcının `.gravityguard.json`'ında kendi eşiği varsa etkileşir.
+
+## 0.1 CI eksikliği (kimseye görünmüyor, ama en pahalı borç bu)
+
+- [ ] Depoda **hiç CI yok**. 124 engine + 14 TypeScript testi yalnızca elle,
+      bu makinede çalışıyor. `npm test` ve `npm run test:engine` GitHub Actions'a
+      taşınsın.
+- [ ] Windows + macOS + Linux matrisi: `GRAVITYGUARD_LOG_DIR` yönlendirmesi ve
+      `GRAVITYGUARD_DISABLE_ASYNC=1` kill switch'i sayesinde testler platformdan
+      bağımsız olmalı; bu matris ilk kez çalıştığında çıkacak kırılmaların de
+      kaydedilmesi gerekir.
+- [ ] `tools/sync_plugin.py --check` CI'da **başarısız olmamalı** (canlı plugin
+      dizini CI'da yok) — bu yüzden `--check` uygun bir gate değil, gerçek gate
+      `ast.parse` + testler.
 
 ---
 
-## ✅ Phase 2: Test Evidence & Intent-Aware Enhancer (v1.1.0)
-- [x] **T1 — Missing Related Test (WARN)**: Verifies that production code changes have an associated candidate test file on disk and recent modification window (`sessionWindowSeconds`, default 300s). Dynamically honors `sourceRoots` and `testRoots` from `.gravityguard.json`. Respects exemption allowlist (`types`, `constants`, `index`, `*.d.ts`, `migrations`, `config`, `schemas`).
-- [x] **T2 — Observable Assertion Verification (WARN)**: Case-level verification using AST/line-span tracking that modified/added test cases contain observable assertions (`assert`, `self.assert*`, `pytest.raises`, `expect()`, `.toBe()`, `.toEqual()`, `.toThrow()`). Catches body-only modifications without declarations, prevents assertion masking across multiple tests, and protects fixture/beforeEach/describe setups from false alarms.
-- [x] **T3 — Symbol-to-Test Link (WARN)**: Body-aware line-span verification that newly added or modified top-level functions, classes, and exported arrow functions are referenced by name in the candidate test file. Ignores scalar constants (`export const MAX = 3`). Emits grouped warning if any changed symbol is absent. Zero blocking.
+## 1. Intent Classifier Follow-Up'ları (v1.3.0 adayı)
+
+- [ ] **Düşük güvende tahmin etme, sor.** `classifyIntent()` `confidence: 'low'`
+      döndüğünde (sinyal yok veya berabere) şu an `implement` seçiliyor ve bu
+      tahmin kullanıcıya yalnızca mod etiketi olarak gösteriliyor. Doğru davranış
+      `showQuickPick` ile tek tıkla seçim: `Otomatik (şu an: UYGULAMA)` /
+      `İSTİŞARE` / `UYGULAMA` / `DENETİM / REFACTOR`. Bir seçicinin tahmin ettiği
+      şeyi kullanıcı onaylaması, heuristiğin kendisinden daha değerlidir.
+- [ ] **Sinyal kapsamını ölçerek genişlet.** Bugün 14 test var, hepsi elle
+      yazılmış cümleler. Gerçek kullanım için: `.gemini/logs/srp_guardian_live.json`
+      prompt **içermiyor** (sadece dosya olayları), yani gerçek ground truth
+      kaynağı yok. Önce elle etiketlenmiş bir fixture seti (`tests/fixtures/*.txt`,
+      her satır `prompt → beklenen mod`), sonra kapsam genişletme. Etiketleme
+      kuralı: mod ne olsa da kullanıcının istediği şey ne?
+- [ ] **4. mod eklenmeli mi?** Aday: `test` (yalnızca test yaz/sar, üretim koduna dokunma)
+      ve `explain` (kod oku, hiçbir şey değiştirme). Karar ölçütü: yönlendirme
+      direktifi gerçekten farklı davranış üretiyor mu, yoksa sadece isim mi değişiyor?
+      Fark üretmiyorsa eklenmemeli — üç moddan fazlası modelin değil prompt'un
+      seçeneğidir.
 
 ---
 
-## ✅ Phase 2.5: Static Validation & Architecture Guidance (v1.2.0 - FROZEN)
-- [x] **ARCH_FILE_GROWTH Guard (WARN ONLY)**:
-  - Detects monolithic file accumulation: (1) Projected LOC >= 1000, (2) Single tool-call addition >= 180 LOC, (3) Creeping growth on 800+ LOC file with >= 80 LOC addition.
-  - Zero blocking — prompts AI toward modularity and SRP boundaries.
-- [x] **Tier 2 / Tier 3 Async Static Validation Pipeline & Real Orchestration**:
-  - Preserved the **< 10 ms Fast Guard Invariant**: Pre-tool path strictly runs zero external compilers or linters.
-  - **Hidden Background Orchestration**: `trigger_background_validation()` launches `async_runner.py` in ~1ms without waiting for completion, using `CREATE_NO_WINDOW` + `SW_HIDE` so no console window ever appears (see v1.2.1 fix).
-  - **State-Based TS Debounce Worker**: Persistent `.gravityguard/runtime/debounce_state.json` enforces a real 3.0s idle window after edit bursts before running `tsc --noEmit`. Bounded by explicit termination guards + a `max_lifetime` cap. Every exit path that leaves a state file behind now releases the `worker_running` claim first, so the guard cannot permanently block future spawns (see v1.2.1 and v1.2.3 fixes).
-  - **Per-File TSC Diagnostics**: `parse_tsc_output` maps project compilation errors directly to modified target files (`auth.ts`).
-  - **Per-File Lint Burst Coalescing & State Cleanup**: 300ms quiet window for single-file linters (`ruff`, `eslint`, `godot`) with state-based duplicate suppression across rapid multi-edit bursts, automatically purging finished state from `debounce_state.json`. The claim is best-effort, not a formal atomic mutex.
-  - **New-File Grace Period**: since GravityGuard is a `PreToolUse` hook, the worker is spawned *before* the file exists. It waits a bounded 2.0s grace period for the target to land, lints once when it does, and exits cleanly if it never appears (see v1.2.2 fix).
-  - **Diagnostics Bridge**: `.gravityguard/runtime/diagnostics.json` stores linter findings; `STATIC_LINTER_DIAGNOSTIC (WARN)` reads them in sub-millisecond time.
-- [x] **Prompt Enhancer Architectural Guidance Preamble**:
-  - System prompt directives favoring cohesive modules over monolithic accumulation.
+## 2. Pre-Hook Architecture Whisperer (v1.3.0 adayı — tasarım engelli)
 
+Amaç: agent kodu yazmadan **önce** aktif katman sınırlarını ve mimari kuralları
+prompt bağlamına sokmak.
 
-### 2.2. Intent-Aware Prompt Enhancer
-- [x] **Intent classification is local, deterministic and testable** — the `[~]` gap is closed:
-  - `classifyIntent()` in `src/intent.ts` decides the mode in the extension with a weighted Turkish + English signal score, in under a millisecond and with no network call. The result carries `{ mode, confidence, score, runnerUpScore, signals, source }`, so every decision is explainable.
-  - The system prompt no longer *asks* the model to classify the user's intent; it **declares** the mode and sends only that mode's directive. The three directives are mutually exclusive, so the model cannot drift into a mode the user did not ask for.
-  - The user can override the classifier with a `#denetle:` / `#danış:` / `#kodla:` prefix, reported as `source: 'override'`. A heuristic the user cannot contradict is a heuristic the user will stop trusting.
-  - Covered by `tests/intent.test.mjs` (14 tests, zero dependencies, `npm test`), including determinism and mode exclusivity of the emitted prompt.
-  - **Known limit, stated rather than hidden:** it is a keyword heuristic, not a language model. Unusual phrasings fall through to `implement` with `confidence: 'low'`. The override prefix exists for exactly that case.
-- [x] **Consulting / Brainstorming Mode** — directive A ("İSTİŞARE / FİKİR / BEYİN FIRTINASI"): demands options, trade-offs and over-engineering risks, and explicitly forbids issuing build orders.
-- [x] **Implementation Mode** — directive B ("UYGULAMA / KODLAMA"): demands a defensive specification (purpose, architecture, SRP boundaries, error handling, tests).
-- [x] **Audit / Refactoring Mode** — directive C ("DENETİM / REFACTOR"): forbids new production code, requires findings with `dosya:satır` evidence plus an impact rating, keeps unverifiable suspicions in a separate list, names the inspection targets (layer/SRP violations, dead code, duplicated logic, swallowed errors, embedded credentials, comment/behaviour divergence, test integrity), and requires refactor advice to be split into small revertible steps with a verification method each.
-- [x] **Verification is no longer the model's compliance** — the mode is decided before the request leaves the extension, and the emitted system prompt is asserted to contain exactly one directive.
+- [ ] **Önce kanal engeli çözülmeli.** Hook yanıt şeması yalnızca
+      `decision`, `reason`, `permissionOverrides`, `overwrite` kabul ediyor
+      (bkz. `CHANGELOG` 1.2.5: fazladan alan → protojson tüm yanıtı çöpe atar).
+      Bir "fısıltı" da `reason` içinden geçmek zorunda — ama `reason` **zaten**
+      uyarıların kanalı. Yani fısıltı ile uyarı aynı yerde durur ve ayırt
+      edilemez. Çözülmesi gereken soru: *fısıltı bir uyarı mıdır, yoksa ayrı bir
+      kanal mı aranmalı?* İkinci seçenek şema değişikliği gerektirir ve Antigravity
+      tarafında karşı tarafta doğrulanması gerekir.
+- [ ] İçerik kaynağı hazır: `.gravityguard.json` → `layers`, `testEvidence.sourceRoots`,
+      `complexity` bloğu. Fısıltı bu dosyadan okunmalı, hard-code edilmemeli.
+- [ ] Boyut sınırı: fısıltı her tool-call'de tekrar edilirse prompt şişer.
+      Sadece katman ihlali *riski* taşıyan hedefler için (yeni dosya, yeni import,
+      hedef dizin `layers` içinde) gönderilmeli.
 
----
+## 2.1 Complexity Heuristics — Yeni Kural Eklemeden Önce Ölçüm (v1.3.0 adayı)
 
-## 2.3. Prompt Enhancer Offline Degradation
+Mevcut adaylar: forwarding wrapper katmanı, tek implementasyonlu soyutlama,
+bağımlılık artışı (dependency creep).
 
-- [x] **The local gateway is optional, not required.** `gravityguard.models` and `gravityguard.routerTimeoutMs` are configurable, and any OpenAI-compatible `/v1` endpoint works (9Router, Ollama, LM Studio, llama.cpp). The feature is no longer coupled to one gateway or to its model naming.
-- [x] **Connection failures abort the model cascade.** `ECONNREFUSED` / `ENOTFOUND` / `EHOSTUNREACH` skip the remaining candidates instead of each burning a full timeout; model-level failures (HTTP error, empty content, timeout) still fall through, which is what a cascade is for.
-- [x] **Deterministic offline composer.** When no model answers, `buildOfflinePrompt()` returns a structured, mode-correct brief instead of an error. This is what makes ARCHITECTURE invariant 2 true for the enhancer instead of aspirational.
-- [x] **`antigravityBridge.ping` performs a real health check** (`GET /v1/models`) and reports the endpoint, model count, or the exact connection error. It used to report success unconditionally, which said nothing about the dependency the feature has.
+- [ ] **Süreç kuralı (artık bağlayıcı):** her yeni heuristik, `CHANGELOG`'daki
+      kalibrasyon yöntemiyle önce gerçel korpusta ölçülmek zorunda —
+      11 repo, son 400 commit, 6.404 üretim dosya-yazımı — ve **ölçülen fire rate'i
+      ile birlikte** sevk edilmeli. Fire rate'i bilinmeyen bir heuristik, tahmin
+      değil sitedir. (OE_SPIKE bu yüzden 1,27% ölçümüyle değiştirilmedi.)
+- [ ] Her aday için ayrıca: false-positive örneği (gerçek geçmişten) ve
+      true-positive örneği (gerçek geçmişten) CHANGELOG'da gösterilmeli.
+- [ ] `dependency creep` için sınır: `package.json` / `requirements.txt` farkı
+      hook'un `added_text`inde görünür, bu yüzden uygulanabilir; ancak yeni bir
+      bağımlılığın "küçük bir fonksiyon için mi" olduğunu bilmek statik olarak
+      mümkün değil — bu kural kaçınılmaz olarak spekülatiftir ve **WARN** olmalı.
 
----
+## 2.2 `run_command` Mutation Detection (P3-02)
 
-## 2.4. Complexity Threshold Calibration
+- [ ] Dar ön filtre: `Remove-Item`, `del`, `rmdir`, `rm`, `move`, `Move-Item`,
+      `Set-Content`, `Out-File`, `Add-Content`.
+- [ ] **Her terminal komutunu derin analiz etme.** Fast-path izin listesi:
+      `git status/diff/log/show`, `python -c`, `blender --background --python`,
+      `npm`, `pytest`.
+- [ ] **Bypass'in hâlâ mümkün olduğu açıkça yazılacak**: `python x.py` içinde
+      `os.remove`, `blender --python` script'leri. Bu kural gözle görünür yolları
+      kapatır, hepsini değil. Vaat edilenden azını vaat et.
+- [ ] Performans **gerçek bir kodlama oturumunda** ölçülecek — bu repo'nun log'u
+      değil: kayıtlı ölçüm, oturumun kendi tanıklığıyla (`git ~%30,7`,
+      keyfi Python/Blender çalıştırma ~%28,5, dosya mutasyonu ~%2`) teşhis
+      komutlarıyla kirlenmiş.
+- [ ] Karar noktası: `run_command` hook'ta `args.command` olarak mı geliyor, yoksa
+      ayrı mı? Doğrulanmadan yazılmamalı — 1.2.5'te hatırlanıldığı gibi hook'un
+      payload şeması tahminle değil, ölçümle konuşulmalı.
 
-- [x] **Calibrated against 6,404 real production file-writes** across 11 repositories (method, results and limitations in the CHANGELOG).
-- [x] **ARCH_FILE_GROWTH rule A is now a growth event, not a file state.** It fires on the write that crosses the monolith line instead of on every subsequent touch of an already-large file. Half of its previous fires (30 of 60) told the agent nothing it had not already been told, on repeat.
-- [x] **ARCH_FILE_GROWTH rule B no longer fires on file creation.** 359 of 1,636 real creations added 180+ lines; a brand-new cohesive module is the outcome the rule asks for. The rule now applies to additions to an existing file.
-- [x] **`srp: allow-monolith` silences the growth rules**, reusing the marker vocabulary the SRP boundary rule already documents instead of inventing a second escape hatch.
-- [x] **OE_SPIKE deliberately left unchanged.** 1.27% fire rate, and only 2 of 59 fires are attributable to conventional scaffolding — a scaffolding exemption would change 3% of fires. Raising the declaration threshold would cut fires by 68% but would also drop genuinely coupled pairs. Tuning a number that measurement says is already right is not tuning.
-- [x] **All six thresholds are per-project configurable** via the `complexity` block of `.gravityguard.json`, with floors, type checks and a defaults fallback: the block is a convenience, and a typo must never turn a WARN-only rule into a hook error.
-- [x] **Latency held.** Interleaved A/B against `git HEAD` (4,000 iterations each): median ratio 1.015x, within noise. An earlier 1.35x regression from per-call dict copies is what drove resolving the thresholds once per tool call.
+## 2.3 Controlled Test Maintenance Mode (P3-01)
 
----
-
-## Phase 3: v1.3.0 — Extended Complexity Guard & Pre-Tool Whisperer
-
-*Target: Q1 2027*
-
-### 3.1. Extended Complexity Heuristics (YAGNI)
-- [ ] Forwarding wrapper layer detection (classes that merely forward calls across 3+ layers without logic).
-- [ ] Single-implementation abstraction warnings for private internal modules.
-- [ ] Dependency creep detector (new external dependencies added for single small functions).
-
-### 3.2. Pre-Hook Architecture Whisperer
-- [ ] Intercept AI agent tool calls before execution (`pre-tool hook`).
-- [ ] Automatically inject active layer boundaries and architectural rules into the agent's prompt context to prevent violations before code is generated.
-
-### 3.3. `run_command` Mutation Detection (P3-02)
-- [ ] Narrow pre-filter for obvious filesystem mutation commands (`Remove-Item`, `del`, `rmdir`, `rm`, `move`, `Move-Item`, `Set-Content`, `Out-File`, `Add-Content`).
-- [ ] **Do NOT** deep-analyze every terminal command. Fast-path allow ordinary work: `git status/diff/log/show`, `python -c`, `blender --background --python`, `npm`, `pytest`.
-- [ ] Explicitly document that bypass remains possible (`python x.py` calling `os.remove`, `blender --python` scripts) — this closes obvious paths only, not all paths.
-- [ ] Performance must be measured on a **real coding session** — not on this conversation's transcript, which is polluted with diagnostic commands.
-- [ ] Known measured baseline (this repo's log): ~30.7% git, ~28.5% arbitrary Python/Blender code exec, ~2% file mutation commands.
-
-### 3.4. Controlled Test Maintenance Mode (P3-01)
-- [ ] User can consciously authorize test cleanup; only **G2** relaxes while the mode is active.
-- [ ] **AI must not be able to grant this permission to itself** — otherwise the guard stops being a boundary.
-- [ ] No broad bypass without explicit user approval.
-- [ ] Authorization mechanism intentionally undecided: `.gravityguard.json` is technically easy but is AI-modifiable (so not a security boundary); an environment variable is impractical for an already-running Antigravity process (env vars are read at process start).
-- [ ] Note: G2 currently blocks test deletion, renaming, `.skip`, and moving a test to `archive/`, with no escape hatch equivalent to `# srp: bypass`.
-
-### 3.5. Git Secret Safety Net — commit-time hook (P3-03)
-> This is a **local machine layer**, separate from GravityGuard's engine. It lives in `.git/hooks`, which is not version-controlled.
-
-- [x] Replaced the dead `lefthook` trigger with a **portable** `loss-guard.py` call (no hardcoded user paths).
-- [x] Applied to `~/.git-template` + 12 repositories (8 previously dead, 4 previously alive).
-- [x] Extended secret-scan scope from `{.tsx,.jsx,.ts,.js,.vue,.svelte}` to include `.py`, `.pyw`, `.pyi`.
-- [x] Verified: synthetic `.ts` / `.js` / `.py` / `.pyw` commits are blocked; a clean file passes.
-- [x] **Fixed:** the interactive confirmation prompt (`CONIN$`) used to hang forever when no console was attached, so the commit never completed. The prompt was removed entirely; warnings are now informational and never block. Verified: warning-producing commit completes in 0.7s.
-- [x] **Fixed:** reverted the `pre-push` hook to a no-op in 9 repositories (it inspected staged files, which is meaningless at push time).
-- [x] **Expanded scan coverage (measured):** the guard previously scanned only 9 file types. A 16-type probe showed `.env`, `.json`, `.yaml`, `.toml`, `.ipynb`, `.sh`, `.ps1`, `.bat`, `.gd`, `.godot` all passed through unscanned. Fixed with a **two-list design**: `SECRET_EXTENSIONS` (wide, ~30 types, secret scan only) and `STRUCTURAL_EXTENSIONS` (narrow, code files only, the four structural checks). This widens detection without adding a single warning to non-code files.
-- [x] **Hardened `secret_checker.py`:** added AWS (`AKIA`), HuggingFace (`hf_`), GitLab (`glpat-`), Stripe (`sk_live_`/`rk_live_`), Telegram bot, npm, and PyPI patterns, plus PEM private-key block headers. Added placeholder skipping (so `.env.example` and documentation examples do not false-block) and value masking + line numbers in the block message.
-- [x] **Template-diff verification:** all 12 repository copies verified byte-identical to `~/.git-template/hooks`.
-- [x] **Global gitignore:** `core.excludesFile` was unset (no global protection at all). Created `~/.gitignore_global` covering `.env*`, `*.key`, `*.pem`, `credentials.json`, `secrets.*`, `id_rsa`, etc. This prevents secrets from being staged in the first place across all 55 repositories; the hook remains the detection layer for `git add -f` overrides.
-- [x] **Backup consolidation:** 105 scattered `.bak-before-*` files (161.5 KB) moved from hidden `.git/hooks` directories into `~/.git-hook-backups/`, tagged with their originating repository. Nothing deleted.
-- [ ] Scope note: of the 5 checks in `loss-guard`, only the secret check is relevant to Python projects; the other 4 (visual tags, React hooks, lazy placeholders, `components/` line balance) target web/React code.
-
-### 3.6. Repo ↔ Live Plugin Synchronization (P3-04)
-> The guard engine exists as **two copies**: the repo source (`engine/gravity-validator.py`) and the live plugin copy (`~/.gemini/config/plugins/srp-swarm-guardian/scripts/srp-validator.py`). The plugin copy is renamed because `hooks.json` invokes `python scripts/srp-validator.py`. The two directories are separate deployment targets, so the duplicate cannot be eliminated — only kept in check.
-
-- [x] **Risk identified and closed with tooling.** No sync mechanism existed. This is the same failure mode as the earlier `lefthook` incident: one copy is edited, the other silently rots, and live protection degrades without any signal.
-- [x] **Added `tools/sync_plugin.py`** — copies repo engine → live plugin:
-  - `--check` reports drift only and exits `1` when copies differ (safe for pre-commit / CI).
-  - `--dry-run` prints the plan without touching anything.
-  - Default mode backs the old target up into `~/.git-hook-backups/plugin-sync/` before copying.
-  - Validates the source with `ast.parse` **before** copying, so a broken file can never be pushed into the live hook.
-  - Verifies the copy with MD5 **after** copying; a mismatch is reported as failure (exit `2`).
-  - Files tracked: `engine/gravity-validator.py` → `scripts/srp-validator.py`, and `engine/async_runner.py` → `scripts/async_runner.py`.
-- [x] **Verified by deliberate drift injection:** a synthetic 21-byte line was appended to the live plugin copy. `--check` correctly reported `FARKLI / drift` and exited `1`; the default mode restored the file and confirmed it by MD5 (`f1bbb2af…`). Test residue was removed afterwards.
-- [x] **Now automated — `tools/autosync_plugin.py`**, wired into `.git/hooks/pre-commit` right after the secret scan. On every commit the repo engine is pushed to the live plugin, so the repo is the single source of truth at commit time.
-  - **Design boundary (deliberate):** this is a convenience, not a security boundary. It never blocks the commit when the plugin directory is absent or a copy fails. It stops the commit **only** when a source file fails `ast.parse`, so a broken file can never reach the live hook.
-  - Silent when there is no drift, so ordinary commits stay quiet.
-  - Backs the previous plugin copy up into `~/.git-hook-backups/plugin-sync/` before overwriting.
-- [x] **Verified end-to-end (three tests):** (1) no drift → silent, exit `0`; (2) injected drift → copied and MD5-confirmed, exit `0`; (3) deliberately broken source → exit `1` **and the live plugin remained intact** (`f1bbb2af…`). Also confirmed via a real `git commit`, where the hook fired and repaired the drift. All test residue and the temporary commit were reverted.
-- [ ] **Open naming debt:** the same file is `gravity-validator.py` in the repo and `srp-validator.py` in the plugin. A search finds no cross-reference between the two names, so the relationship is invisible to anyone reading either side.
-
-### 3.7. Repository Hygiene (local cleanup, 2026-09-20)
-- [x] Removed the `.kilo/worktrees/magnificent-earth` git worktree via `git worktree remove --force`. It was **not** a stale copy — it sat on the same commit (`2377035`) with identical line counts; the byte delta (1526 B) exactly matched the line count, i.e. a pure CRLF-vs-LF difference under `core.autocrlf=true`.
-- [x] Removed `srp-validator.py.bak-v123` (63,454 B). Confirmed as a manual snapshot of `v1.2.3`: its size matches `git cat-file -s 8ad8bef:engine/gravity-validator.py` exactly, so it remains recoverable from history. (Its exact original location was not conclusively re-verified before deletion; the size match is the evidence that matters.)
-- [x] **Found and archived:** the plugin's `skills/srp-modularizer/` folder contained five unrelated files — `SKILL (1).md` (SOLID Principles), `SKILL (2).md` (@json-render/solid), `SKILL(3).md` (Requesting Code Review), `solid.md`, and `solid-skills-main.zip`. Their word-overlap with the real `SKILL.md` was 7–10% (i.e. unrelated content), the `(1)`/`(2)` suffixes indicated browser download duplicates, and none was referenced by any other file. **Moved (not deleted) to `Desktop/GG-artik/`** on user instruction, leaving only `SKILL.md` and `Single-Responsibility-Principle.md` in the skill folder.
-- [ ] **Note:** `.gravityguard/runtime/` empty directories regenerate on their own because the engine recreates them; deleting them is pointless.
+- [ ] Kullanıcı bilinçli olarak test bakımını yetkilendirebilecek; yalnızca
+      **G2** bu mod aktifken gevşeyecek.
+- [ ] **Yapay zeka bu yetkiyi kendine verememeli.** Aksi halde koruma değil, tavsiye olur.
+- [ ] **Geniş bypass olmayacak** — sadece test dosyalarında, sadece onay süresince.
+- [ ] **Yetkilendirme mekanizması hâlâ karar bekliyor** ve seçenekler daralmış:
+      - `.gravityguard.json` → teknik olarak kolay ama ajan tarafından yazılabilir
+        (**güvenlik sınırı değildir**).
+      - Ortam değişkeni → pratikte imkânsız: Antigravity zaten çalışıyor, env
+        değişkenleri süreç başında okunuyor.
+      - Kalan gerçekçi yol: kullanıcının **kendi terminalinde** çalıştırdığı bir
+        komutun tek seferlik bir jeton yazması ve hook'un o jetonu okuması
+        (kısa ömürlü, tek kullanımlık, kullanıcı komut isteminde görünür).
+        Uygulanabilirliği doğrulanmadan karar verilmeyecek.
+- [ ] Not: G2 şu anda test silme, yeniden adlandırma, `.skip` ve testi
+      `archive/`'a taşımayı engelliyor ve `# srp: bypass` benzeri bir çıkış yolu yok.
 
 ---
 
-## 4. Explicit Anti-Goals & Out-of-Scope Boundaries
+## 3. Bilinen Borç ve Sınırlar (kaybolmasın diye açıkça listelendi)
+
+| # | Borç / sınır | Nerede | Durum |
+|---|---|---|---|
+| 1 | Intent classifier anahtar kelime heuristiği; sıra dışı ifadeler `implement`'e düşüyor (`confidence: 'low'` ile işaretlenir) | `src/intent.ts` | açık — §1 |
+| 2 | Engine iki kopyada yaşıyor: `engine/gravity-validator.py` ↔ plugin `scripts/srp-validator.py`. `hooks.json` eski adı çağırıyor, iki isim arasında hiçbir çapraz referans yok | `CHANGELOG` P3-04 | açık — aşağıda |
+| 3 | `loss-guard`'ın 5 kontrolünden 4'ü web/React'a özgü; Python projelerinde yalnızca secret taraması anlamlı | `~/.git-template/hooks` | kabul edildi, kapatılmayacak |
+| 4 | Boş `.gravityguard/runtime/` dizinleri motor yeniden oluşturuyor; silmek anlamsız | motor | kabul edildi |
+| 5 | CI yok (§0.1) | repo | açık |
+| 6 | Hook'un `reason` alanı hem uyarı hem (gelecekte) fısıltı kanalı; ayrım yok | `CHANGELOG` 1.2.5 | açık — §2 |
+| 7 | T1 deferred mode: test dosyası hiç olmayan bir projede gerçek uyarı verir (WARN, engellemez). Susturmak ya test yazmak ya `.gravityguard.json` istisnası — bilinçli bir tercih | `CHANGELOG` 1.2.6 Notes | bilinçli kabul |
+
+### 3.1 İsim borcu (en ucuz çözümden başlayarak)
+
+1. **Ucuz:** her iki dosyaya da kutu başı yorum satırı — "bu dosyanın canlı
+   kopyası şurada, `tools/sync_plugin.py` ikisini eşitliyor". Tek satırlık,
+   yanlış anlaşılma riski sıfır.
+2. **Pahalı:** plugin tarafında `srp-validator.py` → `gravity-validator.py`
+   yeniden adlandırmak + `hooks.json`'u güncellemek + `sync_plugin.py` eşlemesini
+   değiştirmek + 12 repo hook kopyasını doğrulamak. Yeniden adlandırma canlı
+   korumayı kırarsa kullanıcı korumasız kalır; bu yüzden ayrı, ölçülmüş bir adım.
+
+---
+
+## 4. Anti-Hedefler (değişmez — bir maddeyi açmak için gerekçe yazılmalı)
 
 To maintain sub-10ms gatekeeping latency and prevent catastrophic scope creep, GravityGuard explicitly rejects the following product directions:
 
@@ -190,3 +188,8 @@ To maintain sub-10ms gatekeeping latency and prevent catastrophic scope creep, G
 
 ### ❌ Anti-Goal 5: Autonomous AI Self-Exemption
 - **Why**: An AI agent must never be permitted to weaken or bypass blocking integrity rules (`G0`, `G1`, `G2`, `G4`) autonomously through synthetic escape comments or self-authorizing config flags. A guard that an agent can talk itself out of is not a security boundary.
+- **Consequence for the work in this file**: `srp: allow-monolith` and the `complexity` block are deliberately scoped to **WARN-only** rules. Extending either to a BLOCK rule re-opens this anti-goal and must be argued explicitly, not assumed.
+
+### ❌ Anti-Goal 6: Telemetry, Cloud, or "Just Ask the Model"
+- **Why**: A local gatekeeper that phones home stops being a boundary, and a heuristic that is delegated to an LLM stops being deterministic. The intent classifier exists *because* the same prompt instruction was previously the classifier, and the same reasoning applies to every other decision.
+- **Enforcement**: No network call on the Tier 1 path. The prompt enhancer's gateway is optional by design and its offline composer is a first-class path, not a degraded one.

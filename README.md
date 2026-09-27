@@ -1,18 +1,18 @@
-# GravityGuard — v1.2.6
+# GravityGuard — v1.2.7
 
 > Deterministic Architecture Airbag, Secret Leak Airbag & AI Agent Gatekeeper for Antigravity IDE.
 
 [English](#english) | [Türkçe](#türkçe)
 
 [![Antigravity Compatible](https://img.shields.io/badge/Antigravity%20IDE-Compatible-blue.svg)](https://antigravity.google/)
-[![Tests](https://img.shields.io/badge/Tests-92%20Passing-brightgreen.svg)]()
-[![Core Evaluator](https://img.shields.io/badge/Core%20Benchmark-Avg%200.11ms%20%7C%20p95%200.24ms-blue.svg)]()
+[![Tests](https://img.shields.io/badge/Engine%20124%20%2B%20TS%2014-Passing-brightgreen.svg)]()
+[![Core Evaluator](https://img.shields.io/badge/Core%20Benchmark-Avg%20~0.1ms%20%7C%20p95%20%3C0.5ms-blue.svg)]()
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9%20%7C%20ES2022-blue.svg)](https://www.typescriptlang.org/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B%20%7C%20Zero%20Dependencies-brightgreen.svg)](https://www.python.org/)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
-[![Local AI First](https://img.shields.io/badge/Local%20AI-9Router%20%7C%20Ollama-orange.svg)]()
+[![Local AI First](https://img.shields.io/badge/Local%20AI%20%7C%20Optional%20Gateway-orange.svg)]()
 
-**GravityGuard** is an ultra-lightweight, deterministic architectural gatekeeper, secret airbag, and prompt engineering companion built specifically for **Antigravity IDE** and modern autonomous AI coding agents. In development benchmarks, it intercepts AI agent tool-calls with an average in-memory logic execution of `~0.11ms` (p95 `< 0.25ms`), preventing codebase degradation, accidental credential leaks, architectural violations, and silent error masking without adding synchronous developer friction.
+**GravityGuard** is an ultra-lightweight, deterministic architectural gatekeeper, secret airbag, and prompt engineering companion built specifically for **Antigravity IDE** and modern autonomous AI coding agents. In development benchmarks, it intercepts AI agent tool-calls with an average in-memory logic execution of `~0.1ms` (p95 `< 0.5ms`), preventing codebase degradation, accidental credential leaks, architectural violations, and silent error masking without adding synchronous developer friction. Absolute latency is host- and load-dependent; the number that is held stable is the ratio against the previous release, measured interleaved in the same time slice.
 
 ---
 
@@ -40,7 +40,7 @@ GravityGuard operates an ordered, zero-overhead pipeline before any file modific
 ## Key Features
 
 ### 🛡️ 1. Deterministic Architectural Gatekeeper
-- **High-Confidence Airbags**: Pure in-memory diff evaluation: avg `~0.11ms`, p95 `<0.25ms` (zero subprocess). Total Windows subprocess spawn overhead is `<230ms` and runs fully hidden from the tool-call loop (`CREATE_NO_WINDOW` + `SW_HIDE`, so no console window ever flashes on screen).
+- **High-Confidence Airbags**: Pure in-memory diff evaluation: avg `~0.1ms`, p95 `<0.5ms` (zero subprocess). Running the engine as a Windows subprocess costs a real `python.exe` spawn — measured at a median of ~340–370 ms on this host, and host-dependent — which is why all linting and compiling happens in a hidden background worker (`CREATE_NO_WINDOW` + `SW_HIDE`, so no console window ever flashes on screen) and the synchronous path stays in-memory.
 - **Intelligent Scale Heuristics**: Distinguishes cohesive single-responsibility files from unmaintainable god-files without relying on arbitrary mechanical line-count blocking.
 - **Zero Heavy Dependencies**: Pure standard-library Python validator operating via shallow AST and regex heuristics. Zero compilation overhead.
 
@@ -87,7 +87,10 @@ GravityGuard operates an ordered, zero-overhead pipeline before any file modific
 ```text
 1. Press Ctrl + Alt + E (or click ✨ Prompt Geliştir on the Status Bar).
 2. Enter your raw instruction (e.g. "Add player inventory websocket sync").
-3. Within 3 seconds, the enhanced defensive specification is copied to your clipboard.
+   Prefix it with #denetle: / #danış: / #kodla: to pin the mode yourself.
+3. The request is classified locally (no network) and the enhanced defensive
+   specification is copied to your clipboard — in seconds with a local gateway,
+   instantly in offline template mode.
 4. Go to Antigravity Chat, press Ctrl + V, and submit!
 ```
 
@@ -150,9 +153,9 @@ Bu depo, standart mühendislik prensiplerine tam uyumlu dokümantasyon seti içe
 | :--- | :--- |
 | **`README.md`** | Bu belge (Genel bakış, İngilizce/Türkçe kılavuz, hızlı başlangıç). |
 | **[`ARCHITECTURE.md`](ARCHITECTURE.md)** | Sistem topolojisi, Mermaid diyagramları, bileşen sınırları ve yaşam döngüleri. |
-| **[`ROADMAP.md`](ROADMAP.md)** | Sürüm kilometre taşları (v1.0 -> v2.0) ve planlanan yetenekler. |
-| **[`CHANGELOG.md`](CHANGELOG.md)** | Semantik versiyonlama kurallarına göre tüm sürüm değişiklik kayıtları. |
-| **[`brain/knowledge.md`](brain/knowledge.md)** | Geliştiriciler ve yapay zeka ajanları için kalıcı mühendislik bilgi tabanı ve değişmezler. |
+| **[`ROADMAP.md`](ROADMAP.md)** | **Yalnızca yapılmamış iş**: sıradaki sürüm kesimi, açık borç ve sınırlar, anti-hedefler. Tamamlanan her şey `CHANGELOG.md`'dedir. |
+| **[`CHANGELOG.md`](CHANGELOG.md)** | Semantik versiyonlama kurallarına göre tüm sürüm değişiklik kayıtları, ölçümler ve gerekçeler; sonunda repo/makine katmanı ek'i. |
+| **[`docs/KNOWLEDGE.md`](docs/KNOWLEDGE.md)** | Geliştiriciler ve yapay zeka ajanları için kalıcı mühendislik bilgi tabanı, değişmezler ve "yeni heuristik nasıl sevk edilir" kuralları. |
 | **[`LICENSE`](LICENSE)** | GNU General Public License v3.0 (GPL-3.0). |
 
 ---

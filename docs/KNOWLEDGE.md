@@ -11,8 +11,9 @@ This document serves as the persistent engineering knowledge repository for **Gr
 - The primary directive is: **"Act as a deterministic airbag that prevents AI Coding Agents (Antigravity, Cursor, Claude Engineer) from degrading code architecture."**
 - **Latency Invariant**:
   - Core in-memory rule evaluations (`check_g1`, `check_g2`, `check_g4`, `difflib.SequenceMatcher`) must finish in **< 10 milliseconds** (typically ~0.05–1.5 ms).
-  - When invoked as an external process hook on Windows via CLI / tool hook, process spawn overhead (`python.exe`) adds ~100–220 ms. End-to-end hook round-trip is within ~120–250 ms.
+  - When invoked as an external process hook on Windows via CLI / tool hook, process spawn overhead (`python.exe`) adds real time and is **host- and load-dependent**: measured on this machine at a median of **~340–370 ms** (observed range 294–558 ms across runs), well above the 100–220 ms figure quoted in earlier notes. The spawn cost is unavoidable and is *not* what the guard is optimised for; nothing else in the loop may block.
   - Sub-50ms claims apply strictly to internal rule logic, not full Windows subprocess spawn cycles.
+  - **Parity is claimed against `git HEAD`, not against an absolute number.** Measure interleaved, in the same time slice; an absolute "0.11 ms" does not survive a change of host or load. See §4.3.
 - Heavy AST computations, recursive symbol resolutions, and whole-project semantic graphs are strictly prohibited. Prefer regex scanning, shallow AST inspection, file metrics, and import boundaries.
 
 ### 1.2. Zero Core IDE Tampering (Integrity Invariant)
@@ -25,18 +26,21 @@ This document serves as the persistent engineering knowledge repository for **Gr
 
 ### 1.3. Dual Engine Coordination
 - **TypeScript Layer (`src/`)**:
-  - Handles VS Code / Antigravity lifecycle, webview message passing, Status Bar items, clipboard synchronization, and 9Router / local LLM prompt enhancement queries.
+  - Handles VS Code / Antigravity lifecycle, webview message passing, Status Bar items, and clipboard synchronization.
+  - `src/intent.ts` is the **local intent classifier**: deterministic, no network, `<1ms`. It is the reason the prompt pipeline has no runtime dependency on an AI gateway.
+  - `src/extension.ts` owns the optional local-gateway client (any OpenAI-compatible `/v1` endpoint) and the deterministic offline composer that answers when no gateway is reachable.
 - **Python Guard Engine (`engine/`)**:
   - Operates as a standalone CLI / hook runner (`gravity-validator.py`).
   - Executed either via IDE pre/post tool hooks, pre-commit Git hooks, or CLI commands.
   - Communicates with the TypeScript UI via the event stream file at `~/.gemini/logs/srp_guardian_live.json`.
 
 ### 1.4. Context-Aware Prompt Enhancement
-- The Prompt Enhancer must NEVER assume all user prompts are implementation tasks.
-- Prompts must be categorized by intent:
-  1. **Inquiry / Consulting ("Fikirlerin nelerdir?", "Nasıl yapmalıyız?")**: Generates trade-off analysis, architectural choices, and risk pre-mortems.
-  2. **Implementation / Coding ("Şunu yaz", "Modül ekle")**: Generates strict, defensive, SRP-compliant technical specifications.
-  3. **Refactoring / Review ("İncele", "Temizle")**: Focuses on boundary violations, dead code, and test coverage.
+- The Prompt Enhancer must NEVER assume all user prompts are implementation tasks. The intent is decided **in the extension**, before the request leaves the machine, and the model is told which mode it is in. The three directives are mutually exclusive and only the selected one is sent:
+  1. **Inquiry / Consulting ("Fikirlerin nelerdir?", "Nasıl yapmalıyım?")** — directive A: options with trade-offs, over-engineering risks, decision criteria. No build orders, no tool calls.
+  2. **Implementation / Coding ("Şunu yaz", "Modül ekle")** — directive B: defensive specification (purpose, scope, module and SRP boundaries, error handling, tests).
+  3. **Audit / Refactoring ("Denetle", "ölü kodları incele")** — directive C: no new production code, findings with `dosya:satır` evidence plus an impact rating, unverifiable suspicions in a separate list, refactor advice split into small revertible steps with a verification method each.
+- **The user can override the classifier** with a `#denetle:` / `#danış:` / `#kodla:` prefix; the result is reported as `source: 'override'`. A heuristic the user cannot contradict is a heuristic the user will stop trusting.
+- **Why not ask the model?** It was the previous design, and it was unverifiable: the repository could not prove compliance, so a directive was a request rather than a decision. `tests/intent.test.mjs` asserts that exactly one directive is emitted per prompt.
 
 ---
 
@@ -55,12 +59,18 @@ The Python engine enforces checks through an ordered, high-to-low priority pipel
 3. **`G2_TEST_INTEGRITY` (P0 - BLOCK / WARN)**: Test suite preservation. Rejects test case deletion across full files (`Counter`) and test disablers (`.skip()`, `xit()`). Allows `pytest.mark.xfail` and treats `.only()` as WARN.
 4. **`G3_COMPILER_BYPASS` (P1 - WARN ONLY)**: Flags newly introduced linter/compiler suppression pragmas (`# noqa`, `# type: ignore`, `@ts-ignore`).
 5. **`G4_IMPORT_MATRIX` (P0 - BLOCK)**: Enforces architecture boundaries (`.gravityguard.json`). Supports relative Python imports and TS side-effects with exact path-segment matching (no false substring collisions).
-6. **`OE_SPIKE` (P2 - WARN ONLY)**: Lightweight heuristic for premature abstraction spikes (< 50 LOC introducing 2+ classes/interfaces).
+6. **`OE_SPIKE` (P2 - WARN ONLY)**: Lightweight heuristic for premature abstraction spikes — a change inside `overEngineeringMaxLoc` (default 50 LOC) introducing `overEngineerAbstractions`+ (default 2) classes/interfaces. **Calibrated and deliberately left alone**: measured fire rate 1.27% (59 of 4,639 eligible writes), of which only 2 are attributable to conventional scaffolding (exceptions, dataclasses, Protocols, Enums). Both numbers are tunable per project (§2.4).
 7. **`SRP_BOUNDARY` (P0 - BLOCK)**: Flags multi-responsibility anti-patterns (e.g., mixing raw UI widgets with HTTP/Network requests in a single file).
 8. **`ARCH_FILE_GROWTH` (P2 - WARN ONLY)**:
    - **Philosophy**: Prevents the "creeping monolith" anti-pattern without blocking. AI agents tend to append small chunks (+40 LOC, +40 LOC) into a single 900+ LOC file, gradually turning it into an unmaintainable god-file.
-   - **Trigger Conditions**: (1) Projected LOC >= 1000, (2) Single tool-call additions >= 180 LOC, or (3) Creeping additions >= 80 LOC on an already large file (>= 800 LOC).
+   - **It measures growth, not file state.** Criteria, first match wins:
+     1. The write **crosses** the monolith line (`old_loc < monolithLoc <= projected_loc`, default 1000).
+     2. `old_loc >= creepBaseLoc` (default 800) **and** `added >= creepAddedLoc` (default 80).
+     3. One tool call adds `>= singleWriteLoc` (default 180) to an **existing** file.
+   - **Creation is not accumulation.** Rules 2 and 3 skip files that do not exist yet: a brand-new cohesive module is the outcome these rules ask for. Rule 1 still applies, so a file *born* over the monolith line is reported.
+   - **Escape hatch**: `srp: allow-monolith` (or the rest of the marker vocabulary the SRP rule already honours) silences rules 2 and 3. It deliberately does **not** silence rule 1.
    - **Exemptions**: Test files (`test_*.py`, `*.test.ts`) and configured cohesive modules are exempt.
+   - **Measured justification** (6,404 real production file-writes, 11 repositories): 60 writes land on files already past 1,000 lines and only 30 of them carry a material addition, so the previous `projected_loc >= 1000` state check repeated itself on half its fires; 359 of 1,636 real file creations added 180+ lines, so warning on creation penalised modularisation. Method and full numbers in the CHANGELOG.
 9. **`TEST_EVIDENCE` (Phase 2 - WARN ONLY)**:
    - **Philosophy**: Not a test coverage or mutation testing tool. Acts as a lightweight pre-tool "evidence airbag" to catch AI agents changing production behavior without test updates or writing empty assertionless stubs.
    - **Zero BLOCK Invariant**: Under no circumstance does T1, T2, or T3 block a tool call. All decisions return `decision: allow` with informative warnings.
@@ -94,18 +104,37 @@ The Python engine enforces checks through an ordered, high-to-low priority pipel
   ```
 - The TypeScript webview watches this file using both `fs.watch` and a 1.5s fallback polling heartbeat.
 
-### 2.3. Local LLM / 9Router Fallback Pipeline
-- Prompt enhancement queries `http://127.0.0.1:20128/v1/chat/completions` with `"stream": false`.
-- Priority cascade:
-  1. `ag/gemini-3.8-flash-low` (latency: ~2.5s)
-  2. `ag/gemini-3.7-flash-medium` (fallback)
-  3. `all` (router-balanced fallback)
-- If the local router is unreachable, gracefully inform the user without crashing the extension host.
+### 2.3. Prompt Enhancement Pipeline (optional gateway, deterministic floor)
+- Stage 1 — **local intent classification** (`src/intent.ts`): no network, `<1ms`, three mutually exclusive directives (§1.4).
+- Stage 2 — **gateway cascade** (optional): `http://<gravityguard.routerHost>:<routerPort>/v1/chat/completions` with `"stream": false`, against any OpenAI-compatible endpoint (9Router, Ollama, LM Studio, llama.cpp). Model ids come from `gravityguard.models` (env: `ROUTER_MODELS`); default cascade is `ag/gemini-3.8-flash-low` → `ag/gemini-3.7-flash-medium` → `all`. Per-model timeout: `gravityguard.routerTimeoutMs` (default 12,000 ms).
+- **Two failure classes, two behaviours.** *Model-level* failures (HTTP error, empty content, timeout) fall through to the next model. *Connection-level* failures (`ECONNREFUSED`, `ENOTFOUND`, `EHOSTUNREACH`, `ENETUNREACH`, `EAI_AGAIN`, `ECONNRESET`, `EPIPE`) mean no model behind that host can answer, so the remaining candidates are skipped instead of each burning a full timeout.
+- Stage 3 — **offline composer** (always available): `buildOfflinePrompt()` renders a structured, mode-correct brief from the classified intent — the original request verbatim, the expected output for that mode, and the standing constraints. The user is told the result came from the offline path. This is the invariant, not a fallback: offline is the floor.
+- `antigravityBridge.ping` performs a real health check (`GET /v1/models`, 3s) and reports the endpoint, the model count, or the exact connection error.
+
+### 2.4. Project Configuration (`.gravityguard.json`)
+
+| Block | Consumed by | Notes |
+|---|---|---|
+| `layers` | `G4_IMPORT_MATRIX` (BLOCK) | Forbidden import targets per layer. Exact path-segment matching. |
+| `testEvidence` | `T1` / `T2` / `T3` (WARN) | `sourceRoots`, `testRoots`, `sessionWindowSeconds` (default 300), `exemptPatterns` (fnmatch globs), `deferredMode`. |
+| `complexity` | `OE_SPIKE`, `ARCH_FILE_GROWTH` (WARN only) | `monolithLoc` (1000), `singleWriteLoc` (180), `creepBaseLoc` (800), `creepAddedLoc` (80), `overEngineeringMaxLoc` (50), `overEngineerAbstractions` (2). |
+
+**Configuration is a convenience, never a security boundary.** Every numeric key has a floor (`monolithLoc: 3` would flag every file), non-numeric values, booleans and malformed blocks are ignored, and a bad config degrades to the defaults instead of raising — this code runs inside the pre-tool hook, where an exception means the write proceeds unguarded.
 
 ---
 
 ## 3. Developer Guidelines
 
-- Always run `npm run build` after editing `src/*.ts`.
-- Ensure `engine/gravity-validator.py` can be executed independently with `python gravity-validator.py --file <path>`.
+- Run `npm run build` after editing `src/*.ts`, then `npm test` (14 TypeScript tests for the classifier and prompt composer).
+- Run `npm run test:engine` (or `python -m unittest discover -s engine -p test_*.py`) after editing the engine. The suite sets `GRAVITYGUARD_LOG_DIR` and `GRAVITYGUARD_DISABLE_ASYNC=1` before importing any module, so it never writes to the live audit log and never spawns a real background worker.
 - Keep telemetry and network calls strictly opt-in and local-first.
+- `tools/sync_plugin.py --check` reports drift between the repo engine and the live plugin copy; the `pre-commit` hook syncs automatically and reports `[autosync] DRIFT <file> -> <bytes> (dogrulandi)`.
+
+## 4. How A New Heuristic Gets Shipped (lessons that are already paid for)
+
+1. **Measure before you tune.** A heuristic ships with its measured fire rate on the real corpus (11 repositories, last 400 commits, 6,404 production file-writes) and at least one true-positive and one false-positive example from that history. A number nobody measured is a guess. OE_SPIKE shipped *unchanged* because 1.27% measured as already correct.
+2. **Test behaviour, not the predicate.** The first cut of the `srp: allow-monolith` exemption reused `is_ts_cohesive_monolith()` — which answers a different question and is true for nearly every TypeScript file — and the mistake was caught by an *existing* behaviour test going silent, not by a unit test of the predicate. Assertions must exercise the rule through the hook.
+3. **Claim parity with an A/B, not an absolute.** Latency comparisons run interleaved against `git HEAD` in the same time slice. An absolute "0.11 ms" is host- and load-dependent; the ratio is the claim that survives. A first implementation regressed 1.35x purely by copying a dict per call — invisible without the A/B.
+4. **One escape-hatch vocabulary.** A new marker or config key must reuse an existing one (`srp: allow-monolith`) or justify why it cannot.
+5. **WARN rules may accept a human exemption; BLOCK rules may not.** Extending `complexity` or the marker to a blocking rule re-opens Anti-Goal 5 and must be argued explicitly.
+6. **Schema is a contract.** The hook stdout permits only `decision`, `reason`, `permissionOverrides`, `overwrite`; protojson discards the entire response for an unknown field, and a test harness using plain `json.loads` cannot observe that class of bug. `run_validator()` gates every response against the allowed key set for this reason.
