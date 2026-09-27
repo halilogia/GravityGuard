@@ -54,5 +54,8 @@ jobs:
       - name: TypeScript tests (intent classifier, prompt composer)
         run: npm test
 
-      - name: Engine tests (125: guards, schema contract, perf invariants)
+      # Quoted because an unquoted value containing ": " is a YAML mapping, not a
+      # string. A step label edit broke the whole workflow for two pushes; CI
+      # caught it in 0 seconds, which is the only reason it was noticed at all.
+      - name: "Engine tests (125: guards, schema contract, perf invariants)"
         run: npm run test:engine

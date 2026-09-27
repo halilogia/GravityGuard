@@ -72,6 +72,32 @@ def find_vsix() -> Path:
     return candidates[-1]
 
 
+def validate_workflow_yaml() -> list[str]:
+    """Parse .github/workflows/*.yaml so a broken workflow fails locally, not on push.
+
+    Cost of the lesson: a step label containing ": " is a YAML mapping, not a
+    string. It broke the whole CI workflow for two pushes, and the only signal
+    was a 0-second red run. PyYAML is already a transitive dependency of the
+    toolchain here; when it is absent the check reports "skipped" rather than
+    pretending to have validated something.
+    """
+    import glob
+
+    try:
+        import yaml
+    except ImportError:
+        return []
+
+    failures = []
+    workflows = glob.glob(str(REPO / ".github" / "workflows" / "*.y*ml"))
+    for path in workflows:
+        try:
+            yaml.safe_load(open(path, encoding="utf-8"))
+        except Exception as exc:  # yaml.YAMLError and friends
+            failures.append(f"{Path(path).name}: YAML bozuk -> {exc}")
+    return failures
+
+
 def main() -> None:
     vsix = Path(sys.argv[1]) if len(sys.argv) > 1 else find_vsix()
     if not vsix.is_file():
@@ -133,6 +159,16 @@ def main() -> None:
                     failures.append(f"{name}: {why}")
         if not found_any:
             print("  [TEMIZ] yasakli desen ile eslesen dosya yok")
+
+    print()
+    workflow_failures = validate_workflow_yaml()
+    if workflow_failures:
+        print("Workflow YAML dogrulamasi:")
+        for failure in workflow_failures:
+            print(f"  [BOZUK] {failure}")
+        failures.extend(workflow_failures)
+    else:
+        print("Workflow YAML: GECERLI")
 
     print()
     if failures:
