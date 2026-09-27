@@ -24,9 +24,13 @@ aşağıdaki anti-hedefler. Bir fikir bu çerçeveyi ihlal ediyorsa fikir değil
 - [x] `npm run build` ve `vsce package`; paket içindeki engine'in `md5`'i repo engine'iyle **byte-aynı** doğrulandı — artık elle değil `npm run verify:package` ile. Bu kontrol ilk çalıştığında paketin 15 dosya / 80.33 KB çıktığını ve `tests/`, `docs/`, `.kilo/`, `dist/*.js.map` içerdiğini yakaladı; `.vscodeignore` düzeltildi → **10 dosya / 65.44 KB**, 1.2.5 paketiyle aynı dosya sayısı.
 - [x] `tools/sync_plugin.py --check` temiz — canlı plugin bu sürümle eşleşiyor.
 - [x] `v1.3.0` etiketi atıldı ve gönderildi.
-- [ ] **GitHub Release yüklemesi `gh` CLI olmadan yapılamıyor** (bu makinede kurulu değil).
-      `.vsix` dosyası yerelde üretildi; Release'i etiketten açıp dosyayı elle eklemek gerekiyor:
-      `gh release create v1.3.0 gravityguard-1.3.0.vsix --title "v1.3.0" --notes-file notes.md`
+- [x] GitHub Release yayınlandı: `https://github.com/halilogia/GravityGuard/releases/tag/v1.3.0`
+      (`.vsix` iliştirildi, `Latest` işaretli). Doğrulama: asset geri indirildi ve
+      md5 `898E0802…` ile yerel dosyayla **byte-aynı**.
+      Komut: `gh release create v1.3.0 gravityguard-1.3.0.vsix --title "v1.3.0" --notes-file notes.md --verify-tag`
+- [ ] **Eksik etiketler:** `v1.2.6` ve `v1.2.7` CHANGELOG'da var ama git etiketi
+      ve GitHub Release'leri yok. Geriye dönük etiketlemek bir sürüm kararıdır
+      (imzalanmamış etiketler `v1.2.5`'te de öyle), karar kullanıcının.
 
 ## 0.1 CI eksikliği (kimseye görünmüyor, ama en pahalı borç bu)
 
