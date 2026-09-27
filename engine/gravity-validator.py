@@ -2,16 +2,17 @@
 # GRAVITYGUARD GUARD ENGINE — repo source of truth
 # ============================================================================
 #   Live copy: ~/.gemini/config/plugins/srp-swarm-guardian/scripts/
-#              srp-validator.py   (renamed: hooks.json invokes
-#              `python scripts/srp-validator.py`)
-#   These are two different files on purpose — the plugin directory is a
-#   separate deployment target — and a search for either name finds no
-#   reference to the other, which made the relationship invisible to anyone
-#   reading one side. It is now stated here, in async_runner.py, and in
-#   tools/sync_plugin.py.
+#              gravity-validator.py
+#   The live copy keeps the same name (it used to be renamed to
+#   srp-validator.py, which meant a search for either name found no reference
+#   to the other). The plugin manifests that name the entry point are version
+#   controlled too: plugin/hooks.json and plugin/plugin.json.
 #   EDIT THIS FILE, never the live copy. tools/sync_plugin.py copies this file
-#   to the plugin on every commit (pre-commit hook) and
+#   and both manifests to the plugin on every commit (pre-commit hook), and
 #   `python tools/sync_plugin.py --check` reports drift.
+#   hooks.json is the single most safety-critical line in this product: if the
+#   script name there is wrong the hook never runs, and a hook that never runs
+#   fails open without a trace. It is version controlled for that reason.
 # ============================================================================
 import sys
 import json
@@ -1336,6 +1337,74 @@ def resolve_candidate_test_file(target_file: str, cfg: Optional[dict] = None) ->
     return None, primary_expected
 
 
+_TEST_FILE_PATTERNS = ("test_*.py", "*_test.py", "*.test.*", "*.spec.*", "conftest.py")
+
+
+def project_has_test_infrastructure(target_file: str, cfg: Optional[dict] = None) -> bool:
+    """Does this project have ANY test evidence, anywhere?
+
+    WHY THIS PRECONDITION EXISTS
+      T1 asks "you changed production code, where is the test that covers it?".
+      On a project with no tests at all there is nothing to point at, so the
+      answer it produces — create the related test file — is unactionable advice
+      repeated on every single write. A warning that cannot be acted on trains
+      the agent (and the reader) to ignore the rule, which costs more than the
+      signal is worth. The 1.2.6 notes recorded this exact situation on a real
+      project and called it "a real warning"; the resolution is not to argue
+      about whether it is true, but to notice that there is no test suite for it
+      to be true *about*.
+
+      So: T1 stays silent while the project has no test suite at all, and from the
+      first sign of one — a `tests/` directory or a single test file — it behaves
+      exactly as before. An *empty* `tests/` directory counts as the sign: it is a
+      declared intent, and T1's question ("where is the test for this change?") is
+      answerable from the moment it exists.
+
+    COST
+      Only called on the path that would have warned anyway, bounded to the same
+      six directories and three test roots `resolve_candidate_test_file` already
+      walks, and it short-circuits on the first hit. No full-tree scan, so the
+      <10ms fast path is unaffected.
+    """
+    if cfg and isinstance(cfg, dict):
+        te_cfg = cfg.get("testEvidence", {})
+        if isinstance(te_cfg, dict) and te_cfg.get("requireTestInfrastructure") is False:
+            return True
+
+    test_roots = ["tests", "__tests__", "test"]
+    if cfg and isinstance(cfg, dict):
+        te_cfg = cfg.get("testEvidence", {})
+        if isinstance(te_cfg, dict) and isinstance(te_cfg.get("testRoots"), list):
+            test_roots = te_cfg["testRoots"]
+
+    search_dirs = [Path(target_file).parent]
+    curr = Path(target_file).parent
+    for _ in range(5):
+        if curr.parent == curr:
+            break
+        curr = curr.parent
+        search_dirs.append(curr)
+
+    for root_cand in search_dirs:
+        for tr in test_roots:
+            td = root_cand / tr
+            if not td.is_dir():
+                continue
+            try:
+                entries = list(td.iterdir())
+            except OSError:
+                continue
+            # A canonical test root is a declaration of intent on its own, even
+            # while it is still empty: the agent has set up a suite to add to.
+            if not entries:
+                return True
+            for entry in entries:
+                name = entry.name
+                if any(fnmatch.fnmatch(name, pattern) for pattern in _TEST_FILE_PATTERNS):
+                    return True
+    return False
+
+
 def check_t1_missing_test(
     target_file: str,
     added_text: str,
@@ -1345,6 +1414,8 @@ def check_t1_missing_test(
     T1 — MISSING_RELATED_TEST (WARN ONLY).
     Triggers when production code changes but no candidate test file exists on disk,
     or candidate test file exists but was not updated in the active session window.
+    Silent when the project has no test infrastructure at all (see
+    project_has_test_infrastructure).
     Returns: (warn_triggered, warn_message, candidate_test_path)
     """
     if not added_text.strip():
@@ -1356,6 +1427,8 @@ def check_t1_missing_test(
     candidate_path, expected_name = resolve_candidate_test_file(target_file, cfg)
 
     if not candidate_path or not os.path.exists(candidate_path):
+        if not project_has_test_infrastructure(target_file, cfg):
+            return False, "", None
         return True, (
             f"Test Kanıtı Uyarısı (T1_MISSING_RELATED_TEST): Üretim kodunda değişiklik yapıldı "
             f"ancak ilişkili test dosyası ('{expected_name}') diskte bulunamadı. "

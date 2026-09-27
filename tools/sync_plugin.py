@@ -5,12 +5,17 @@
 NEDEN VAR:
     Ayni kod iki yerde duruyor:
       - Repo  : GravityGuard/engine/gravity-validator.py  (GitHub'a giden kaynak)
-      - Plugin: ~/.gemini/config/plugins/.../scripts/srp-validator.py  (Antigravity'nin
+      - Plugin: ~/.gemini/config/plugins/.../scripts/gravity-validator.py  (Antigravity'nin
                 hook ile calistirdigi CANLI kopya)
 
     Kopyayi yok etmek mumkun degil (plugin klasoru ile repo klasoru ayri ayri
     yasamak zorunda). Bu script, "biri guncellenip digeri unutulur ve koruma
     sessizce eskir" riskini tek komuta indirir.
+
+    Pluginin MANIFEST dosyalari (hooks.json, plugin.json) de ayni sekilde iki
+    yerde yasiyordu ve hicbir kopyasi repoda degildi. hooks.json ise guvenlik
+    acisindan en kritik satirdir: oradaki dosya adi yanlissa hook hic calismaz
+    ve guard sessizce fail-open olur. Bu yuzden manifestler de PAIRS'e girdi.
 
 KULLANIM:
     python tools/sync_plugin.py --check    # sadece fark var mi? (kopyalamaz)
@@ -32,10 +37,14 @@ import shutil
 import sys
 import time
 
-# (repo tarafi, plugin tarafi, aciklama)
+# (repo tarafi, plugin tarafi (scripts/ altindaki HEDEF AD), aciklama)
+# Not: hedef adi plugin'in scripts/ klasoru altindadir; plugin kokundeki
+# manifestler bu yuzden "scripts/" onekli ozel bir hedef kullanir.
 PAIRS = [
-    ("engine/gravity-validator.py", "scripts/srp-validator.py", "Ana dogrulama motoru"),
+    ("engine/gravity-validator.py", "scripts/gravity-validator.py", "Ana dogrulama motoru"),
     ("engine/async_runner.py", "scripts/async_runner.py", "Arka plan statik analiz calistiricisi"),
+    ("plugin/hooks.json", "hooks.json", "Hook manifesti: hangi scripti cagiracagimizi yazar"),
+    ("plugin/plugin.json", "plugin.json", "Plugin kimlik dosyasi"),
 ]
 
 PLUGIN_DIR = os.path.join(
@@ -90,7 +99,7 @@ def main() -> int:
         print("-" * 68)
         print("%s  (%s)" % (os.path.basename(repo_rel), desc))
         print("  kaynak: %s" % repo_rel)
-        print("  hedef : scripts/%s" % os.path.basename(plug_rel))
+        print("  hedef : %s" % plug_rel)
 
         if not os.path.isfile(src):
             print("  HATA  : kaynak dosya yok")

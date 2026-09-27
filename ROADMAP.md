@@ -115,27 +115,22 @@ bağımlılık artışı (dependency creep).
 
 ---
 
-## 3. Borç Kaydı
+## 3. Borç Kaydı — **boş**
 
-Kapatılan borçler burada **kalmaz** — kanıtları `CHANGELOG.md` → `[Unreleased]`
-içindedir. Aşağıdaki tablo yalnızca **hâlâ borç olan** ve **kabul edilmiş
-sınırları** tutar.
+Kayıtta borç kalmadı. Yedi maddenin akıbeti:
 
-| # | Borç / sınır | Durum |
+| # | Borç | Kapanış |
 |---|---|---|
-| 2 | Engine iki kopyada (`gravity-validator.py` ↔ `srp-validator.py`) | **kısmen açık** — çapraz referans eklendi, adlandırma yapılmadı (§3.1) |
-| 3 | `loss-guard` 5 kontrolünün 4'ü web/React'a özgü | **kabul** — `~/.git-template` içinde, 12 repo'ya uygulanmış kullanıcı-makine katmanı; ürün değişikliği değil. Python projelerinde yalnızca secret taraması anlamlı ve zararsız |
-| 4 | Boş `.gravityguard/runtime/` dizinleri kendini yeniden oluşturuyor | **kabul** — motorun çalışma zamanı dizinlerini `mkdir` ile kurması bir özellik; silmek kalıcı çözüm değil, `KNOWLEDGE` §2.1'de yazılı |
-| 7 | T1 deferred mode: testi hiç olmayan projede gerçek uyarı (WARN, engellemez) | **kabul** — susturmanın iki yolu da kasıtlı ve mevcut: test yazmak ya da `testEvidence.exemptPatterns` / `deferredMode` (`KNOWLEDGE` §2.4) |
+| 1 | Classifier heuristiği, düşük güvende tahmin | **düzeltildi** — onay akışı + 32 maddelik korpus |
+| 2 | Engine'in iki kopyası, isim ayrışmış, manifestler sürümlenmemiş | **düzeltildi** — tek isim, `plugin/hooks.json` + `plugin.json` depoda, senkron listesi tek yerde |
+| 3 | `loss-guard`'ın web'a özgü kontrolleri | **ölçüldü, hata değil** — her kontrol kendi kapısında; Python repo'da `[]` döner, maliyeti mikrosaniye |
+| 4 | Boş `.gravityguard/runtime/` dizinleri | **ölçüldü, hata değil** — motorun çalışma zamanı durum dizini; silmek hiçbir şey değiştirmiyor |
+| 5 | CI yok | **düzeltildi** — üç platformlu Actions, ilk koşu yeşil |
+| 6 | `reason` kanalı belirsizliği | **karara bağlandı** — fısıltı ayrı kanal değil, WARN kuralı |
+| 7 | T1'in testsiz projeye sürekli uyarısı | **düzeltildi** — test altyapısı ön koşulu + kapatma anahtarı |
 
-Kapanmış borçlar (karşılaştırma için): 1 classifier (korpus + onay akışı), 5 CI,
-6 kanal kararı. Kayıt: `CHANGELOG.md` → `[Unreleased]`.
-
-### 3.1 İsim borcu — kalan kısım
-
-Adlandırma (`srp-validator.py` → `gravity-validator.py`) yapılmadı: `hooks.json` o yolu
-çağırıyor, `sync_plugin.py` eşlemesi ve 12 repo hook kopyası değişecek. Yanlış yapılırsa
-kullanıcının canlı koruması sessizce düşer. Adım adım ölçülmüş, ayrı bir iş.
+Kanıtlar ve ölçümler: `CHANGELOG.md` → `[Unreleased]`. Yeni borç buraya girmez —
+ya düzeltilir ya da (3 ve 4'te olduğu gibi) ölçülüp hata olmadığı kanıtlanır.
 
 ---
 

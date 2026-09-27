@@ -49,6 +49,7 @@ FORBIDDEN_PATTERNS = [
     (r"^extension/engine/test_", "engine test suite shipped in the artifact"),
     (r"^extension/docs/", "developer documentation shipped in the artifact"),
     (r"^extension/tools/", "repo tooling shipped in the artifact"),
+    (r"^extension/plugin/", "Antigravity plugin manifests shipped in the artifact"),
     (r"^extension/brain/", "untracked brain directory shipped in the artifact"),
     (r"^extension/\.kilo/", "agent scratch directory shipped in the artifact"),
     (r"^extension/src/", "TypeScript sources shipped alongside the build"),

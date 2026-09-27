@@ -5,11 +5,17 @@
 NEDEN:
     GravityGuard'in motoru iki yerde durur:
       repo  : engine/gravity-validator.py   (GitHub kaynagi)
-      plugin: ~/.gemini/config/plugins/srp-swarm-guardian/scripts/srp-validator.py
+      plugin: ~/.gemini/config/plugins/srp-swarm-guardian/scripts/gravity-validator.py
               (Antigravity hook'unun calistirdigi CANLI dosya)
 
     Kopyayi yok etmek mumkun degil. Bu script, commit aninda tek kural uygular:
     "repo'ya giren surum canliya da girer".
+
+    HANGI DOSYALARIN senkronize edilecegi TEK YERDE tanimlidir
+    (sync_plugin.PAIRS) ve burada ice aktarilir. Onceki surum bu listeyi iki
+    dosyada ayri ayri tasiyordu; isim degistiginde otomatik senkron eski adi
+    geri getirmeye devam etti ve canli plugin'de bayat bir kopya birikiyordu.
+    Yani ayni hatayi ureten sey, senkronu iki yerde tanimlamaktti.
 
 TASARIM KARARI - neden commit'i ENGELLEMEZ:
     Bu bir kolayliktir, guvenlik siniri DEGILDIR. Plugin klasoru olmayan bir
@@ -38,15 +44,8 @@ import shutil
 import sys
 import time
 
-PAIRS = [
-    ("engine/gravity-validator.py", "scripts/srp-validator.py"),
-    ("engine/async_runner.py", "scripts/async_runner.py"),
-]
-
-PLUGIN_DIR = os.path.join(
-    os.path.expanduser("~"), ".gemini", "config", "plugins", "srp-swarm-guardian"
-)
-BACKUP_DIR = os.path.join(os.path.expanduser("~"), ".git-hook-backups", "plugin-sync")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from sync_plugin import BACKUP_DIR, PAIRS, PLUGIN_DIR  # noqa: E402
 
 PREFIX = "[autosync] "
 
@@ -67,7 +66,7 @@ def main() -> int:
 
     # 2) Kaynak dosyalarin sozdizimini ONCE kontrol et.
     #    Bozuksa commit'i durdur; bozuk kod canli koruma zincirine girmemeli.
-    for repo_rel, _ in PAIRS:
+    for repo_rel, plug_rel, _desc in PAIRS:
         src = os.path.join(repo, repo_rel.replace("/", os.sep))
         if not os.path.isfile(src):
             continue
@@ -81,7 +80,7 @@ def main() -> int:
 
     # 3) Fark var mi?
     drifted = []
-    for repo_rel, plug_rel in PAIRS:
+    for repo_rel, plug_rel, _desc in PAIRS:
         src = os.path.join(repo, repo_rel.replace("/", os.sep))
         dst = os.path.join(PLUGIN_DIR, plug_rel.replace("/", os.sep))
         if not os.path.isfile(src):

@@ -2916,6 +2916,10 @@ class TestV127G0ZeroBypassAndStatefulEvidence(unittest.TestCase):
 
         service_file = os.path.join(self.temp_dir, "src", "legacy_service.ts")
         os.makedirs(os.path.dirname(service_file), exist_ok=True)
+        # The project must have a test suite for T1 to have anything to say about
+        # (see project_has_test_infrastructure): this test is about deferredMode,
+        # not about the zero-test case, which has its own test below.
+        os.makedirs(os.path.join(self.temp_dir, "tests"), exist_ok=True)
 
         payload = {
             "toolCall": {
@@ -2934,6 +2938,8 @@ class TestV127G0ZeroBypassAndStatefulEvidence(unittest.TestCase):
         """Repeated writes to the same production file do not generate duplicate pending records"""
         src = os.path.join(self.temp_dir, "src", "order.ts")
         os.makedirs(os.path.dirname(src), exist_ok=True)
+        # A test suite must exist for T1 to record a pending expectation at all.
+        os.makedirs(os.path.join(self.temp_dir, "tests"), exist_ok=True)
 
         for i in range(3):
             payload = {
@@ -2955,8 +2961,73 @@ class TestV127G0ZeroBypassAndStatefulEvidence(unittest.TestCase):
         pending = state.get("pending", {})
         self.assertEqual(len(pending), 1, "Only 1 pending entry must exist for order.ts despite 3 writes")
 
+    def test_t1_is_silent_on_a_project_with_no_test_suite(self):
+        """The zero-test project: T1 has nothing to point at, so it stays quiet.
+
+        This is the case the 1.2.6 notes recorded as "a real warning" and left
+        unfixed. The resolution is not to argue that the warning is true — it is —
+        but to notice that "the related test file" cannot exist in a project with
+        no test suite, so the advice is unactionable and repeats on every write. A
+        warning that cannot be acted on costs more than the signal is worth,
+        because it teaches the agent to ignore the rule.
+
+        An empty `tests/` directory is NOT the zero-test case: it is a declared
+        intent, and the T1 warning resumes from the moment it exists (asserted by
+        the stateful lifecycle test above).
+        """
+        src = os.path.join(self.temp_dir, "src", "billing.py")
+        os.makedirs(os.path.dirname(src), exist_ok=True)
+        self.assertFalse(
+            os.path.isdir(os.path.join(self.temp_dir, "tests")),
+            "precondition: this project must have no tests directory",
+        )
+
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": src,
+                    "CodeContent": "def pay():\n    return True\n"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+        self.assertNotIn("T1_MISSING_RELATED_TEST", _warnings_from(res))
+
+        stop_res, _ = run_validator({"terminationReason": "model_stop"})
+        self.assertNotIn(
+            "Test Kanıtı Uyarısı (T1)", _warnings_from(stop_res),
+            "a project with no test suite must not be nagged at Stop either",
+        )
+
+    def test_t1_test_infrastructure_precondition_can_be_disabled(self):
+        """`testEvidence.requireTestInfrastructure: false` restores the old behaviour.
+
+        Someone may want the nag on a zero-test project on purpose — that is what
+        the 1.2.6 notes described. The escape hatch exists so the decision is
+        theirs, not ours.
+        """
+        with open(os.path.join(self.temp_dir, ".gravityguard.json"), "w", encoding="utf-8") as f:
+            json.dump({"testEvidence": {"requireTestInfrastructure": False}}, f)
+
+        src = os.path.join(self.temp_dir, "src", "billing.py")
+        os.makedirs(os.path.dirname(src), exist_ok=True)
+
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": src,
+                    "CodeContent": "def pay():\n    return True\n"
+                }
+            }
+        }
+        run_validator(payload)
+        stop_res, _ = run_validator({"terminationReason": "model_stop"})
+        self.assertIn("Test Kanıtı Uyarısı (T1)", _warnings_from(stop_res))
+
     def test_t1_corrupted_state_file_fail_safe(self):
-        """Corrupted or truncated state file is safely recovered without blocking writes"""
         state_path = os.path.join(self.temp_dir, "test_evidence_state.json")
         with open(state_path, "w", encoding="utf-8") as f:
             f.write("{corrupted_json: true, [unterminated")

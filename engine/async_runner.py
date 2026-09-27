@@ -9,8 +9,9 @@ and per-file lint burst coalescing to eliminate redundant linter spawns.
 Live copy: ~/.gemini/config/plugins/srp-swarm-guardian/scripts/async_runner.py
 (kept under the same name as here). Two deployment targets, one source of truth
 in this repo: edit here, and tools/sync_plugin.py copies it to the plugin on
-every commit. Its sibling, gravity-validator.py, is renamed to srp-validator.py
-in the live plugin because hooks.json invokes that path.
+every commit. Its sibling, gravity-validator.py, also keeps its name in the
+plugin; the manifests that name the entry point (plugin/hooks.json,
+plugin/plugin.json) are version controlled here too.
 """
 
 import sys

@@ -22,6 +22,7 @@ dist/**/*.js.map
 # --- Gelistirme araclari (bu depoya ozel; paketle ilgisi yok) ---
 tools/
 .kilo/
+plugin/
 
 # --- Dokuman / arastirma ---
 brain/
