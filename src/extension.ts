@@ -417,14 +417,55 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
     if (fs.existsSync(logPath)) {
       try {
         data = JSON.parse(fs.readFileSync(logPath, 'utf8'));
-      } catch (e) {}
+      } catch (e) {
+        console.warn('Failed to parse live log file:', e);
+      }
     }
 
+    // Resolve workspace folder and read governance / project config
+    let workspaceRoot = '';
+    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+      workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    }
+
+    let govData: any = null;
+    let pendingTests: Record<string, any> = {};
+    let pendingDocs: Record<string, any> = {};
+    let stopRetries = 0;
+
+    if (workspaceRoot) {
+      const govPath = path.join(workspaceRoot, '.gravityguard', 'runtime', 'governance.json');
+      if (fs.existsSync(govPath)) {
+        try {
+          govData = JSON.parse(fs.readFileSync(govPath, 'utf8'));
+          pendingTests = govData.test_obligations?.pending || {};
+          pendingDocs = govData.doc_obligations?.pending || {};
+          stopRetries = govData.stop_retries || 0;
+        } catch (e) {
+          console.warn('Failed to parse governance state:', e);
+        }
+      }
+    }
+
+    let projectCfg: any = null;
+    if (workspaceRoot) {
+      const cfgPath = path.join(workspaceRoot, '.gravityguard.json');
+      if (fs.existsSync(cfgPath)) {
+        try {
+          projectCfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+        } catch (e) {
+          console.warn('Failed to parse .gravityguard.json:', e);
+        }
+      }
+    }
+
+    const totalObligations = Object.keys(pendingTests).length + Object.keys(pendingDocs).length;
     const eventsList = data.events || [];
     const blockedCount = eventsList.filter(e => e.status === 'BLOCKED').length;
     const warningCount = eventsList.filter(e => e.status === 'WARNING').length;
     const approvedCount = eventsList.filter(e => e.status === 'APPROVED').length;
 
+    // --- TAB 1: Events HTML ---
     let eventsHtml = '';
     for (const e of eventsList) {
       const isBlocked = e.status === 'BLOCKED';
@@ -470,6 +511,90 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
         '</div>';
     }
 
+    // --- TAB 2: Obligations HTML ---
+    let obligationsHtml = '';
+    const testKeys = Object.keys(pendingTests);
+    const docKeys = Object.keys(pendingDocs);
+
+    if (testKeys.length === 0 && docKeys.length === 0) {
+      obligationsHtml =
+        '<div style="color: #10b981; font-size: 0.8rem; text-align: center; padding: 25px 10px; border: 1px dashed rgba(16,185,129,0.25); border-radius: 10px; background: rgba(16,185,129,0.05);">' +
+        '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" style="margin-bottom: 8px;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>' +
+        '<div style="font-weight: 800; font-size: 0.85rem;">Tüm Yükümlülükler Temiz!</div>' +
+        '<div style="color: #94a3b8; font-size: 0.72rem; margin-top: 4px;">Bekleyen test kanıtı veya eksik CHANGELOG kaydı bulunmuyor.</div>' +
+        '</div>';
+    } else {
+      if (testKeys.length > 0) {
+        obligationsHtml += '<div style="font-size: 0.7rem; font-weight: 800; color: #38bdf8; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.5px;">🧪 Bekleyen Test Kanıtları (' + testKeys.length + ')</div>';
+        for (const tk of testKeys) {
+          const item = pendingTests[tk];
+          obligationsHtml +=
+            '<div style="background: #1e293b; border-left: 3px solid #38bdf8; padding: 10px; border-radius: 6px; margin-bottom: 8px; font-size: 0.75rem;">' +
+            '<div style="color: #f8fafc; font-weight: 700; word-break: break-all;">' + path.basename(tk) + '</div>' +
+            '<div style="color: #94a3b8; font-size: 0.7rem; margin-top: 2px;">Beklenen Test: <span style="color: #38bdf8;">' + (item.expected_name || 'test') + '</span></div>' +
+            '</div>';
+        }
+      }
+      if (docKeys.length > 0) {
+        obligationsHtml += '<div style="font-size: 0.7rem; font-weight: 800; color: #f59e0b; text-transform: uppercase; margin: 12px 0 6px 0; letter-spacing: 0.5px;">📝 Bekleyen Dokümantasyon (' + docKeys.length + ')</div>';
+        for (const dk of docKeys) {
+          const item = pendingDocs[dk];
+          const reqs = (item.required_docs || ['CHANGELOG.md']).join(', ');
+          obligationsHtml +=
+            '<div style="background: #1e293b; border-left: 3px solid #f59e0b; padding: 10px; border-radius: 6px; margin-bottom: 8px; font-size: 0.75rem;">' +
+            '<div style="color: #f8fafc; font-weight: 700; word-break: break-all;">' + path.basename(dk) + '</div>' +
+            '<div style="color: #94a3b8; font-size: 0.7rem; margin-top: 2px;">Gereken Güncelleme: <span style="color: #f59e0b;">' + reqs + '</span> (§6 Same-Commit)</div>' +
+            '</div>';
+        }
+      }
+      obligationsHtml +=
+        '<div style="margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.04); border-radius: 6px; font-size: 0.7rem; color: #94a3b8; display: flex; justify-content: space-between;">' +
+        '<span>Oturum Stop Tekrarı:</span>' +
+        '<span style="font-weight: 800; color: ' + (stopRetries >= 4 ? '#ef4444' : '#38bdf8') + ';">' + stopRetries + ' / 5</span>' +
+        '</div>';
+    }
+
+    // --- TAB 3: Rules & Context HTML ---
+    let rulesHtml = '';
+    const docGovActive = projectCfg?.governance?.enforceDocObligations === true;
+    const layers = projectCfg?.layers || {};
+    const layerNames = Object.keys(layers);
+
+    rulesHtml +=
+      '<div style="background: #1e293b; padding: 12px; border-radius: 8px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.06);">' +
+      '<div style="font-size: 0.75rem; font-weight: 800; color: #38bdf8; margin-bottom: 6px;">📐 Proje Yapılandırması (.gravityguard.json)</div>' +
+      '<div style="font-size: 0.7rem; color: #cbd5e1; line-height: 1.6;">' +
+      '<div>• <b>Dokümantasyon Yükümlülüğü:</b> ' + (docGovActive ? '<span style="color: #10b981; font-weight: bold;">AKTİF (Opt-in)</span>' : '<span style="color: #94a3b8;">Devre Dışı</span>') + '</div>' +
+      '<div>• <b>Tek Seferde Satır Sınırı:</b> ' + (projectCfg?.complexity?.singleWriteLoc || 200) + ' satır (ARCH_FILE_GROWTH)</div>' +
+      '<div>• <b>Dosya Tavan Sınırı:</b> ' + (projectCfg?.complexity?.totalLoc || 500) + ' satır</div>' +
+      '<div>• <b>Test Kanıt Modu:</b> ' + (projectCfg?.testEvidence?.deferredMode !== false ? 'Ertelenebilir (Stop denetimi)' : 'Anında Uyarı') + '</div>' +
+      '</div>' +
+      '</div>';
+
+    if (layerNames.length > 0) {
+      rulesHtml +=
+        '<div style="background: #1e293b; padding: 12px; border-radius: 8px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.06);">' +
+        '<div style="font-size: 0.75rem; font-weight: 800; color: #a78bfa; margin-bottom: 6px;">🧱 Mimari Katman Sınırları (G4)</div>' +
+        '<div style="font-size: 0.7rem; color: #cbd5e1; line-height: 1.5;">';
+      for (const lyr of layerNames) {
+        const allowed = layers[lyr];
+        rulesHtml += '<div>• <code style="color: #38bdf8;">' + lyr + '</code> ➜ ' + (Array.isArray(allowed) && allowed.length ? allowed.join(', ') : '<i>yalnızca kendi katmanı</i>') + '</div>';
+      }
+      rulesHtml += '</div></div>';
+    }
+
+    rulesHtml +=
+      '<div style="background: #1e293b; padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">' +
+      '<div style="font-size: 0.75rem; font-weight: 800; color: #10b981; margin-bottom: 6px;">🛡️ Değişmez Güvenlik Kuralları</div>' +
+      '<div style="font-size: 0.7rem; color: #94a3b8; line-height: 1.5;">' +
+      '<div><b>G0:</b> Gizli anahtar / token sızıntısı engeli (HER text dosyası)</div>' +
+      '<div><b>G1:</b> Sessiz hata yutma yasağı (except pass / boş handler)</div>' +
+      '<div><b>G2:</b> Test bütünlüğü koruması (silme / assert zayıflatma engeli)</div>' +
+      '<div><b>G4:</b> Katmanlar arası ters import engeli</div>' +
+      '<div><b>T1/T2:</b> Test kanıtı ve gözlemlenebilir assertion şartı</div>' +
+      '</div>' +
+      '</div>';
+
     const statBoxBlocked = '<div class="stat-box"><div class="stat-val" style="color: #ef4444;">' + blockedCount + '</div><div class="stat-lbl">Engellenen</div></div>';
     const statBoxWarning = '<div class="stat-box"><div class="stat-val" style="color: #f59e0b;">' + warningCount + '</div><div class="stat-lbl">Uyarılar</div></div>';
     const statBoxApproved = '<div class="stat-box"><div class="stat-val" style="color: #10b981;">' + approvedCount + '</div><div class="stat-lbl">Onaylanan</div></div>';
@@ -480,36 +605,40 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       '<head>' +
       '<meta charset="UTF-8">' +
       '<style>' +
-      'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 14px; color: #f8fafc; background: #0f172a; margin: 0; }' +
-      '.header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 12px; }' +
+      'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 12px; color: #f8fafc; background: #0f172a; margin: 0; }' +
+      '.header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 10px; }' +
       '.title-box { display: flex; align-items: center; gap: 8px; }' +
-      '.title { font-size: 1rem; font-weight: 900; color: #38bdf8; letter-spacing: 0.5px; }' +
+      '.title { font-size: 0.95rem; font-weight: 900; color: #38bdf8; letter-spacing: 0.5px; }' +
       '.btn-group { display: flex; gap: 6px; }' +
-      '.action-btn { display: inline-flex; align-items: center; gap: 4px; background: rgba(255,255,255,0.08); color: #cbd5e1; border: 1px solid rgba(255,255,255,0.12); padding: 4px 10px; border-radius: 6px; font-size: 0.7rem; font-weight: 700; cursor: pointer; transition: all 0.2s; }' +
+      '.action-btn { display: inline-flex; align-items: center; gap: 4px; background: rgba(255,255,255,0.08); color: #cbd5e1; border: 1px solid rgba(255,255,255,0.12); padding: 3px 8px; border-radius: 6px; font-size: 0.68rem; font-weight: 700; cursor: pointer; transition: all 0.2s; }' +
       '.action-btn:hover { background: rgba(255,255,255,0.18); color: white; }' +
       '.action-btn.danger:hover { background: rgba(239, 68, 68, 0.25); color: #ef4444; border-color: rgba(239, 68, 68, 0.4); }' +
-      '.stat-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 16px; }' +
-      '.stat-box { background: #1e293b; padding: 8px 4px; border-radius: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.05); }' +
-      '.stat-val { font-size: 1.25rem; font-weight: 900; }' +
-      '.stat-lbl { font-size: 0.6rem; text-transform: uppercase; color: #94a3b8; margin-top: 2px; }' +
-      '.log-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }' +
-      '.log-title { font-size: 0.75rem; font-weight: 800; text-transform: uppercase; color: #94a3b8; letter-spacing: 0.5px; }' +
-      '.pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; display: inline-block; box-shadow: 0 0 8px #10b981; }' +
+      '.stat-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 12px; }' +
+      '.stat-box { background: #1e293b; padding: 6px 4px; border-radius: 6px; text-align: center; border: 1px solid rgba(255,255,255,0.05); }' +
+      '.stat-val { font-size: 1.15rem; font-weight: 900; }' +
+      '.stat-lbl { font-size: 0.58rem; text-transform: uppercase; color: #94a3b8; margin-top: 1px; }' +
+      '.tabs { display: flex; gap: 4px; margin-bottom: 12px; background: rgba(0,0,0,0.25); padding: 3px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06); }' +
+      '.tab-btn { flex: 1; padding: 6px 2px; font-size: 0.65rem; font-weight: 700; background: transparent; border: none; color: #94a3b8; border-radius: 6px; cursor: pointer; transition: all 0.15s; text-align: center; }' +
+      '.tab-btn.active { background: #38bdf8; color: #0f172a; font-weight: 800; box-shadow: 0 2px 6px rgba(56,189,248,0.3); }' +
+      '.tab-content { display: none; }' +
+      '.tab-content.active { display: block; }' +
+      '.badge-pill { font-size: 0.6rem; padding: 1px 5px; border-radius: 10px; background: rgba(239,68,68,0.3); color: #f87171; margin-left: 3px; }' +
+      '.pulse-dot { width: 7px; height: 7px; border-radius: 50%; background: #10b981; display: inline-block; box-shadow: 0 0 6px #10b981; }' +
       '</style>' +
       '</head>' +
       '<body>' +
       '<div class="header">' +
       '<div class="title-box">' +
-      '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' +
+      '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' +
       '<div class="title">GravityGuard</div>' +
       '</div>' +
       '<div class="btn-group">' +
       '<button class="action-btn" onclick="refresh()">' +
-      '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>' +
+      '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>' +
       'Yenile' +
       '</button>' +
       '<button class="action-btn danger" onclick="clearLogs()">' +
-      '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>' +
+      '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>' +
       'Temizle' +
       '</button>' +
       '</div>' +
@@ -519,13 +648,38 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       statBoxWarning +
       statBoxApproved +
       '</div>' +
-      '<div class="log-header">' +
-      '<div class="log-title">Canlı Güvenlik Akışı</div>' +
-      '<div style="display: flex; align-items: center; gap: 6px; font-size: 0.65rem; color: #10b981; font-weight: 800;"><span class="pulse-dot"></span> LIVE AUTO-SYNC</div>' +
+      '<div class="tabs">' +
+      '<button class="tab-btn active" id="btn-events" onclick="setTab(\'events\')">🛡️ Olaylar</button>' +
+      '<button class="tab-btn" id="btn-obligations" onclick="setTab(\'obligations\')">📋 Yükümlülükler' + (totalObligations > 0 ? '<span class="badge-pill">' + totalObligations + '</span>' : '') + '</button>' +
+      '<button class="tab-btn" id="btn-rules" onclick="setTab(\'rules\')">📐 Kurallar & Context</button>' +
       '</div>' +
-      '<div>' + eventsHtml + '</div>' +
+      '<div id="tab-events" class="tab-content active">' +
+      '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">' +
+      '<span style="font-size: 0.7rem; font-weight: 800; color: #94a3b8; text-transform: uppercase;">Canlı Akış</span>' +
+      '<span style="display: flex; align-items: center; gap: 4px; font-size: 0.6rem; color: #10b981; font-weight: 800;"><span class="pulse-dot"></span> CANLI AKTİF</span>' +
+      '</div>' +
+      eventsHtml +
+      '</div>' +
+      '<div id="tab-obligations" class="tab-content">' +
+      obligationsHtml +
+      '</div>' +
+      '<div id="tab-rules" class="tab-content">' +
+      rulesHtml +
+      '</div>' +
       '<script>' +
       'const vscode = acquireVsCodeApi();' +
+      'let currentTab = window._lastTab || "events";' +
+      'function setTab(tabName) {' +
+      '  currentTab = tabName;' +
+      '  window._lastTab = tabName;' +
+      '  document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));' +
+      '  document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));' +
+      '  const btn = document.getElementById("btn-" + tabName);' +
+      '  const content = document.getElementById("tab-" + tabName);' +
+      '  if (btn) btn.classList.add("active");' +
+      '  if (content) content.classList.add("active");' +
+      '}' +
+      'if (window._lastTab) { setTab(window._lastTab); }' +
       'function clearLogs() { vscode.postMessage({ command: "clearLogs" }); }' +
       'function refresh() { vscode.postMessage({ command: "refresh" }); }' +
       '</script>' +

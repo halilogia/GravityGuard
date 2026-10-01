@@ -45,6 +45,7 @@ PAIRS = [
     ("engine/async_runner.py", "scripts/async_runner.py", "Arka plan statik analiz calistiricisi"),
     ("plugin/hooks.json", "hooks.json", "Hook manifesti: hangi scripti cagiracagimizi yazar"),
     ("plugin/plugin.json", "plugin.json", "Plugin kimlik dosyasi"),
+    ("plugin/rules/gravityguard_invariants.md", "rules/gravityguard_invariants.md", "Mekanik invariant kural dosyasi"),
 ]
 
 PLUGIN_DIR = os.path.join(
@@ -106,12 +107,13 @@ def main() -> int:
             errors.append(repo_rel)
             continue
 
-        ok, msg = syntax_ok(src)
-        if not ok:
-            print("  HATA  : kaynakta Python sozdizimi bozuk -> %s" % msg)
-            errors.append(repo_rel)
-            continue
-        print("  sozdizimi: GECERLI")
+        if src.endswith(".py"):
+            ok, msg = syntax_ok(src)
+            if not ok:
+                print("  HATA  : kaynakta Python sozdizimi bozuk -> %s" % msg)
+                errors.append(repo_rel)
+                continue
+            print("  sozdizimi: GECERLI")
 
         if not os.path.isfile(dst):
             print("  durum : hedef YOK (ilk kurulum)")
@@ -167,6 +169,7 @@ def main() -> int:
             print("  yedek  : %s" % os.path.basename(bak))
 
         try:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
             shutil.copy2(src, dst)
         except OSError as exc:
             print("  HATA   : kopyalanamadi -> %s" % exc)

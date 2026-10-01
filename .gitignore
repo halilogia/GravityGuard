@@ -22,6 +22,7 @@ __pycache__/
 .env
 *.log
 *.tmp
+archives/audit-logs/*.jsonl
 .gravityguard/*
 !.gravityguard/CONTEXT.md
 

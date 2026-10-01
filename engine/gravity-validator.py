@@ -139,10 +139,7 @@ def log_event(action: str, status: str, target_file: str, reason: str, rule_id: 
             json.dump(current_data, f, indent=2, ensure_ascii=False)
 
         # Permanent Audit & Telemetry Archive (JSONL for product R&D and failure analysis)
-        repo_archive_dir = r"C:\Users\Halil Emre\Desktop\GitHub\Public\GravityGuard\archives\audit-logs"
-        permanent_log_path = os.path.join(repo_archive_dir, "gravityguard_permanent_audit.jsonl")
-        if not os.path.isdir(repo_archive_dir):
-            permanent_log_path = os.path.join(log_dir, "gravityguard_permanent_audit.jsonl")
+        permanent_log_path = os.path.join(log_dir, "gravityguard_permanent_audit.jsonl")
 
         proj_name, proj_root = extract_project_info(target_file)
         ext = os.path.splitext(target_file)[1].lower() if target_file else ""
@@ -580,28 +577,41 @@ def check_escape_hatch_tampering(added_text: str, old_full_content: str) -> Tupl
 
 
 # --- G4: IMPORT MATRIX (BLOCK) ---
-def load_gravityguard_config(target_file: str) -> Optional[dict]:
+def load_gravityguard_config(target_file: str = "", project_root: Optional[Path] = None) -> Optional[dict]:
     """Traverse upward looking for .gravityguard.json config."""
-    try:
-        p = Path(target_file)
-        current_dir = p if p.is_dir() else p.parent
-    except (ValueError, OSError):
-        current_dir = Path(os.getcwd())
-
-    for _ in range(6):  # up to 6 levels up
-        cfg_file = current_dir / ".gravityguard.json"
-        if cfg_file.is_file():
+    override_dir = os.environ.get("GRAVITYGUARD_LOG_DIR")
+    if override_dir:
+        cfg_override = Path(override_dir) / ".gravityguard.json"
+        if cfg_override.is_file():
             try:
-                with open(cfg_file, "r", encoding="utf-8") as f:
+                with open(cfg_override, "r", encoding="utf-8") as f:
                     return json.load(f)
             except (json.JSONDecodeError, IOError):
                 return None
-        if current_dir.parent == current_dir:
-            break
-        current_dir = current_dir.parent
 
-    # Check cwd as fallback
-    cwd_cfg = Path(os.getcwd()) / ".gravityguard.json"
+    if target_file:
+        try:
+            p = Path(target_file).resolve()
+            current_dir = p if p.is_dir() else p.parent
+        except (ValueError, OSError):
+            current_dir = Path.cwd()
+
+        for _ in range(10):  # up to 10 levels up
+            cfg_file = current_dir / ".gravityguard.json"
+            if cfg_file.is_file():
+                try:
+                    with open(cfg_file, "r", encoding="utf-8") as f:
+                        return json.load(f)
+                except (json.JSONDecodeError, IOError):
+                    return None
+            if current_dir.parent == current_dir:
+                break
+            current_dir = current_dir.parent
+        return None
+
+    # Check project_root or cwd as fallback only when no target_file was specified
+    root = project_root or Path.cwd()
+    cwd_cfg = root / ".gravityguard.json"
     if cwd_cfg.is_file():
         try:
             with open(cwd_cfg, "r", encoding="utf-8") as f:
@@ -1246,6 +1256,31 @@ def analyze_python_srp_regex_fallback(content: str, file_path: str = "") -> Tupl
 # 5.1 UNIFIED GOVERNANCE STATE ENGINE (v1.3.1 Layer 2 & Layer 3)
 # ============================================================================
 
+def resolve_project_root(payload: Optional[dict] = None, target_file: str = "") -> Path:
+    """
+    Resolves the actual project root for the active request.
+    1. If GRAVITYGUARD_LOG_DIR is set (e.g. testing), return it.
+    2. If target_file is provided, walk up to find .gravityguard.json or .git.
+    3. If payload contains workspacePaths, use the first workspace path.
+    4. Fallback to Path.cwd().
+    """
+    override_dir = os.environ.get("GRAVITYGUARD_LOG_DIR")
+    if override_dir:
+        return Path(override_dir)
+
+    if target_file:
+        _, proj_root_str = extract_project_info(target_file)
+        if proj_root_str:
+            return Path(proj_root_str)
+
+    if payload and isinstance(payload.get("workspacePaths"), list) and payload["workspacePaths"]:
+        first_ws = payload["workspacePaths"][0]
+        if first_ws:
+            return Path(first_ws)
+
+    return Path.cwd()
+
+
 def get_governance_file_path(project_root: Optional[Path] = None) -> Path:
     override_dir = os.environ.get("GRAVITYGUARD_LOG_DIR")
     if override_dir:
@@ -1274,9 +1309,12 @@ def get_test_evidence_file_path(project_root: Optional[Path] = None) -> Path:
     return runtime_dir / "test_evidence_state.json"
 
 
-def load_governance_state(project_root: Optional[Path] = None) -> Dict[str, Any]:
+def load_governance_state(
+    project_root: Optional[Path] = None,
+    conversation_id: Optional[str] = None
+) -> Dict[str, Any]:
     """
-    Loads unified governance state (tracking test_obligations and doc_obligations).
+    Loads unified governance state (tracking test_obligations, doc_obligations, and session stop_retries).
     Falls back gracefully to legacy test_evidence_state.json if governance.json does not exist.
     """
     path = get_governance_file_path(project_root)
@@ -1301,41 +1339,46 @@ def load_governance_state(project_root: Optional[Path] = None) -> Dict[str, Any]
                     data = {
                         "version": 2,
                         "test_obligations": {"pending": pending},
-                        "doc_obligations": {"pending": {}}
+                        "doc_obligations": {"pending": {}},
+                        "sessions": {}
                     }
         except (IOError, OSError, json.JSONDecodeError, ValueError):
             data = None
 
     if data is None or not isinstance(data, dict):
-        return {
+        data = {
             "version": 2,
             "test_obligations": {"pending": {}},
-            "doc_obligations": {"pending": {}}
+            "doc_obligations": {"pending": {}},
+            "sessions": {}
         }
 
-    # Ensure required structure
-    if "test_obligations" not in data or not isinstance(data["test_obligations"], dict):
-        data["test_obligations"] = {"pending": {}}
-    if "pending" not in data["test_obligations"] or not isinstance(data["test_obligations"]["pending"], dict):
-        data["test_obligations"]["pending"] = {}
+    data.setdefault("version", 2)
+    data.setdefault("sessions", {})
+    data.setdefault("test_obligations", {"pending": {}})
+    data.setdefault("doc_obligations", {"pending": {}})
 
-    if "doc_obligations" not in data or not isinstance(data["doc_obligations"], dict):
-        data["doc_obligations"] = {"pending": {}}
-    if "pending" not in data["doc_obligations"] or not isinstance(data["doc_obligations"]["pending"], dict):
-        data["doc_obligations"]["pending"] = {}
-
-    # Prune stale pending entries older than session TTL (3600s)
     now = time.time()
-    t_pending = data["test_obligations"]["pending"]
-    data["test_obligations"]["pending"] = {
-        k: v for k, v in t_pending.items()
-        if isinstance(v, dict) and (now - v.get("timestamp", now)) < 3600
-    }
-    d_pending = data["doc_obligations"]["pending"]
-    data["doc_obligations"]["pending"] = {
-        k: v for k, v in d_pending.items()
-        if isinstance(v, dict) and (now - v.get("timestamp", now)) < 3600
-    }
+    # Prune stale global pending
+    for cat in ("test_obligations", "doc_obligations"):
+        pending = data.get(cat, {}).get("pending", {})
+        if isinstance(pending, dict):
+            data[cat]["pending"] = {
+                k: v for k, v in pending.items()
+                if isinstance(v, dict) and (now - v.get("timestamp", now)) < 3600
+            }
+
+    # Prune stale session pending
+    for s_id, s_data in list(data["sessions"].items()):
+        if not isinstance(s_data, dict):
+            continue
+        for cat in ("test_obligations", "doc_obligations"):
+            pending = s_data.get(cat, {}).get("pending", {})
+            if isinstance(pending, dict):
+                s_data.setdefault(cat, {})["pending"] = {
+                    k: v for k, v in pending.items()
+                    if isinstance(v, dict) and (now - v.get("timestamp", now)) < 3600
+                }
 
     return data
 
@@ -1367,6 +1410,36 @@ def save_governance_state(state: Dict[str, Any], project_root: Optional[Path] = 
         return
 
 
+def get_session_stop_retries(project_root: Optional[Path] = None, conversation_id: Optional[str] = None) -> int:
+    state = load_governance_state(project_root)
+    cid = conversation_id or "default"
+    session = state.get("sessions", {}).get(cid, {})
+    return session.get("stop_retries", state.get("stop_retries", 0))
+
+
+def increment_session_stop_retries(project_root: Optional[Path] = None, conversation_id: Optional[str] = None) -> int:
+    state = load_governance_state(project_root)
+    cid = conversation_id or "default"
+    session = state.setdefault("sessions", {}).setdefault(cid, {
+        "stop_retries": 0,
+        "test_obligations": {"pending": {}},
+        "doc_obligations": {"pending": {}}
+    })
+    session["stop_retries"] = session.get("stop_retries", 0) + 1
+    state["stop_retries"] = session["stop_retries"]
+    save_governance_state(state, project_root)
+    return session["stop_retries"]
+
+
+def reset_session_stop_retries(project_root: Optional[Path] = None, conversation_id: Optional[str] = None) -> None:
+    state = load_governance_state(project_root)
+    cid = conversation_id or "default"
+    if cid in state.get("sessions", {}):
+        state["sessions"][cid]["stop_retries"] = 0
+    state["stop_retries"] = 0
+    save_governance_state(state, project_root)
+
+
 def load_test_evidence_state(project_root: Optional[Path] = None) -> Dict[str, Any]:
     gov = load_governance_state(project_root)
     return {"version": 1, "pending": gov.get("test_obligations", {}).get("pending", {})}
@@ -1383,20 +1456,28 @@ def record_pending_test_evidence(
     candidate_path: Optional[str],
     expected_name: str,
     reason: str,
-    project_root: Optional[Path] = None
+    project_root: Optional[Path] = None,
+    conversation_id: Optional[str] = None
 ) -> None:
     norm = target_file.replace("\\", "/")
     state = load_governance_state(project_root)
-    state.setdefault("test_obligations", {}).setdefault("pending", {})[norm] = {
+    entry = {
         "candidate_path": candidate_path.replace("\\", "/") if candidate_path else None,
         "expected_name": expected_name,
         "timestamp": time.time(),
         "reason": reason
     }
+    state.setdefault("test_obligations", {}).setdefault("pending", {})[norm] = entry
+    cid = conversation_id or "default"
+    state.setdefault("sessions", {}).setdefault(cid, {}).setdefault("test_obligations", {}).setdefault("pending", {})[norm] = entry
     save_governance_state(state, project_root)
 
 
-def resolve_pending_test_evidence(test_file: str, project_root: Optional[Path] = None) -> List[str]:
+def resolve_pending_test_evidence(
+    test_file: str,
+    project_root: Optional[Path] = None,
+    conversation_id: Optional[str] = None
+) -> List[str]:
     norm_test = test_file.replace("\\", "/").lower()
     test_path_obj = Path(norm_test)
     test_stem = test_path_obj.stem.lower()
@@ -1430,14 +1511,26 @@ def resolve_pending_test_evidence(test_file: str, project_root: Optional[Path] =
         if matched:
             resolved.append(prod_path)
             del pending[prod_path]
+            for s_id, s_data in state.get("sessions", {}).items():
+                s_pending = s_data.get("test_obligations", {}).get("pending", {})
+                if prod_path in s_pending:
+                    del s_pending[prod_path]
 
     if resolved:
+        reset_session_stop_retries(project_root, conversation_id)
         save_governance_state(state, project_root)
     return resolved
 
 
-def get_unresolved_test_evidence(project_root: Optional[Path] = None) -> Dict[str, Any]:
+def get_unresolved_test_evidence(
+    project_root: Optional[Path] = None,
+    conversation_id: Optional[str] = None
+) -> Dict[str, Any]:
     state = load_governance_state(project_root)
+    if conversation_id and conversation_id in state.get("sessions", {}):
+        sess_pending = state["sessions"][conversation_id].get("test_obligations", {}).get("pending", {})
+        if sess_pending:
+            return sess_pending
     return state.get("test_obligations", {}).get("pending", {})
 
 
@@ -1452,18 +1545,13 @@ def clear_test_evidence_state(project_root: Optional[Path] = None) -> None:
 def should_enforce_doc_obligations(target_file: str = "", cfg: Optional[dict] = None) -> bool:
     """
     Determines whether documentation obligations should be enforced for this target file.
-    Active if explicitly configured in .gravityguard.json, or if CHANGELOG.md exists
-    at the root of the project to which target_file belongs.
+    Strictly opt-in: Requires explicit configuration in .gravityguard.json:
+        {"governance": {"enforceDocObligations": true}}
     """
     if cfg and isinstance(cfg.get("governance"), dict):
         explicit = cfg["governance"].get("enforceDocObligations")
         if explicit is not None:
             return bool(explicit)
-    if target_file:
-        _, proj_root_str = extract_project_info(target_file)
-        if proj_root_str:
-            p_root = Path(proj_root_str)
-            return (p_root / "CHANGELOG.md").exists()
     return False
 
 
@@ -1513,7 +1601,8 @@ def record_pending_doc_obligation(
     target_file: str,
     required_docs: Optional[List[str]] = None,
     reason: Optional[str] = None,
-    project_root: Optional[Path] = None
+    project_root: Optional[Path] = None,
+    conversation_id: Optional[str] = None
 ) -> None:
     norm = target_file.replace("\\", "/")
     if required_docs is None:
@@ -1522,17 +1611,21 @@ def record_pending_doc_obligation(
         reason = f"Motor/kod dosyası değiştirildi ({norm}); docs/KNOWLEDGE.md §6 uyarınca {', '.join(required_docs)} güncellenmelidir."
 
     state = load_governance_state(project_root)
-    state.setdefault("doc_obligations", {}).setdefault("pending", {})[norm] = {
+    entry = {
         "required_docs": required_docs,
         "timestamp": time.time(),
         "reason": reason
     }
+    state.setdefault("doc_obligations", {}).setdefault("pending", {})[norm] = entry
+    cid = conversation_id or "default"
+    state.setdefault("sessions", {}).setdefault(cid, {}).setdefault("doc_obligations", {}).setdefault("pending", {})[norm] = entry
     save_governance_state(state, project_root)
 
 
 def resolve_pending_doc_obligations(
     doc_file: str,
-    project_root: Optional[Path] = None
+    project_root: Optional[Path] = None,
+    conversation_id: Optional[str] = None
 ) -> List[str]:
     norm_doc = doc_file.replace("\\", "/").lower()
     doc_name = Path(norm_doc).name
@@ -1548,16 +1641,28 @@ def resolve_pending_doc_obligations(
             if not remaining:
                 resolved.append(prod_path)
                 del pending[prod_path]
+                for s_id, s_data in state.get("sessions", {}).items():
+                    s_pending = s_data.get("doc_obligations", {}).get("pending", {})
+                    if prod_path in s_pending:
+                        del s_pending[prod_path]
             else:
                 entry["required_docs"] = remaining
 
     if resolved:
+        reset_session_stop_retries(project_root, conversation_id)
         save_governance_state(state, project_root)
     return resolved
 
 
-def get_unresolved_doc_obligations(project_root: Optional[Path] = None) -> Dict[str, Any]:
+def get_unresolved_doc_obligations(
+    project_root: Optional[Path] = None,
+    conversation_id: Optional[str] = None
+) -> Dict[str, Any]:
     state = load_governance_state(project_root)
+    if conversation_id and conversation_id in state.get("sessions", {}):
+        sess_pending = state["sessions"][conversation_id].get("doc_obligations", {}).get("pending", {})
+        if sess_pending:
+            return sess_pending
     return state.get("doc_obligations", {}).get("pending", {})
 
 
@@ -1571,7 +1676,8 @@ def clear_governance_state(project_root: Optional[Path] = None) -> None:
     save_governance_state({
         "version": 2,
         "test_obligations": {"pending": {}},
-        "doc_obligations": {"pending": {}}
+        "doc_obligations": {"pending": {}},
+        "sessions": {}
     }, project_root)
 
 
@@ -2044,21 +2150,26 @@ def evaluate_test_evidence(
     cfg: Optional[dict] = None,
     is_python: bool = True,
     is_ts: bool = False
-) -> List[Tuple[str, str]]:
+) -> Tuple[List[Tuple[str, str]], Dict[str, Any]]:
     """
     Evaluates Phase 2 Test Evidence rules (T1, T2, T3).
-    Returns a list of (rule_id, warning_message) tuples. Never blocks.
+    Returns (warnings, actions) where actions contains pending mutations to commit
+    upon all guards passing:
+      - "resolve_test": bool
+      - "record_test": Optional[Tuple[str, Optional[str], str, str]]
     """
     warnings = []
+    actions: Dict[str, Any] = {
+        "resolve_test": False,
+        "record_test": None
+    }
 
     if cfg and isinstance(cfg, dict):
         if not cfg.get("testEvidence", {}).get("enabled", True):
-            return warnings
+            return warnings, actions
 
     if is_test_file:
-        resolved = resolve_pending_test_evidence(target_file)
-        if resolved:
-            log_event("edit", "APPROVED", target_file, f"Resolved pending test evidence for: {', '.join(resolved)}", rule_id="T1_RESOLVED")
+        actions["resolve_test"] = True
 
         t2_warn, t2_msg = check_t2_observable_assertion(
             added_lines, added_text, is_python, is_ts,
@@ -2076,8 +2187,7 @@ def evaluate_test_evidence(
 
             if deferred:
                 candidate_p, expected_n = resolve_candidate_test_file(target_file, cfg)
-                record_pending_test_evidence(target_file, candidate_p, expected_n, t1_msg)
-                log_event("edit", "APPROVED", target_file, f"Pending test evidence recorded ({expected_n})", rule_id="T1_PENDING")
+                actions["record_test"] = (target_file, candidate_p, expected_n, t1_msg)
             else:
                 warnings.append(("T1_MISSING_RELATED_TEST", t1_msg))
 
@@ -2090,7 +2200,7 @@ def evaluate_test_evidence(
             if t3_warn:
                 warnings.append(("T3_SYMBOL_TO_TEST_LINK", t3_msg))
 
-    return warnings
+    return warnings, actions
 
 
 # ============================================================================
@@ -2119,15 +2229,55 @@ def validate_gravityguard():
             print(json.dumps({"decision": "allow"}))
             sys.exit(0)
 
-        # Circuit-breaker: If agent attempted stop > 5 times, avoid infinite trap
+        project_root = resolve_project_root(payload)
+        conversation_id = payload.get("conversationId", "default")
+
+        # Session retry circuit-breaker:
+        # Track actual stop retry count per conversation session in governance state
         exec_num = payload.get("executionNum", 1)
-        if isinstance(exec_num, int) and exec_num > 5:
-            log_event("stop", "WARNING", "workspace", "Circuit breaker triggered: executionNum > 5, allowing stop despite pending obligations", rule_id="STOP_CIRCUIT_BREAKER")
+        session_retries = get_session_stop_retries(project_root, conversation_id)
+        if session_retries >= 5 or (isinstance(exec_num, int) and exec_num > 5):
+            log_event("stop", "WARNING", "workspace", f"Circuit breaker triggered (retries={session_retries}, execNum={exec_num}): allowing stop despite obligations", rule_id="STOP_CIRCUIT_BREAKER")
+            reset_session_stop_retries(project_root, conversation_id)
             print(json.dumps({"decision": "allow"}))
             sys.exit(0)
 
-        unresolved_tests = get_unresolved_test_evidence()
-        unresolved_docs = get_unresolved_doc_obligations()
+        # Physical disk verification for pending doc obligations
+        pending_docs = get_unresolved_doc_obligations(project_root, conversation_id)
+        for prod_file, doc_info in list(pending_docs.items()):
+            req_docs = doc_info.get("required_docs", ["CHANGELOG.md"])
+            ts = doc_info.get("timestamp", 0)
+            all_satisfied = True
+            for req in req_docs:
+                doc_path = project_root / req
+                if not doc_path.is_file():
+                    all_satisfied = False
+                    break
+                try:
+                    if doc_path.stat().st_mtime < (ts - 5):
+                        all_satisfied = False
+                        break
+                except OSError:
+                    all_satisfied = False
+                    break
+            if all_satisfied and req_docs:
+                resolve_pending_doc_obligations(req_docs[0], project_root, conversation_id)
+
+        # Physical disk verification for pending test obligations
+        pending_tests = get_unresolved_test_evidence(project_root, conversation_id)
+        for prod_file, test_info in list(pending_tests.items()):
+            candidate = test_info.get("candidate_path")
+            ts = test_info.get("timestamp", 0)
+            if candidate and os.path.isfile(candidate):
+                try:
+                    if os.path.getmtime(candidate) >= (ts - 5):
+                        resolve_pending_test_evidence(candidate, project_root, conversation_id)
+                except OSError:
+                    # Ignore unreadable test file mtime and continue verification
+                    continue
+
+        unresolved_tests = get_unresolved_test_evidence(project_root, conversation_id)
+        unresolved_docs = get_unresolved_doc_obligations(project_root, conversation_id)
 
         warn_reasons = []
         if unresolved_tests:
@@ -2143,10 +2293,11 @@ def validate_gravityguard():
             warn_reasons.append(doc_warn)
 
         if warn_reasons:
+            increment_session_stop_retries(project_root, conversation_id)
             full_reason = " | ".join(warn_reasons)
-            # In Antigravity Stop hook contract, decision="continue" actively prevents agent from ending session
             print(json.dumps({"decision": "continue", "reason": full_reason}))
         else:
+            reset_session_stop_retries(project_root, conversation_id)
             print(json.dumps({"decision": "allow"}))
         sys.exit(0)
 
@@ -2197,11 +2348,12 @@ def validate_gravityguard():
 
     all_warnings: List[Tuple[str, str]] = []
 
-    # Check if a documentation file is being edited/written -> resolve pending doc obligations
+    # Check if a documentation file is being edited/written -> defer doc resolution until G0 passes
+    should_resolve_doc = False
     if target_file and is_data_or_doc:
         norm_target = target_file.replace("\\", "/").lower()
         if norm_target.endswith(("changelog.md", "knowledge.md", "architecture.md", "readme.md")):
-            resolve_pending_doc_obligations(target_file)
+            should_resolve_doc = True
 
     # Loaded once, before the first rule that consults it, and reused by both the
     # complexity heuristics and the test evidence rules further down. The
@@ -2228,6 +2380,10 @@ def validate_gravityguard():
 
     # Fast-pass for vendor, cache, and non-code text assets (ONLY AFTER G0 IS CLEAN)
     if is_vendor_or_cache or (is_data_or_doc and not file_lower.endswith((".py", ".ts", ".tsx", ".js", ".jsx"))):
+        if should_resolve_doc:
+            p_root = resolve_project_root(payload, target_file)
+            c_id = payload.get("conversationId", "default")
+            resolve_pending_doc_obligations(target_file, p_root, c_id)
         if target_file:
             log_event(tool_name, "APPROVED", target_file, "Exempt file (Vendor/Cache/Asset)", rule_id="EXEMPT")
         if all_warnings:
@@ -2367,7 +2523,7 @@ def validate_gravityguard():
     # ========================================================================
     # GUARD 8: PHASE 2 TEST EVIDENCE AIRBAG (T1, T2, T3) — WARN ONLY
     # ========================================================================
-    test_evidence_warnings = evaluate_test_evidence(
+    test_evidence_warnings, test_actions = evaluate_test_evidence(
         target_file=target_file,
         is_test_file=is_test_file,
         added_lines=added_lines,
@@ -2382,9 +2538,10 @@ def validate_gravityguard():
         log_event(tool_name, "WARNING", target_file, warn_msg, rule_id=rule_id)
         all_warnings.append((rule_id, warn_msg))
 
-    # Record doc obligation if production/engine code is changed and doc governance is enabled
+    # Stage doc obligation if production/engine code is changed and doc governance is enabled
+    pending_doc_record = None
     if should_enforce_doc_obligations(target_file, cfg=cfg) and is_doc_governed_target(target_file, cfg):
-        record_pending_doc_obligation(target_file)
+        pending_doc_record = target_file
 
     # ========================================================================
     # GUARD 9: STATIC LINTER & COMPILER DIAGNOSTIC FEEDBACK (WARN ONLY)
@@ -2396,7 +2553,27 @@ def validate_gravityguard():
 
     # ========================================================================
     # PASS / APPROVED
+    # Two-phase commit: All guards passed. Commit pending governance transitions!
     # ========================================================================
+    project_root = resolve_project_root(payload, target_file)
+    conversation_id = payload.get("conversationId", "default")
+
+    if should_resolve_doc:
+        resolve_pending_doc_obligations(target_file, project_root, conversation_id)
+
+    if test_actions.get("resolve_test"):
+        resolved = resolve_pending_test_evidence(target_file, project_root, conversation_id)
+        if resolved:
+            log_event(tool_name, "APPROVED", target_file, f"Resolved pending test evidence for: {', '.join(resolved)}", rule_id="T1_RESOLVED")
+
+    if test_actions.get("record_test"):
+        tf, cp, en, msg = test_actions["record_test"]
+        record_pending_test_evidence(tf, cp, en, msg, project_root, conversation_id)
+        log_event(tool_name, "APPROVED", tf, f"Pending test evidence recorded ({en})", rule_id="T1_PENDING")
+
+    if pending_doc_record:
+        record_pending_doc_obligation(pending_doc_record, project_root=project_root, conversation_id=conversation_id)
+
     elapsed_ms = (time.perf_counter() - start_time) * 1000
     log_event(tool_name, "APPROVED", target_file, f"All Guards Passed ({elapsed_ms:.1f}ms)", rule_id="PASS")
     res_payload = {"decision": "allow"}

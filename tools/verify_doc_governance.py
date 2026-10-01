@@ -61,16 +61,41 @@ def is_governed_code_file(path_str: str) -> bool:
     return any(g in parts for g in governed_roots)
 
 
+def has_substantive_changes(file_path: str, staged_only: bool = True) -> bool:
+    """
+    Checks if diff contains actual executable code modifications,
+    ignoring comments-only and blank-line-only edits.
+    """
+    try:
+        cmd = ["git", "diff", "--cached" if staged_only else "HEAD", "-U0", "--", file_path]
+        out = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
+        changed_lines = [
+            line[1:].strip()
+            for line in out.splitlines()
+            if (line.startswith("+") and not line.startswith("+++")) or (line.startswith("-") and not line.startswith("---"))
+        ]
+        substantive = [
+            l for l in changed_lines
+            if l and not l.startswith(("#", "//", "/*", "*", "'''", '"""'))
+        ]
+        return len(substantive) > 0
+    except Exception:
+        return True
+
+
 def verify_doc_governance(staged_only: bool = True) -> Tuple[bool, List[str]]:
     files = get_staged_files() if staged_only else (get_staged_files() or get_working_tree_files())
     if not files:
         return True, ["Staged veya değiştirilmiş dosya bulunamadı; denetim temiz."]
 
     git_root = get_git_root()
-    staged_code_files = [f for f in files if is_governed_code_file(f)]
+    staged_code_files = [
+        f for f in files
+        if is_governed_code_file(f) and has_substantive_changes(f, staged_only=staged_only)
+    ]
     
     if not staged_code_files:
-        return True, ["Staged dosyalar arasında motor veya davranış kodu bulunamadı; dokümantasyon zorunluluğu yok."]
+        return True, ["Staged dosyalar arasında motor veya davranış kodu değişikliği bulunamadı; dokümantasyon zorunluluğu yok."]
 
     # Check if CHANGELOG.md is among the staged/changed files
     has_changelog = any(f.lower().endswith("changelog.md") for f in files)

@@ -1,0 +1,13 @@
+#!/bin/sh
+# GravityGuard Pre-Commit Hook (docs/KNOWLEDGE.md §6)
+# Ensures CHANGELOG.md is updated when substantive engine/rules code is modified.
+
+python tools/verify_doc_governance.py
+exit_code=$?
+
+if [ $exit_code -ne 0 ]; then
+    echo "❌ [PRE-COMMIT] Doc governance check failed. Please resolve obligations before committing."
+    exit 1
+fi
+
+exit 0

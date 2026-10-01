@@ -57,5 +57,8 @@ jobs:
       # Quoted because an unquoted value containing ": " is a YAML mapping, not a
       # string. A step label edit broke the whole workflow for two pushes; CI
       # caught it in 0 seconds, which is the only reason it was noticed at all.
-      - name: "Engine tests (125: guards, schema contract, perf invariants)"
+      - name: "Engine tests (139+: guards, schema contract, perf invariants)"
         run: npm run test:engine
+
+      - name: "Doc governance check (§6 Same-Commit rule)"
+        run: python tools/verify_doc_governance.py --all

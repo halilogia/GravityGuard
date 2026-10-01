@@ -19,16 +19,27 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 
 def resolve_permanent_log_path() -> str:
-    """Finds the permanent audit JSONL file."""
-    repo_archive = Path(r"C:\Users\Halil Emre\Desktop\GitHub\Public\GravityGuard\archives\audit-logs\gravityguard_permanent_audit.jsonl")
-    if repo_archive.is_file():
-        return str(repo_archive)
+    """Finds the permanent audit JSONL file dynamically."""
+    override = os.environ.get("GRAVITYGUARD_LOG_DIR", "").strip()
+    if override:
+        p = Path(override) / "gravityguard_permanent_audit.jsonl"
+        if p.is_file():
+            return str(p)
 
-    user_log = Path(os.path.expanduser(r"~/.gemini/logs\gravityguard_permanent_audit.jsonl"))
+    user_sub = Path(os.path.expanduser("~/.gemini/logs/gravityguard/gravityguard_permanent_audit.jsonl"))
+    if user_sub.is_file():
+        return str(user_sub)
+
+    user_log = Path(os.path.expanduser("~/.gemini/logs/gravityguard_permanent_audit.jsonl"))
     if user_log.is_file():
         return str(user_log)
 
-    return str(repo_archive)
+    # Relative to this script's repository root
+    repo_archive = Path(__file__).resolve().parent.parent / "archives" / "audit-logs" / "gravityguard_permanent_audit.jsonl"
+    if repo_archive.is_file():
+        return str(repo_archive)
+
+    return str(user_log)
 
 
 def load_telemetry_events(log_path: str):
@@ -149,83 +160,106 @@ def render_rule_candidates(events):
         print("=" * 80)
         return
 
+    total_events = len(events)
+    total_violations = len(violations)
     rule_counter = Counter(e.get("ruleId") for e in violations)
     rule_targets = defaultdict(list)
+    rule_sessions = defaultdict(set)
     for e in violations:
         r_id = e.get("ruleId", "UNKNOWN")
         target = os.path.basename(e.get("target", "bilinmeyen"))
         rule_targets[r_id].append(target)
+        sid = e.get("conversationId") or e.get("session_id") or "sess_default"
+        rule_sessions[r_id].add(sid)
 
+    MIN_THRESHOLD = 3
     candidates = []
 
     # 1. G4 Import Matrix Analysis
     g4_count = rule_counter.get("G4_IMPORT_MATRIX", 0)
-    if g4_count > 0:
+    if g4_count >= MIN_THRESHOLD:
         targets = Counter(rule_targets["G4_IMPORT_MATRIX"]).most_common(3)
+        sessions = rule_sessions["G4_IMPORT_MATRIX"]
         candidates.append({
             "id": "CAND-G4-BOUNDARY-REFINEMENT",
             "rule": "G4_IMPORT_MATRIX",
             "count": g4_count,
+            "rate": (g4_count / total_violations) * 100 if total_violations else 0,
+            "session_count": len(sessions),
             "targets": [t[0] for t in targets],
-            "diagnosis": "Ajanın belirli katmanlar arasında sıkça sınır ihlali yaptığı gözlemlendi.",
+            "diagnosis": f"Ajanın katmanlar arası sınır ihlali yaptığı gözlemlendi ({len(sessions)} farklı oturumda).",
             "recommendation": ".gravityguard.json içerisindeki 'layers' matrisini gözden geçirin veya ilgili modülü paylaşılan (shared) katmana taşıyın."
         })
 
     # 2. T1 Test Evidence Analysis
     t1_count = rule_counter.get("T1_MISSING_RELATED_TEST", 0) + rule_counter.get("T1_FINAL_UNRESOLVED", 0)
-    if t1_count > 0:
+    if t1_count >= MIN_THRESHOLD:
         targets = Counter(rule_targets.get("T1_MISSING_RELATED_TEST", []) + rule_targets.get("T1_FINAL_UNRESOLVED", [])).most_common(3)
+        t1_sess = rule_sessions["T1_MISSING_RELATED_TEST"] | rule_sessions["T1_FINAL_UNRESOLVED"]
         candidates.append({
             "id": "CAND-T1-EXEMPTION-EXPANSION",
             "rule": "T1_MISSING_RELATED_TEST",
             "count": t1_count,
+            "rate": (t1_count / total_violations) * 100 if total_violations else 0,
+            "session_count": len(t1_sess),
             "targets": [t[0] for t in targets],
-            "diagnosis": "Belirli üretim dosyaları için eşleşen test dosyası bulunamadı veya oturum sonuna kadar eklenmedi.",
+            "diagnosis": f"Üretim dosyaları için test dosyası bulunamadı ({len(t1_sess)} oturumda tekrarlandı).",
             "recommendation": "Bu dosyalar konfigürasyon/şema niteliğindeyse 'exemptPatterns' listesine ekleyin; iş mantığı içeriyorsa test süitine dahil edin."
         })
 
     # 3. Growth / Monolith Analysis
     growth_count = rule_counter.get("ARCH_FILE_GROWTH", 0)
-    if growth_count > 0:
+    if growth_count >= MIN_THRESHOLD:
         targets = Counter(rule_targets["ARCH_FILE_GROWTH"]).most_common(3)
+        g_sess = rule_sessions["ARCH_FILE_GROWTH"]
         candidates.append({
             "id": "CAND-SRP-MODULARIZATION",
             "rule": "ARCH_FILE_GROWTH",
             "count": growth_count,
+            "rate": (growth_count / total_violations) * 100 if total_violations else 0,
+            "session_count": len(g_sess),
             "targets": [t[0] for t in targets],
-            "diagnosis": "Mevcut dosyalara tek seferde 180+ satır ekleme veya kümülatif büyüme uyarıları alındı.",
+            "diagnosis": f"Tek seferde 200+ satır ekleme veya kümülatif büyüme uyarıları alındı ({len(g_sess)} oturum).",
             "recommendation": "Dosyayı srp-modularizer ile alt bileşenlere ayırın ya da bilinçli bir büyüme ise 'srp: allow-monolith' etiketi ekleyin."
         })
 
     # 4. G1 Silent Exception Analysis
     g1_count = rule_counter.get("G1_SILENT_EXCEPTION", 0)
-    if g1_count > 0:
+    if g1_count >= MIN_THRESHOLD:
         targets = Counter(rule_targets["G1_SILENT_EXCEPTION"]).most_common(3)
+        g1_sess = rule_sessions["G1_SILENT_EXCEPTION"]
         candidates.append({
             "id": "CAND-G1-EXCEPTION-STANDARDS",
             "rule": "G1_SILENT_EXCEPTION",
             "count": g1_count,
+            "rate": (g1_count / total_violations) * 100 if total_violations else 0,
+            "session_count": len(g1_sess),
             "targets": [t[0] for t in targets],
-            "diagnosis": "Ajanın sessiz hata yutma (except: pass / catch {}) teşebbüsleri engellendi.",
+            "diagnosis": f"Ajanın sessiz hata yutma (except: pass / catch {{}}) teşebbüsleri engellendi ({len(g1_sess)} oturum).",
             "recommendation": "Ajan promptunda hata yakalama disiplinini (#kodla direktifi) vurgulayın veya loglama zorunluluğu getirin."
         })
 
     # 5. G2 Tampering Analysis
     g2_count = rule_counter.get("G2_SECURITY_TAMPERING", 0) + rule_counter.get("G2_TEST_INTEGRITY", 0)
-    if g2_count > 0:
+    if g2_count >= MIN_THRESHOLD:
+        g2_sess = rule_sessions["G2_SECURITY_TAMPERING"] | rule_sessions["G2_TEST_INTEGRITY"]
         candidates.append({
             "id": "CAND-G2-TAMPERING-ALERT",
             "rule": "G2_SECURITY_TAMPERING",
             "count": g2_count,
+            "rate": (g2_count / total_violations) * 100 if total_violations else 0,
+            "session_count": len(g2_sess),
             "targets": [t[0] for t in Counter(rule_targets.get("G2_SECURITY_TAMPERING", []) + rule_targets.get("G2_TEST_INTEGRITY", [])).most_common(3)],
-            "diagnosis": "Test silme, test atlatma veya yapay escape-hatch enjeksiyon denemesi tespit edildi.",
+            "diagnosis": f"Test silme, test atlatma veya escape-hatch enjeksiyon denemesi tespit edildi ({len(g2_sess)} oturum).",
             "recommendation": "Kural atlatma denemelerine karşı red-teaming denetimini sıkılaştırın ve prompt kurallarını güncelleyin."
         })
 
-    print(f"\n📋 BULUNAN KURAL ADAYLARI ({len(candidates)} Öneri)")
+    print(f"\n📋 BULUNAN KURAL ADAYLARI ({len(candidates)} Öneri - Eşik: >= {MIN_THRESHOLD} ihlal)")
     print("-" * 80)
+    if not candidates:
+        print(f"   [i] Hiçbir kural ihlali belirlenen eşiği (>={MIN_THRESHOLD}) aşmadı. Sistem stabil.")
     for c in candidates:
-        print(f"\n🔹 [{c['id']}] (Tetiklenme: {c['count']} kez | Kural: {c['rule']})")
+        print(f"\n🔹 [{c['id']}] (Tetiklenme: {c['count']} kez | İhlal Oranı: %{c['rate']:.1f} | {c['session_count']} oturum)")
         print(f"   Etkilenen Dosyalar : {', '.join(c['targets'])}")
         print(f"   Teşhis             : {c['diagnosis']}")
         print(f"   Önerilen Aksiyon   : {c['recommendation']}")

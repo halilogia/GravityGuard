@@ -393,7 +393,6 @@ class TestGravityGuardPhase1(unittest.TestCase):
         add a second channel shows up as a test failure rather than as protojson
         discarding the whole response in production (the v1.2.5 failure mode).
         """
-        from test_gravity_validator import SCHEMA_ALLOWED_KEYS
         self.assertEqual(
             SCHEMA_ALLOWED_KEYS,
             {"decision", "reason", "permissionOverrides", "overwrite"},
@@ -3631,6 +3630,105 @@ class TestObligationGovernance(unittest.TestCase):
             gov_data = json.load(f)
         self.assertIn("doc_obligations", gov_data)
         self.assertIn("test_obligations", gov_data)
+
+    def test_two_phase_commit_denied_doc_edit_does_not_resolve_obligation(self):
+        """When an edit to CHANGELOG.md is blocked (e.g. G0 secret leak), the obligation remains unfulfilled"""
+        cfg_path = os.path.join(self.temp_dir, ".gravityguard.json")
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump({"governance": {"enforceDocObligations": True}}, f)
+
+        src_file = os.path.join(self.temp_dir, "engine", "core.py")
+        os.makedirs(os.path.dirname(src_file), exist_ok=True)
+        run_validator({
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {"TargetFile": src_file, "CodeContent": "def core(): pass\n"}
+            }
+        })
+
+        # Attempt to update CHANGELOG.md but leak a secret (G0 violation)
+        changelog = os.path.join(self.temp_dir, "CHANGELOG.md")
+        secret = "ghp_" + "12345678901234567890"
+        bad_edit_res, _ = run_validator({
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {"TargetFile": changelog, "CodeContent": f"Token: {secret}\n"}
+            }
+        })
+        self.assertEqual(bad_edit_res.get("decision"), "deny")
+
+        # Stop hook must STILL hold the doc obligation open because the edit was blocked
+        stop_res, _ = run_validator({"terminationReason": "model_stop"})
+        self.assertEqual(stop_res.get("decision"), "continue")
+        self.assertIn("Dokümantasyon Yükümlülüğü", stop_res.get("reason", ""))
+
+    def test_two_phase_commit_denied_prod_edit_does_not_record_test_obligation(self):
+        """When an edit to production code is blocked (e.g. G1 silent exception), no test obligation is created"""
+        src_file = os.path.join(self.temp_dir, "src", "bad_worker.py")
+        os.makedirs(os.path.dirname(src_file), exist_ok=True)
+
+        bad_edit_res, _ = run_validator({
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": src_file,
+                    "CodeContent": "def work():\n    try:\n        do_work()\n    except:\n        pass\n"
+                }
+            }
+        })
+        self.assertEqual(bad_edit_res.get("decision"), "deny")
+
+        # Stop hook must NOT have pending test for bad_worker.py because the edit was rejected
+        stop_res, _ = run_validator({"terminationReason": "model_stop"})
+        self.assertEqual(stop_res.get("decision"), "allow")
+
+    def test_stop_hook_auto_resolves_when_doc_physically_updated_on_disk(self):
+        """When CHANGELOG.md is physically present and updated on disk, Stop hook verifies and auto-resolves"""
+        cfg_path = os.path.join(self.temp_dir, ".gravityguard.json")
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump({"governance": {"enforceDocObligations": True}}, f)
+
+        src_file = os.path.join(self.temp_dir, "engine", "physical.py")
+        os.makedirs(os.path.dirname(src_file), exist_ok=True)
+        run_validator({
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {"TargetFile": src_file, "CodeContent": "def physical_test(): return 1\n"}
+            }
+        })
+
+        # Physical disk write directly without hook call
+        changelog = os.path.join(self.temp_dir, "CHANGELOG.md")
+        time.sleep(0.05)
+        with open(changelog, "w", encoding="utf-8") as f:
+            f.write("# Changelog\n- Added physical.py\n")
+
+        stop_res, _ = run_validator({"terminationReason": "model_stop"})
+        self.assertEqual(stop_res.get("decision"), "allow")
+
+    def test_session_retries_circuit_breaker(self):
+        """Session-scoped stop retries counter triggers circuit breaker at retry >= 5"""
+        cfg_path = os.path.join(self.temp_dir, ".gravityguard.json")
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump({"governance": {"enforceDocObligations": True}}, f)
+
+        src_file = os.path.join(self.temp_dir, "engine", "stub.py")
+        os.makedirs(os.path.dirname(src_file), exist_ok=True)
+        run_validator({
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {"TargetFile": src_file, "CodeContent": "def stub(): pass\n"}
+            }
+        })
+
+        # 5 retries return continue
+        for attempt in range(5):
+            res, _ = run_validator({"terminationReason": "model_stop", "conversationId": "circ-test-sess"})
+            self.assertEqual(res.get("decision"), "continue", f"Attempt {attempt + 1} must continue")
+
+        # After 5 retries, 6th attempt hits circuit breaker
+        final_res, _ = run_validator({"terminationReason": "model_stop", "conversationId": "circ-test-sess"})
+        self.assertEqual(final_res.get("decision"), "allow", "6th attempt must trigger circuit breaker")
 
 
 if __name__ == "__main__":

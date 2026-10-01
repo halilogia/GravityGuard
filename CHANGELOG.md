@@ -7,10 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-> Borç kapatma turu. Yeni sürüm davranışı değiştirmiyor: sınıflandırıcının
-> doğruluğu artıyor, CI geliyor, iki belirsizlik karara bağlanıyor.
+## [1.3.1] - 2026-10-02
+
+> **Doğruluk (Correctness) ve Mimari Olgunlaşma Sürümü.** İki fazlı commit modeliyle
+> erken yükümlülük düşmesi (premature resolution) giderildi, proje root izolasyonu sağlandı,
+> Stop hook fiziksel disk doğrulaması kazandı ve eklenti arayüzüne çok sekmeli (Olaylar /
+> Yükümlülükler / Kurallar & Context) canlı görünüm eklendi.
 
 ### Fixed
+- **İki Fazlı Durum Taahhüdü (Two-Phase State Commit)**: PreToolUse sırasında yükümlülüklerin erken çözülmesi veya henüz onaylanmamış işlemler için yükümlülük kaydedilmesi engellendi. G0 (gizli anahtar), G1 (sessiz hata) veya G4 (katman) ihlali nedeniyle reddedilen (`deny`) bir yazma çağrısı artık `governance.json` durumunu kirletemez. Değişiklikler yalnızca tüm guardlar onay verdiğinde (`allow`) diske yazılır.
+- **Proje Kökü ve Çalışma Alanı İzolasyonu (Project Scoping)**: Antigravity hook çağrılarında çalışma dizini (`cwd`) eklenti dizinine ayarlandığından `Path.cwd()` kullanımı çoklu çalışma alanlarında durumu bozuyordu. Proje kökü artık öncelikle payload içerisindeki `workspacePaths`, ardından hedef dosyanın yukarı doğru aranmasıyla deterministik olarak çözülüyor.
+- **Oturum Bazlı Devre Kesici (Session-Scoped Circuit Breaker)**: `executionNum > 5` varsayımı (araç çağrı sıra numarası) düzeltildi. Ajanın Stop talepleri her `conversationId` bazında `governance.json` içerisinde ayrı bir sayaç olarak tutulur ve 5 ardışık devam (`continue`) cevabından sonra devre kesici devreye girerek sonsuz döngüyü önler.
+- **Sessiz Yapılandırma Taşması (Config Bleed)**: `.gravityguard.json` arayıcısı, harici veya geçici dizinlerdeki dosyalar için çalışma dizini fallback'ini devre dışı bırakarak bağımsız test ve projelerin birbirinin kurallarını devralmasını engelledi.
+
+### Added
+- **Stop Hook Fiziksel Disk Doğrulaması**: Ajan oturumu bitirirken, `CHANGELOG.md` veya beklenen test dosyasının disk üzerinde fiziksel olarak oluşturulup güncellendiği (`mtime` kontrolü) tespit edilirse yükümlülük Stop anında otomatik çözülür.
+- **Opt-in Dokümantasyon Yönetişimi**: §6 Same-Commit dokümantasyon kuralı yalnızca projenin `.gravityguard.json` dosyasında açıkça `{"governance": {"enforceDocObligations": true}}` ayarlandığında aktifleştirilir.
+- **Takip Edilen Git Hook'ları & CI Entegrasyonu**: `.githooks/pre-commit` ve platformlar arası `tools/install_hooks.py` oluşturuldu. `tools/verify_doc_governance.py` aracına yorum/boşluk filtreli semantik diff kontrolü eklendi; GitHub Actions CI iş akışına dokümantasyon yönetişimi adımı dahil edildi.
+- **Mekanik Kural Enjeksiyonu (Plugin Rules)**: Antigravity'nin ajan sistem promptuna otomatik enjekte ettiği `plugin/rules/gravityguard_invariants.md` (`always_on: true`) kuralı eklendi. Ajan oturum başında G0-G4, SRP ve §6 kurallarını mekanik olarak bağlamında görür.
+- **Çok Sekmeli VS Code / Antigravity Eklenti Arayüzü**: `src/extension.ts` içerisindeki `GuardianViewProvider` yenilendi:
+  - `[🛡️ Olaylar]`: Canlı engelleme, uyarı ve onay akışı.
+  - `[📋 Yükümlülükler]`: `governance.json` üzerinden canlı bekleyen test ve dokümantasyon listesi ile devre kesici sayacı.
+  - `[📐 Kurallar & Context]`: `.gravityguard.json` katmanları, SRP sınırları, opt-in yönetişim durumu ve güvenlik değişmezleri özeti.
+- **Öğrenme Defteri (Learning Ledger) İyileştirmesi**: `tools/telemetry_dashboard.py --candidates` çıktısına minimum 3 ihlal eşiği, farklı oturum çeşitliliği ve ihlal yüzdesi oranı hesaplaması eklendi.
+- **Test Kapsamı**: 143 Python unit testi + 20 TypeScript testi = **Toplam 163 test**, %100 başarılı.
 - **`\p{L}` in a `new RegExp` string collapsed to the letter "p", silently disabling the Turkish word guard.** `tr()` builds its pattern as a *string*, where an unescaped `\p` is an identity escape; the resulting regex read `[^p{L}]` — "any character except p, {, L or }" — so the "must follow a non-letter" guard matched *inside* ordinary words. Consequences found by the new corpus: "ölçeklenir" contains "ekle", so `implement:tr-add` fired on a scaling question; "eksileri" contains "sil", so `implement:tr-delete` fired on a pros/cons question. Fixed with `\\p{L}`, and the reason is now documented at the function, because this is a bug that recompiles silently and looks like a data problem.
 - **The same word could fire two patterns of the same mode, doubling its weight.** `dead code|unused|technical debt` appeared in both the Turkish and the English smell patterns, so one English "unused" scored 6 instead of 3 — enough to outrank a build order. The two lists are now disjoint.
 - **A question mark outweighed a semantic signal.** `?` and the Turkish `mı/mi/mu/mü` particle each scored 2, and the question mark was also matched by the trailing-particle pattern, so a single "?" could score 4 — more than "kalitesi nasıl, risk var mı?" needed to be recognised as an audit request. Question marks are syntactic, not semantic: they say a request is a question, never *which* kind. Both now score 1, and the ordering rule is written down: **specific beats generic** — a build verb or audit verb (4) outranks a question (1–2), and a named assessment topic (5) outranks both.
