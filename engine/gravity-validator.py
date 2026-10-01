@@ -1268,15 +1268,23 @@ def resolve_project_root(payload: Optional[dict] = None, target_file: str = "") 
     if override_dir:
         return Path(override_dir)
 
-    if target_file:
-        _, proj_root_str = extract_project_info(target_file)
-        if proj_root_str:
-            return Path(proj_root_str)
-
     if payload and isinstance(payload.get("workspacePaths"), list) and payload["workspacePaths"]:
         first_ws = payload["workspacePaths"][0]
         if first_ws:
             return Path(first_ws)
+
+    if target_file:
+        try:
+            p = Path(os.path.abspath(target_file))
+            curr = p.parent
+            for _ in range(8):
+                if (curr / ".gravityguard.json").exists() or (curr / ".git").exists():
+                    return curr
+                if curr.parent == curr:
+                    break
+                curr = curr.parent
+        except (IOError, OSError, ValueError):
+            return Path.cwd()
 
     return Path.cwd()
 
@@ -1373,12 +1381,13 @@ def load_governance_state(
         if not isinstance(s_data, dict):
             continue
         for cat in ("test_obligations", "doc_obligations"):
-            pending = s_data.get(cat, {}).get("pending", {})
-            if isinstance(pending, dict):
-                s_data.setdefault(cat, {})["pending"] = {
-                    k: v for k, v in pending.items()
-                    if isinstance(v, dict) and (now - v.get("timestamp", now)) < 3600
-                }
+            if cat in s_data and isinstance(s_data[cat], dict) and "pending" in s_data[cat]:
+                pending = s_data[cat]["pending"]
+                if isinstance(pending, dict):
+                    s_data[cat]["pending"] = {
+                        k: v for k, v in pending.items()
+                        if isinstance(v, dict) and (now - v.get("timestamp", now)) < 3600
+                    }
 
     return data
 
@@ -1420,11 +1429,7 @@ def get_session_stop_retries(project_root: Optional[Path] = None, conversation_i
 def increment_session_stop_retries(project_root: Optional[Path] = None, conversation_id: Optional[str] = None) -> int:
     state = load_governance_state(project_root)
     cid = conversation_id or "default"
-    session = state.setdefault("sessions", {}).setdefault(cid, {
-        "stop_retries": 0,
-        "test_obligations": {"pending": {}},
-        "doc_obligations": {"pending": {}}
-    })
+    session = state.setdefault("sessions", {}).setdefault(cid, {"stop_retries": 0})
     session["stop_retries"] = session.get("stop_retries", 0) + 1
     state["stop_retries"] = session["stop_retries"]
     save_governance_state(state, project_root)
@@ -1501,11 +1506,13 @@ def resolve_pending_test_evidence(
         prod_stem = Path(prod_path).stem.lower()
 
         matched = False
-        if cand and (norm_test.endswith(cand) or cand.endswith(norm_test) or Path(cand).name == Path(norm_test).name):
+        if prod_path.lower() == norm_test or norm_test.endswith(prod_path.lower()):
+            matched = True
+        elif cand and (norm_test.endswith(cand) or cand.endswith(norm_test) or Path(cand).name == Path(norm_test).name):
             matched = True
         elif exp and (norm_test.endswith(exp) or Path(norm_test).name == exp):
             matched = True
-        elif base_stem == prod_stem:
+        elif base_stem == prod_stem or base_stem.replace("-", "_") == prod_stem.replace("-", "_"):
             matched = True
 
         if matched:
@@ -1528,8 +1535,8 @@ def get_unresolved_test_evidence(
 ) -> Dict[str, Any]:
     state = load_governance_state(project_root)
     if conversation_id and conversation_id in state.get("sessions", {}):
-        sess_pending = state["sessions"][conversation_id].get("test_obligations", {}).get("pending", {})
-        if sess_pending:
+        sess_pending = state["sessions"][conversation_id].get("test_obligations", {}).get("pending")
+        if sess_pending is not None:
             return sess_pending
     return state.get("test_obligations", {}).get("pending", {})
 
@@ -1660,8 +1667,8 @@ def get_unresolved_doc_obligations(
 ) -> Dict[str, Any]:
     state = load_governance_state(project_root)
     if conversation_id and conversation_id in state.get("sessions", {}):
-        sess_pending = state["sessions"][conversation_id].get("doc_obligations", {}).get("pending", {})
-        if sess_pending:
+        sess_pending = state["sessions"][conversation_id].get("doc_obligations", {}).get("pending")
+        if sess_pending is not None:
             return sess_pending
     return state.get("doc_obligations", {}).get("pending", {})
 
@@ -1683,12 +1690,12 @@ def clear_governance_state(project_root: Optional[Path] = None) -> None:
 
 DEFAULT_EXEMPT_PATTERNS: List[str] = [
     "types", "constants", "index", ".d.ts", "config", "interfaces", "schemas",
-    "migration", "migrations", "fixtures", "mock", "mocks"
+    "migration", "migrations", "fixtures", "mock", "mocks", "tools", "scripts"
 ]
 
 def is_exempt_from_test_evidence(target_file: str, cfg: Optional[dict] = None) -> bool:
     """
-    Checks if a target file is exempt from test evidence verification (e.g. types, constants, configs).
+    Checks if a target file is exempt from test evidence verification (e.g. types, constants, configs, tooling scripts).
     Supports substring patterns and fnmatch glob patterns.
     """
     normalized = target_file.replace("\\", "/").lower()
@@ -1701,14 +1708,18 @@ def is_exempt_from_test_evidence(target_file: str, cfg: Optional[dict] = None) -
             exempt_patterns = [p.lower() for p in te_cfg["exemptPatterns"]]
 
     for pat in exempt_patterns:
-        pat_clean = pat.lstrip("/")
+        pat_clean = pat.lstrip("/").rstrip("/*")
         if (
             pat in basename or
             f"/{pat}/" in normalized or
+            normalized.startswith(f"{pat}/") or
             fnmatch.fnmatch(basename, pat) or
             fnmatch.fnmatch(normalized, pat) or
             fnmatch.fnmatch(normalized, f"*/{pat_clean}") or
-            fnmatch.fnmatch(normalized, f"*{pat_clean}")
+            fnmatch.fnmatch(normalized, f"*{pat_clean}") or
+            fnmatch.fnmatch(normalized, f"*/{pat_clean}/*") or
+            fnmatch.fnmatch(normalized, f"*/{pat_clean}*") or
+            fnmatch.fnmatch(normalized, f"*{pat_clean}*")
         ):
             return True
 
@@ -1723,22 +1734,37 @@ def is_exempt_from_test_evidence(target_file: str, cfg: Optional[dict] = None) -
 def resolve_candidate_test_file(target_file: str, cfg: Optional[dict] = None) -> Tuple[Optional[str], str]:
     """
     Given a production file, searches for its candidate test file using standard naming conventions.
+    Normalizes hyphens and underscores to handle modules named with hyphens (e.g. gravity-validator -> test_gravity_validator.py).
     Returns: (found_path_or_None, primary_expected_name)
     """
     normalized = target_file.replace("\\", "/")
     target_path = Path(normalized)
     stem = target_path.stem
+    stem_us = stem.replace("-", "_")
+    stem_hy = stem.replace("_", "-")
     suffix = target_path.suffix.lower()
     parent_dir = target_path.parent
 
-    # Candidate file names
+    # Candidate file names with hyphen/underscore variations
     candidate_names = []
     if suffix == ".py":
-        candidate_names = [f"test_{stem}.py", f"{stem}_test.py"]
+        candidate_names = [
+            f"test_{stem}.py", f"{stem}_test.py",
+            f"test_{stem_us}.py", f"{stem_us}_test.py",
+            f"test_{stem_hy}.py", f"{stem_hy}_test.py"
+        ]
+        candidate_names = list(dict.fromkeys(candidate_names))
     elif suffix in [".ts", ".tsx", ".js", ".jsx"]:
-        candidate_names = [f"{stem}.test{suffix}", f"{stem}.spec{suffix}"]
+        candidate_names = [
+            f"{stem}.test{suffix}", f"{stem}.spec{suffix}",
+            f"{stem_us}.test{suffix}", f"{stem_us}.spec{suffix}",
+            f"{stem_hy}.test{suffix}", f"{stem_hy}.spec{suffix}",
+            f"test_{stem}{suffix}", f"{stem}_test{suffix}"
+        ]
+        candidate_names = list(dict.fromkeys(candidate_names))
     else:
-        candidate_names = [f"test_{stem}{suffix}"]
+        candidate_names = [f"test_{stem}{suffix}", f"test_{stem_us}{suffix}"]
+        candidate_names = list(dict.fromkeys(candidate_names))
 
     primary_expected = candidate_names[0] if candidate_names else f"test_{stem}.py"
 
@@ -2231,6 +2257,7 @@ def validate_gravityguard():
 
         project_root = resolve_project_root(payload)
         conversation_id = payload.get("conversationId", "default")
+        cfg = load_gravityguard_config("", project_root)
 
         # Session retry circuit-breaker:
         # Track actual stop retry count per conversation session in governance state
@@ -2266,14 +2293,22 @@ def validate_gravityguard():
         # Physical disk verification for pending test obligations
         pending_tests = get_unresolved_test_evidence(project_root, conversation_id)
         for prod_file, test_info in list(pending_tests.items()):
+            if is_exempt_from_test_evidence(prod_file, cfg):
+                resolve_pending_test_evidence(prod_file, project_root, conversation_id)
+                continue
+
             candidate = test_info.get("candidate_path")
+            if not candidate or not os.path.isfile(candidate):
+                cand_res, _ = resolve_candidate_test_file(prod_file, cfg)
+                if cand_res and os.path.isfile(cand_res):
+                    candidate = cand_res
+
             ts = test_info.get("timestamp", 0)
             if candidate and os.path.isfile(candidate):
                 try:
                     if os.path.getmtime(candidate) >= (ts - 5):
                         resolve_pending_test_evidence(candidate, project_root, conversation_id)
                 except OSError:
-                    # Ignore unreadable test file mtime and continue verification
                     continue
 
         unresolved_tests = get_unresolved_test_evidence(project_root, conversation_id)
