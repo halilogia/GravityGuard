@@ -132,10 +132,116 @@ def render_dashboard(events):
     print("=" * 80)
 
 
+def render_rule_candidates(events):
+    print("=" * 80)
+    print("      GRAVITYGUARD KURAL ADAYLARI & ÖĞRENME DEFTERİ (Learning Ledger)    ")
+    print("=" * 80)
+
+    if not events:
+        print("\n[!] Yeterli telemetri verisi bulunamadı.\n")
+        print("=" * 80)
+        return
+
+    violations = [e for e in events if e.get("status") in ("BLOCKED", "WARNING")]
+    if not violations:
+        print("\n[✓] Telemetri verilerinde henüz ihlal veya uyarı kaydı yok.")
+        print("    Mevcut politikalar sistemle tam uyumlu çalışıyor.\n")
+        print("=" * 80)
+        return
+
+    rule_counter = Counter(e.get("ruleId") for e in violations)
+    rule_targets = defaultdict(list)
+    for e in violations:
+        r_id = e.get("ruleId", "UNKNOWN")
+        target = os.path.basename(e.get("target", "bilinmeyen"))
+        rule_targets[r_id].append(target)
+
+    candidates = []
+
+    # 1. G4 Import Matrix Analysis
+    g4_count = rule_counter.get("G4_IMPORT_MATRIX", 0)
+    if g4_count > 0:
+        targets = Counter(rule_targets["G4_IMPORT_MATRIX"]).most_common(3)
+        candidates.append({
+            "id": "CAND-G4-BOUNDARY-REFINEMENT",
+            "rule": "G4_IMPORT_MATRIX",
+            "count": g4_count,
+            "targets": [t[0] for t in targets],
+            "diagnosis": "Ajanın belirli katmanlar arasında sıkça sınır ihlali yaptığı gözlemlendi.",
+            "recommendation": ".gravityguard.json içerisindeki 'layers' matrisini gözden geçirin veya ilgili modülü paylaşılan (shared) katmana taşıyın."
+        })
+
+    # 2. T1 Test Evidence Analysis
+    t1_count = rule_counter.get("T1_MISSING_RELATED_TEST", 0) + rule_counter.get("T1_FINAL_UNRESOLVED", 0)
+    if t1_count > 0:
+        targets = Counter(rule_targets.get("T1_MISSING_RELATED_TEST", []) + rule_targets.get("T1_FINAL_UNRESOLVED", [])).most_common(3)
+        candidates.append({
+            "id": "CAND-T1-EXEMPTION-EXPANSION",
+            "rule": "T1_MISSING_RELATED_TEST",
+            "count": t1_count,
+            "targets": [t[0] for t in targets],
+            "diagnosis": "Belirli üretim dosyaları için eşleşen test dosyası bulunamadı veya oturum sonuna kadar eklenmedi.",
+            "recommendation": "Bu dosyalar konfigürasyon/şema niteliğindeyse 'exemptPatterns' listesine ekleyin; iş mantığı içeriyorsa test süitine dahil edin."
+        })
+
+    # 3. Growth / Monolith Analysis
+    growth_count = rule_counter.get("ARCH_FILE_GROWTH", 0)
+    if growth_count > 0:
+        targets = Counter(rule_targets["ARCH_FILE_GROWTH"]).most_common(3)
+        candidates.append({
+            "id": "CAND-SRP-MODULARIZATION",
+            "rule": "ARCH_FILE_GROWTH",
+            "count": growth_count,
+            "targets": [t[0] for t in targets],
+            "diagnosis": "Mevcut dosyalara tek seferde 180+ satır ekleme veya kümülatif büyüme uyarıları alındı.",
+            "recommendation": "Dosyayı srp-modularizer ile alt bileşenlere ayırın ya da bilinçli bir büyüme ise 'srp: allow-monolith' etiketi ekleyin."
+        })
+
+    # 4. G1 Silent Exception Analysis
+    g1_count = rule_counter.get("G1_SILENT_EXCEPTION", 0)
+    if g1_count > 0:
+        targets = Counter(rule_targets["G1_SILENT_EXCEPTION"]).most_common(3)
+        candidates.append({
+            "id": "CAND-G1-EXCEPTION-STANDARDS",
+            "rule": "G1_SILENT_EXCEPTION",
+            "count": g1_count,
+            "targets": [t[0] for t in targets],
+            "diagnosis": "Ajanın sessiz hata yutma (except: pass / catch {}) teşebbüsleri engellendi.",
+            "recommendation": "Ajan promptunda hata yakalama disiplinini (#kodla direktifi) vurgulayın veya loglama zorunluluğu getirin."
+        })
+
+    # 5. G2 Tampering Analysis
+    g2_count = rule_counter.get("G2_SECURITY_TAMPERING", 0) + rule_counter.get("G2_TEST_INTEGRITY", 0)
+    if g2_count > 0:
+        candidates.append({
+            "id": "CAND-G2-TAMPERING-ALERT",
+            "rule": "G2_SECURITY_TAMPERING",
+            "count": g2_count,
+            "targets": [t[0] for t in Counter(rule_targets.get("G2_SECURITY_TAMPERING", []) + rule_targets.get("G2_TEST_INTEGRITY", [])).most_common(3)],
+            "diagnosis": "Test silme, test atlatma veya yapay escape-hatch enjeksiyon denemesi tespit edildi.",
+            "recommendation": "Kural atlatma denemelerine karşı red-teaming denetimini sıkılaştırın ve prompt kurallarını güncelleyin."
+        })
+
+    print(f"\n📋 BULUNAN KURAL ADAYLARI ({len(candidates)} Öneri)")
+    print("-" * 80)
+    for c in candidates:
+        print(f"\n🔹 [{c['id']}] (Tetiklenme: {c['count']} kez | Kural: {c['rule']})")
+        print(f"   Etkilenen Dosyalar : {', '.join(c['targets'])}")
+        print(f"   Teşhis             : {c['diagnosis']}")
+        print(f"   Önerilen Aksiyon   : {c['recommendation']}")
+
+    print("\n" + "=" * 80)
+    print("Not: Kural adayları insan denetimi (Human-in-the-Loop) içindir; otonom kural gevşetme yapılmaz.")
+    print("=" * 80)
+
+
 def main():
     log_path = resolve_permanent_log_path()
     events = load_telemetry_events(log_path)
-    render_dashboard(events)
+    if "--candidates" in sys.argv:
+        render_rule_candidates(events)
+    else:
+        render_dashboard(events)
 
 
 if __name__ == "__main__":

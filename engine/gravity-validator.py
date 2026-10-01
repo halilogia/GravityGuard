@@ -1242,8 +1242,23 @@ def analyze_python_srp_regex_fallback(content: str, file_path: str = "") -> Tupl
 # ============================================================================
 
 # ============================================================================
-# 5.1 STATEFUL TEST EVIDENCE ENGINE (v1.2.7 Pending State Management)
 # ============================================================================
+# 5.1 UNIFIED GOVERNANCE STATE ENGINE (v1.3.1 Layer 2 & Layer 3)
+# ============================================================================
+
+def get_governance_file_path(project_root: Optional[Path] = None) -> Path:
+    override_dir = os.environ.get("GRAVITYGUARD_LOG_DIR")
+    if override_dir:
+        return Path(override_dir) / "governance.json"
+    if project_root is None:
+        project_root = Path.cwd()
+    runtime_dir = project_root / ".gravityguard" / "runtime"
+    try:
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+    except (IOError, OSError):
+        return runtime_dir / "governance.json"
+    return runtime_dir / "governance.json"
+
 
 def get_test_evidence_file_path(project_root: Optional[Path] = None) -> Path:
     override_dir = os.environ.get("GRAVITYGUARD_LOG_DIR")
@@ -1259,39 +1274,108 @@ def get_test_evidence_file_path(project_root: Optional[Path] = None) -> Path:
     return runtime_dir / "test_evidence_state.json"
 
 
-def load_test_evidence_state(project_root: Optional[Path] = None) -> Dict[str, Any]:
-    path = get_test_evidence_file_path(project_root)
-    if not path.exists():
-        return {"version": 1, "pending": {}}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if not isinstance(data, dict):
-                return {"version": 1, "pending": {}}
-            # Prune stale pending entries older than session TTL (3600s)
-            now = time.time()
-            pending = data.get("pending", {})
-            if isinstance(pending, dict):
-                fresh_pending = {
-                    k: v for k, v in pending.items()
-                    if isinstance(v, dict) and (now - v.get("timestamp", now)) < 3600
-                }
-                data["pending"] = fresh_pending
-            return data
-    except (IOError, OSError, json.JSONDecodeError, ValueError):
-        return {"version": 1, "pending": {}}
+def load_governance_state(project_root: Optional[Path] = None) -> Dict[str, Any]:
+    """
+    Loads unified governance state (tracking test_obligations and doc_obligations).
+    Falls back gracefully to legacy test_evidence_state.json if governance.json does not exist.
+    """
+    path = get_governance_file_path(project_root)
+    legacy_path = get_test_evidence_file_path(project_root)
+
+    data = None
+    if path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    data = loaded
+        except (IOError, OSError, json.JSONDecodeError, ValueError):
+            data = None
+
+    if data is None and legacy_path.exists():
+        try:
+            with open(legacy_path, "r", encoding="utf-8") as f:
+                legacy = json.load(f)
+                if isinstance(legacy, dict):
+                    pending = legacy.get("pending", {}) if isinstance(legacy.get("pending"), dict) else {}
+                    data = {
+                        "version": 2,
+                        "test_obligations": {"pending": pending},
+                        "doc_obligations": {"pending": {}}
+                    }
+        except (IOError, OSError, json.JSONDecodeError, ValueError):
+            data = None
+
+    if data is None or not isinstance(data, dict):
+        return {
+            "version": 2,
+            "test_obligations": {"pending": {}},
+            "doc_obligations": {"pending": {}}
+        }
+
+    # Ensure required structure
+    if "test_obligations" not in data or not isinstance(data["test_obligations"], dict):
+        data["test_obligations"] = {"pending": {}}
+    if "pending" not in data["test_obligations"] or not isinstance(data["test_obligations"]["pending"], dict):
+        data["test_obligations"]["pending"] = {}
+
+    if "doc_obligations" not in data or not isinstance(data["doc_obligations"], dict):
+        data["doc_obligations"] = {"pending": {}}
+    if "pending" not in data["doc_obligations"] or not isinstance(data["doc_obligations"]["pending"], dict):
+        data["doc_obligations"]["pending"] = {}
+
+    # Prune stale pending entries older than session TTL (3600s)
+    now = time.time()
+    t_pending = data["test_obligations"]["pending"]
+    data["test_obligations"]["pending"] = {
+        k: v for k, v in t_pending.items()
+        if isinstance(v, dict) and (now - v.get("timestamp", now)) < 3600
+    }
+    d_pending = data["doc_obligations"]["pending"]
+    data["doc_obligations"]["pending"] = {
+        k: v for k, v in d_pending.items()
+        if isinstance(v, dict) and (now - v.get("timestamp", now)) < 3600
+    }
+
+    return data
 
 
-def save_test_evidence_state(state: Dict[str, Any], project_root: Optional[Path] = None) -> None:
-    path = get_test_evidence_file_path(project_root)
+def save_governance_state(state: Dict[str, Any], project_root: Optional[Path] = None) -> None:
+    """
+    Saves unified governance state to governance.json and syncs test_evidence_state.json for compatibility.
+    """
+    path = get_governance_file_path(project_root)
+    legacy_path = get_test_evidence_file_path(project_root)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        # Write governance.json atomically
         tmp = path.with_suffix(".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2, ensure_ascii=False)
         tmp.replace(path)
+
+        # Sync legacy test_evidence_state.json atomically
+        legacy_state = {
+            "version": 1,
+            "pending": state.get("test_obligations", {}).get("pending", {})
+        }
+        legacy_tmp = legacy_path.with_suffix(".tmp")
+        with open(legacy_tmp, "w", encoding="utf-8") as f:
+            json.dump(legacy_state, f, indent=2, ensure_ascii=False)
+        legacy_tmp.replace(legacy_path)
     except (IOError, OSError):
         return
+
+
+def load_test_evidence_state(project_root: Optional[Path] = None) -> Dict[str, Any]:
+    gov = load_governance_state(project_root)
+    return {"version": 1, "pending": gov.get("test_obligations", {}).get("pending", {})}
+
+
+def save_test_evidence_state(state: Dict[str, Any], project_root: Optional[Path] = None) -> None:
+    gov = load_governance_state(project_root)
+    gov.setdefault("test_obligations", {})["pending"] = state.get("pending", {})
+    save_governance_state(gov, project_root)
 
 
 def record_pending_test_evidence(
@@ -1302,14 +1386,14 @@ def record_pending_test_evidence(
     project_root: Optional[Path] = None
 ) -> None:
     norm = target_file.replace("\\", "/")
-    state = load_test_evidence_state(project_root)
-    state.setdefault("pending", {})[norm] = {
+    state = load_governance_state(project_root)
+    state.setdefault("test_obligations", {}).setdefault("pending", {})[norm] = {
         "candidate_path": candidate_path.replace("\\", "/") if candidate_path else None,
         "expected_name": expected_name,
         "timestamp": time.time(),
         "reason": reason
     }
-    save_test_evidence_state(state, project_root)
+    save_governance_state(state, project_root)
 
 
 def resolve_pending_test_evidence(test_file: str, project_root: Optional[Path] = None) -> List[str]:
@@ -1326,8 +1410,8 @@ def resolve_pending_test_evidence(test_file: str, project_root: Optional[Path] =
                 base_stem = base_stem[:-len(sfx)]
                 break
 
-    state = load_test_evidence_state(project_root)
-    pending = state.get("pending", {})
+    state = load_governance_state(project_root)
+    pending = state.get("test_obligations", {}).get("pending", {})
     resolved = []
 
     for prod_path, entry in list(pending.items()):
@@ -1348,17 +1432,147 @@ def resolve_pending_test_evidence(test_file: str, project_root: Optional[Path] =
             del pending[prod_path]
 
     if resolved:
-        save_test_evidence_state(state, project_root)
+        save_governance_state(state, project_root)
     return resolved
 
 
 def get_unresolved_test_evidence(project_root: Optional[Path] = None) -> Dict[str, Any]:
-    state = load_test_evidence_state(project_root)
-    return state.get("pending", {})
+    state = load_governance_state(project_root)
+    return state.get("test_obligations", {}).get("pending", {})
 
 
 def clear_test_evidence_state(project_root: Optional[Path] = None) -> None:
-    save_test_evidence_state({"version": 1, "pending": {}}, project_root)
+    state = load_governance_state(project_root)
+    state.setdefault("test_obligations", {})["pending"] = {}
+    save_governance_state(state, project_root)
+
+
+# --- 5.2 DOCUMENTATION OBLIGATION ENGINE (docs/KNOWLEDGE.md §6 Same-Commit Rule) ---
+
+def should_enforce_doc_obligations(target_file: str = "", cfg: Optional[dict] = None) -> bool:
+    """
+    Determines whether documentation obligations should be enforced for this target file.
+    Active if explicitly configured in .gravityguard.json, or if CHANGELOG.md exists
+    at the root of the project to which target_file belongs.
+    """
+    if cfg and isinstance(cfg.get("governance"), dict):
+        explicit = cfg["governance"].get("enforceDocObligations")
+        if explicit is not None:
+            return bool(explicit)
+    if target_file:
+        _, proj_root_str = extract_project_info(target_file)
+        if proj_root_str:
+            p_root = Path(proj_root_str)
+            return (p_root / "CHANGELOG.md").exists()
+    return False
+
+
+def is_doc_governed_target(target_file: str, cfg: Optional[dict] = None) -> bool:
+    """
+    Checks if modifying target_file creates a documentation obligation under docs/KNOWLEDGE.md §6.
+    By default, changes to engine/, src/, plugin/, or rules/ require a CHANGELOG update.
+    """
+    p = Path(target_file)
+    file_name_lower = p.name.lower()
+    parent_parts_lower = [part.lower() for part in p.parent.parts]
+
+    # Exclude test files
+    is_in_test_dir = any(d in parent_parts_lower for d in ("tests", "test", "__tests__"))
+    is_test_name = (
+        file_name_lower.startswith("test_") or
+        "_test." in file_name_lower or
+        file_name_lower.endswith("_test.py") or
+        ".test." in file_name_lower or
+        ".spec." in file_name_lower
+    )
+    if is_in_test_dir or is_test_name:
+        return False
+
+    norm = target_file.replace("\\", "/").lower()
+    # Exclude temporary, cache, and runtime dirs
+    if any(m in norm for m in ["/.gravityguard/", "/logs/", "/scratch/", "/brain/", "/dist/", "/node_modules/", "/.git/"]):
+        return False
+    if file_name_lower.endswith((".md", ".txt", ".json", ".lock", ".svg", ".png", ".jpg", ".jpeg", ".ico")):
+        return False
+
+    governed_dirs = {"engine", "src", "plugin", "rules", "scripts"}
+    if any(part in governed_dirs for part in parent_parts_lower):
+        return True
+
+    if cfg and isinstance(cfg.get("governance"), dict):
+        patterns = cfg["governance"].get("docObligationPatterns", [])
+        import fnmatch
+        for pat in patterns:
+            if fnmatch.fnmatch(norm, pat.lower()) or pat.lower() in norm:
+                return True
+
+    return False
+
+
+def record_pending_doc_obligation(
+    target_file: str,
+    required_docs: Optional[List[str]] = None,
+    reason: Optional[str] = None,
+    project_root: Optional[Path] = None
+) -> None:
+    norm = target_file.replace("\\", "/")
+    if required_docs is None:
+        required_docs = ["CHANGELOG.md"]
+    if reason is None:
+        reason = f"Motor/kod dosyası değiştirildi ({norm}); docs/KNOWLEDGE.md §6 uyarınca {', '.join(required_docs)} güncellenmelidir."
+
+    state = load_governance_state(project_root)
+    state.setdefault("doc_obligations", {}).setdefault("pending", {})[norm] = {
+        "required_docs": required_docs,
+        "timestamp": time.time(),
+        "reason": reason
+    }
+    save_governance_state(state, project_root)
+
+
+def resolve_pending_doc_obligations(
+    doc_file: str,
+    project_root: Optional[Path] = None
+) -> List[str]:
+    norm_doc = doc_file.replace("\\", "/").lower()
+    doc_name = Path(norm_doc).name
+
+    state = load_governance_state(project_root)
+    pending = state.get("doc_obligations", {}).get("pending", {})
+    resolved = []
+
+    for prod_path, entry in list(pending.items()):
+        reqs = [r.lower() for r in entry.get("required_docs", ["changelog.md"])]
+        if any(doc_name == req or norm_doc.endswith(req) for req in reqs):
+            remaining = [r for r in entry.get("required_docs", []) if r.lower() != doc_name and not norm_doc.endswith(r.lower())]
+            if not remaining:
+                resolved.append(prod_path)
+                del pending[prod_path]
+            else:
+                entry["required_docs"] = remaining
+
+    if resolved:
+        save_governance_state(state, project_root)
+    return resolved
+
+
+def get_unresolved_doc_obligations(project_root: Optional[Path] = None) -> Dict[str, Any]:
+    state = load_governance_state(project_root)
+    return state.get("doc_obligations", {}).get("pending", {})
+
+
+def clear_doc_obligations(project_root: Optional[Path] = None) -> None:
+    state = load_governance_state(project_root)
+    state.setdefault("doc_obligations", {})["pending"] = {}
+    save_governance_state(state, project_root)
+
+
+def clear_governance_state(project_root: Optional[Path] = None) -> None:
+    save_governance_state({
+        "version": 2,
+        "test_obligations": {"pending": {}},
+        "doc_obligations": {"pending": {}}
+    }, project_root)
 
 
 DEFAULT_EXEMPT_PATTERNS: List[str] = [
@@ -1899,12 +2113,39 @@ def validate_gravityguard():
 
     # 0. Lifecycle Hook Check: Stop / PostInvocation or CLI --stop flag
     if payload.get("terminationReason") or "--stop" in sys.argv:
-        unresolved = get_unresolved_test_evidence()
-        if unresolved:
-            missing_items = [f"'{p}' (beklenen test: {info.get('expected_name', 'test')})" for p, info in unresolved.items()]
-            warn_reason = f"Test Kanıtı Uyarısı (T1): Oturum tamamlandı ancak şu üretim kodları için test kanıtı bulunamadı: {', '.join(missing_items)}"
-            log_event("stop", "WARNING", "workspace", warn_reason, rule_id="T1_FINAL_UNRESOLVED")
-            print(json.dumps({"decision": "allow", "reason": warn_reason}))
+        # Check if user explicitly cancelled the task
+        term_reason = payload.get("terminationReason", "")
+        if term_reason in ("user_cancel", "cancelled", "user_abort"):
+            print(json.dumps({"decision": "allow"}))
+            sys.exit(0)
+
+        # Circuit-breaker: If agent attempted stop > 5 times, avoid infinite trap
+        exec_num = payload.get("executionNum", 1)
+        if isinstance(exec_num, int) and exec_num > 5:
+            log_event("stop", "WARNING", "workspace", "Circuit breaker triggered: executionNum > 5, allowing stop despite pending obligations", rule_id="STOP_CIRCUIT_BREAKER")
+            print(json.dumps({"decision": "allow"}))
+            sys.exit(0)
+
+        unresolved_tests = get_unresolved_test_evidence()
+        unresolved_docs = get_unresolved_doc_obligations()
+
+        warn_reasons = []
+        if unresolved_tests:
+            missing_items = [f"'{p}' (beklenen test: {info.get('expected_name', 'test')})" for p, info in unresolved_tests.items()]
+            t1_warn = f"Test Kanıtı Uyarısı (T1): Oturum tamamlandı ancak şu üretim kodları için test kanıtı bulunamadı: {', '.join(missing_items)}"
+            log_event("stop", "WARNING", "workspace", t1_warn, rule_id="T1_FINAL_UNRESOLVED")
+            warn_reasons.append(t1_warn)
+
+        if unresolved_docs:
+            missing_docs = [f"'{p}' (gereken: {', '.join(info.get('required_docs', ['CHANGELOG.md']))})" for p, info in unresolved_docs.items()]
+            doc_warn = f"Dokümantasyon Yükümlülüğü: Motor/kod dosyaları değiştirildi ancak dokümantasyon güncellenmedi (docs/KNOWLEDGE.md §6 Same-commit rule): {', '.join(missing_docs)}"
+            log_event("stop", "WARNING", "workspace", doc_warn, rule_id="DOC_OBLIGATION_UNRESOLVED")
+            warn_reasons.append(doc_warn)
+
+        if warn_reasons:
+            full_reason = " | ".join(warn_reasons)
+            # In Antigravity Stop hook contract, decision="continue" actively prevents agent from ending session
+            print(json.dumps({"decision": "continue", "reason": full_reason}))
         else:
             print(json.dumps({"decision": "allow"}))
         sys.exit(0)
@@ -1955,6 +2196,12 @@ def validate_gravityguard():
     added_lines, added_text, added_line_numbers = get_diff_analysis(old_full_content, projected_content)
 
     all_warnings: List[Tuple[str, str]] = []
+
+    # Check if a documentation file is being edited/written -> resolve pending doc obligations
+    if target_file and is_data_or_doc:
+        norm_target = target_file.replace("\\", "/").lower()
+        if norm_target.endswith(("changelog.md", "knowledge.md", "architecture.md", "readme.md")):
+            resolve_pending_doc_obligations(target_file)
 
     # Loaded once, before the first rule that consults it, and reused by both the
     # complexity heuristics and the test evidence rules further down. The
@@ -2134,6 +2381,10 @@ def validate_gravityguard():
     for rule_id, warn_msg in test_evidence_warnings:
         log_event(tool_name, "WARNING", target_file, warn_msg, rule_id=rule_id)
         all_warnings.append((rule_id, warn_msg))
+
+    # Record doc obligation if production/engine code is changed and doc governance is enabled
+    if should_enforce_doc_obligations(target_file, cfg=cfg) and is_doc_governed_target(target_file, cfg):
+        record_pending_doc_obligation(target_file)
 
     # ========================================================================
     # GUARD 9: STATIC LINTER & COMPILER DIAGNOSTIC FEEDBACK (WARN ONLY)

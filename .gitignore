@@ -22,7 +22,8 @@ __pycache__/
 .env
 *.log
 *.tmp
-.gravityguard/
+.gravityguard/*
+!.gravityguard/CONTEXT.md
 
 # OS & Editor
 .DS_Store

@@ -11,6 +11,13 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python scripts/gravity-validator.py --stop",
+        "timeout": 15
+      }
     ]
   }
 }

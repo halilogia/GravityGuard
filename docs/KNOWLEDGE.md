@@ -4,6 +4,23 @@ This document serves as the persistent engineering knowledge repository for **Gr
 
 ---
 
+## 0. ALWAYS_LOAD (Core Invariants)
+
+> [!IMPORTANT]
+> **Deterministic Airbag Protocol (Obligation-Driven Governance)**
+> 1. **Core Philosophy**: GravityGuard is an ultra-fast (<10ms in-memory), deterministic airbag — NOT a heavy compiler or AST engine.
+> 2. **P0 Hard Gates (ALWAYS BLOCK)**:
+>    - `G0_SECRET_LEAK`: Zero exposed API keys, tokens, or private credentials.
+>    - `G1_SILENT_EXCEPTION`: Zero empty catch/except blocks (`except: pass`, `catch {}`).
+>    - `G2_TEST_INTEGRITY`: Zero test deletions, skipping, or bypass escape-hatch injection.
+>    - `G4_IMPORT_MATRIX`: Strict architectural layer boundaries (no reverse/cross-layer imports).
+> 3. **Obligations Before Session Stop (L3 Lifecycle Gate)**:
+>    - **Test Obligation (T1)**: Modifying production code requires matching test evidence before session stop.
+>    - **Doc Obligation (§6 Same-Commit Rule)**: Modifying `engine/`, `src/`, `plugin/`, or `rules/` requires updating `CHANGELOG.md` (and `docs/KNOWLEDGE.md` if procedures change).
+> 4. **Git Pre-Commit Gate (L4)**: `tools/verify_doc_governance.py` rejects commits altering engine/rules without staged documentation.
+
+---
+
 ## 1. Architectural Invariants (Non-Negotiable)
 
 ### 1.1. The Lightweight Gatekeeper Philosophy (Anti-Bloat Invariant)
@@ -126,6 +143,14 @@ The Python engine enforces checks through an ordered, high-to-low priority pipel
 | *(none)* | `hooks.json` in the live plugin | The plugin invokes `python scripts/srp-validator.py`, which is why the repo's `engine/gravity-validator.py` is renamed there. Both entry points state this in their header; `tools/sync_plugin.py` keeps them equal. |
 
 **Configuration is a convenience, never a security boundary.** Every numeric key has a floor (`monolithLoc: 3` would flag every file), non-numeric values, booleans and malformed blocks are ignored, and a bad config degrades to the defaults instead of raising — this code runs inside the pre-tool hook, where an exception means the write proceeds unguarded.
+
+### 2.5. 5-Layer Obligation Governance Model (v1.3.1)
+- **L0 (Agent Protocol)**: Compact invariant context in `docs/KNOWLEDGE.md` §0 and `.gravityguard/CONTEXT.md`.
+- **L1 (PreTool Airbag)**: Fast deterministic gates (`G0`, `G1`, `G2`, `G4`, `SRP`, `Growth`).
+- **L2 (Async Evidence & Governance State)**: Unified `.gravityguard/runtime/governance.json` tracking both `test_obligations` and `doc_obligations`.
+- **L3 (Lifecycle Gate / Stop Hook)**: Stop hook returning `{"decision": "continue", "reason": "..."}` to trap the agent until obligations are resolved.
+- **L4 (Git Pre-Commit Gate)**: `tools/verify_doc_governance.py` enforcing §6 same-commit discipline.
+- **L5 (Learning Ledger)**: `tools/telemetry_dashboard.py --candidates` surfacing human-reviewed policy proposals.
 
 ---
 

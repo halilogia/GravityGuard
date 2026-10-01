@@ -3463,6 +3463,176 @@ class TestProjectRootResolution(unittest.TestCase):
         self.assertTrue(runtime.is_dir(), "a trusted root must actually get its state dir")
 
 
+class TestObligationGovernance(unittest.TestCase):
+    """v1.3.1 Layer 0-5 Obligation-Driven Governance and Stop Hook Lifecycle Tests."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="gg_gov_test_")
+        os.environ["GRAVITYGUARD_LOG_DIR"] = self.temp_dir
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_stop_hook_returns_continue_when_unresolved_test_obligations_exist(self):
+        # 1. Ensure a test root exists so project is recognized as having a test suite
+        os.makedirs(os.path.join(self.temp_dir, "tests"), exist_ok=True)
+        prod_file = os.path.join(self.temp_dir, "src", "billing.ts")
+        os.makedirs(os.path.dirname(prod_file), exist_ok=True)
+
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": prod_file,
+                    "CodeContent": "export function charge() { return 100; }\n"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+
+        # 2. Stop hook should return continue and point to billing.ts
+        stop_res, _ = run_validator({"terminationReason": "model_stop"})
+        self.assertEqual(stop_res.get("decision"), "continue")
+        self.assertIn("Test Kanıtı Uyarısı (T1)", stop_res.get("reason", ""))
+        self.assertIn("billing.ts", stop_res.get("reason", ""))
+
+    def test_stop_hook_returns_continue_when_unresolved_doc_obligations_exist(self):
+        # Configure enforceDocObligations in .gravityguard.json
+        cfg_path = os.path.join(self.temp_dir, ".gravityguard.json")
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump({"governance": {"enforceDocObligations": True}}, f)
+
+        engine_file = os.path.join(self.temp_dir, "engine", "core_mod.py")
+        os.makedirs(os.path.dirname(engine_file), exist_ok=True)
+
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": engine_file,
+                    "CodeContent": "def core_helper():\n    return 42\n"
+                }
+            }
+        }
+        res, _ = run_validator(payload)
+        self.assertEqual(res.get("decision"), "allow")
+
+        stop_res, _ = run_validator({"terminationReason": "model_stop"})
+        self.assertEqual(stop_res.get("decision"), "continue")
+        self.assertIn("Dokümantasyon Yükümlülüğü", stop_res.get("reason", ""))
+        self.assertIn("CHANGELOG.md", stop_res.get("reason", ""))
+
+    def test_doc_obligation_resolved_by_changelog_update(self):
+        cfg_path = os.path.join(self.temp_dir, ".gravityguard.json")
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump({"governance": {"enforceDocObligations": True}}, f)
+
+        engine_file = os.path.join(self.temp_dir, "engine", "worker.py")
+        os.makedirs(os.path.dirname(engine_file), exist_ok=True)
+
+        payload_code = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": engine_file,
+                    "CodeContent": "def do_work():\n    return True\n"
+                }
+            }
+        }
+        run_validator(payload_code)
+
+        # Update CHANGELOG.md to resolve doc obligation
+        changelog_file = os.path.join(self.temp_dir, "CHANGELOG.md")
+        payload_doc = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": changelog_file,
+                    "CodeContent": "## [Unreleased]\n### Added\n- Added worker.py\n"
+                }
+            }
+        }
+        res_doc, _ = run_validator(payload_doc)
+        self.assertEqual(res_doc.get("decision"), "allow")
+
+        stop_res, _ = run_validator({"terminationReason": "model_stop"})
+        # No tests suite declared, and doc obligation is resolved -> allow!
+        self.assertEqual(stop_res.get("decision"), "allow")
+        self.assertEqual(stop_res.get("reason", ""), "")
+
+    def test_stop_hook_circuit_breaker_allows_on_excessive_attempts(self):
+        cfg_path = os.path.join(self.temp_dir, ".gravityguard.json")
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump({"governance": {"enforceDocObligations": True}}, f)
+
+        engine_file = os.path.join(self.temp_dir, "engine", "loop.py")
+        os.makedirs(os.path.dirname(engine_file), exist_ok=True)
+        payload_code = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": engine_file,
+                    "CodeContent": "def infinite():\n    return 0\n"
+                }
+            }
+        }
+        run_validator(payload_code)
+
+        # When executionNum > 5, circuit-breaker permits termination
+        stop_res, _ = run_validator({"terminationReason": "model_stop", "executionNum": 6})
+        self.assertEqual(stop_res.get("decision"), "allow")
+
+    def test_stop_hook_allows_on_user_cancel(self):
+        cfg_path = os.path.join(self.temp_dir, ".gravityguard.json")
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump({"governance": {"enforceDocObligations": True}}, f)
+
+        engine_file = os.path.join(self.temp_dir, "engine", "cancelled.py")
+        os.makedirs(os.path.dirname(engine_file), exist_ok=True)
+        payload_code = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": engine_file,
+                    "CodeContent": "def abort_me():\n    pass\n"
+                }
+            }
+        }
+        run_validator(payload_code)
+
+        stop_res, _ = run_validator({"terminationReason": "user_cancel"})
+        self.assertEqual(stop_res.get("decision"), "allow")
+
+    def test_governance_json_dual_write_and_sync(self):
+        cfg_path = os.path.join(self.temp_dir, ".gravityguard.json")
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump({"governance": {"enforceDocObligations": True}}, f)
+
+        src_file = os.path.join(self.temp_dir, "engine", "sync.py")
+        os.makedirs(os.path.dirname(src_file), exist_ok=True)
+        payload = {
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": src_file,
+                    "CodeContent": "def sync_me():\n    return 1\n"
+                }
+            }
+        }
+        run_validator(payload)
+
+        gov_file = os.path.join(self.temp_dir, "governance.json")
+        leg_file = os.path.join(self.temp_dir, "test_evidence_state.json")
+        self.assertTrue(os.path.exists(gov_file), "governance.json must be written")
+        self.assertTrue(os.path.exists(leg_file), "test_evidence_state.json must be synced")
+
+        with open(gov_file, "r", encoding="utf-8") as f:
+            gov_data = json.load(f)
+        self.assertIn("doc_obligations", gov_data)
+        self.assertIn("test_obligations", gov_data)
+
+
 if __name__ == "__main__":
     unittest.main()
 
