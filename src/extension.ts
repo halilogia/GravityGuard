@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as http from 'http';
 import { buildOfflinePrompt, buildSystemPrompt, classifyIntent, modeLabel, shouldAskForMode, IntentClassification, IntentMode } from './intent';
+import { initI18n, t, setLanguage, getCurrentLanguage } from './i18n';
 
 interface LogEvent {
   status?: string;
@@ -54,6 +55,7 @@ const CONNECTION_ERROR_CODES = new Set([
 ]);
 
 export function activate(context: vscode.ExtensionContext): void {
+  initI18n(vscode.env.language);
   console.log('[GravityGuard] Extension activated successfully!');
 
   // 1. Register Webview Provider for GravityGuard Live Monitor
@@ -90,6 +92,12 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('antigravityBridge.clearLogs', () => {
       provider.clearLogs();
+    }),
+    vscode.commands.registerCommand('antigravityBridge.toggleLanguage', () => {
+      const next = getCurrentLanguage() === 'tr' ? 'en' : 'tr';
+      setLanguage(next);
+      provider.updateHtml();
+      vscode.window.showInformationMessage(`GravityGuard dili: ${next.toUpperCase()}`);
     }),
     vscode.commands.registerCommand('antigravityBridge.enhancePrompt', async () => {
       await handleEnhancePrompt();
@@ -363,6 +371,10 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
         this.clearLogs();
       } else if (message.command === 'refresh') {
         this.updateHtml();
+      } else if (message.command === 'toggleLanguage') {
+        const next = getCurrentLanguage() === 'tr' ? 'en' : 'tr';
+        setLanguage(next);
+        this.updateHtml();
       }
     });
 
@@ -507,7 +519,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       eventsHtml =
         '<div style="color: #64748b; font-size: 0.8rem; text-align: center; padding: 30px 10px; border: 1px dashed rgba(255,255,255,0.1); border-radius: 10px; display: flex; flex-direction: column; align-items: center; gap: 8px;">' +
         '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' +
-        '<span>Günlük tertemiz! Henüz bir olay kaydı yok.</span>' +
+        '<span>' + t('events.noEvents') + '</span>' +
         '</div>';
     }
 
@@ -520,37 +532,36 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       obligationsHtml =
         '<div style="color: #10b981; font-size: 0.8rem; text-align: center; padding: 25px 10px; border: 1px dashed rgba(16,185,129,0.25); border-radius: 10px; background: rgba(16,185,129,0.05);">' +
         '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" style="margin-bottom: 8px;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>' +
-        '<div style="font-weight: 800; font-size: 0.85rem;">Tüm Yükümlülükler Temiz!</div>' +
-        '<div style="color: #94a3b8; font-size: 0.72rem; margin-top: 4px;">Bekleyen test kanıtı veya eksik CHANGELOG kaydı bulunmuyor.</div>' +
+        '<div style="font-weight: 800; font-size: 0.85rem;">' + t('obligations.cleanState') + '</div>' +
         '</div>';
     } else {
       if (testKeys.length > 0) {
-        obligationsHtml += '<div style="font-size: 0.7rem; font-weight: 800; color: #38bdf8; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.5px;">🧪 Bekleyen Test Kanıtları (' + testKeys.length + ')</div>';
+        obligationsHtml += '<div style="font-size: 0.7rem; font-weight: 800; color: #38bdf8; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.5px;">🧪 ' + t('obligations.testTitle') + ' (' + testKeys.length + ')</div>';
         for (const tk of testKeys) {
           const item = pendingTests[tk];
           obligationsHtml +=
             '<div style="background: #1e293b; border-left: 3px solid #38bdf8; padding: 10px; border-radius: 6px; margin-bottom: 8px; font-size: 0.75rem;">' +
             '<div style="color: #f8fafc; font-weight: 700; word-break: break-all;">' + path.basename(tk) + '</div>' +
-            '<div style="color: #94a3b8; font-size: 0.7rem; margin-top: 2px;">Beklenen Test: <span style="color: #38bdf8;">' + (item.expected_name || 'test') + '</span></div>' +
+            '<div style="color: #94a3b8; font-size: 0.7rem; margin-top: 2px;">' + t('obligations.expectedTest') + ': <span style="color: #38bdf8;">' + (item.expected_name || 'test') + '</span></div>' +
             '</div>';
         }
       }
       if (docKeys.length > 0) {
-        obligationsHtml += '<div style="font-size: 0.7rem; font-weight: 800; color: #f59e0b; text-transform: uppercase; margin: 12px 0 6px 0; letter-spacing: 0.5px;">📝 Bekleyen Dokümantasyon (' + docKeys.length + ')</div>';
+        obligationsHtml += '<div style="font-size: 0.7rem; font-weight: 800; color: #f59e0b; text-transform: uppercase; margin: 12px 0 6px 0; letter-spacing: 0.5px;">📝 ' + t('obligations.docTitle') + ' (' + docKeys.length + ')</div>';
         for (const dk of docKeys) {
           const item = pendingDocs[dk];
           const reqs = (item.required_docs || ['CHANGELOG.md']).join(', ');
           obligationsHtml +=
             '<div style="background: #1e293b; border-left: 3px solid #f59e0b; padding: 10px; border-radius: 6px; margin-bottom: 8px; font-size: 0.75rem;">' +
             '<div style="color: #f8fafc; font-weight: 700; word-break: break-all;">' + path.basename(dk) + '</div>' +
-            '<div style="color: #94a3b8; font-size: 0.7rem; margin-top: 2px;">Gereken Güncelleme: <span style="color: #f59e0b;">' + reqs + '</span> (§6 Same-Commit)</div>' +
+            '<div style="color: #94a3b8; font-size: 0.7rem; margin-top: 2px;">' + t('obligations.requiredDoc') + ': <span style="color: #f59e0b;">' + reqs + '</span> (§6 Same-Commit)</div>' +
             '</div>';
         }
       }
       obligationsHtml +=
         '<div style="margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.04); border-radius: 6px; font-size: 0.7rem; color: #94a3b8; display: flex; justify-content: space-between;">' +
-        '<span>Oturum Stop Tekrarı:</span>' +
-        '<span style="font-weight: 800; color: ' + (stopRetries >= 4 ? '#ef4444' : '#38bdf8') + ';">' + stopRetries + ' / 5</span>' +
+        '<span>' + t('obligations.circuitBreaker') + ':</span>' +
+        '<span style="font-weight: 800; color: ' + (stopRetries >= 4 ? '#ef4444' : '#38bdf8') + ';">' + stopRetries + ' / 5 ' + t('obligations.retries') + '</span>' +
         '</div>';
     }
 
@@ -562,42 +573,42 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
 
     rulesHtml +=
       '<div style="background: #1e293b; padding: 12px; border-radius: 8px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.06);">' +
-      '<div style="font-size: 0.75rem; font-weight: 800; color: #38bdf8; margin-bottom: 6px;">📐 Proje Yapılandırması (.gravityguard.json)</div>' +
+      '<div style="font-size: 0.75rem; font-weight: 800; color: #38bdf8; margin-bottom: 6px;">📐 ' + t('rules.title') + '</div>' +
       '<div style="font-size: 0.7rem; color: #cbd5e1; line-height: 1.6;">' +
-      '<div>• <b>Dokümantasyon Yükümlülüğü:</b> ' + (docGovActive ? '<span style="color: #10b981; font-weight: bold;">AKTİF (Opt-in)</span>' : '<span style="color: #94a3b8;">Devre Dışı</span>') + '</div>' +
-      '<div>• <b>Tek Seferde Satır Sınırı:</b> ' + (projectCfg?.complexity?.singleWriteLoc || 200) + ' satır (ARCH_FILE_GROWTH)</div>' +
-      '<div>• <b>Dosya Tavan Sınırı:</b> ' + (projectCfg?.complexity?.totalLoc || 500) + ' satır</div>' +
-      '<div>• <b>Test Kanıt Modu:</b> ' + (projectCfg?.testEvidence?.deferredMode !== false ? 'Ertelenebilir (Stop denetimi)' : 'Anında Uyarı') + '</div>' +
+      '<div>• <b>' + t('rules.docGovernance') + ':</b> ' + (docGovActive ? '<span style="color: #10b981; font-weight: bold;">' + t('rules.active') + ' (Opt-in)</span>' : '<span style="color: #94a3b8;">' + t('rules.inactive') + '</span>') + '</div>' +
+      '<div>• <b>' + t('rules.maxChunk') + ':</b> ' + (projectCfg?.complexity?.singleWriteLoc || 200) + ' (ARCH_FILE_GROWTH)</div>' +
+      '<div>• <b>' + t('rules.maxLoc') + ':</b> ' + (projectCfg?.complexity?.totalLoc || 500) + '</div>' +
+      '<div>• <b>' + t('rules.testEvidence') + ':</b> ' + (projectCfg?.testEvidence?.deferredMode !== false ? t('rules.deferred') : t('rules.active')) + '</div>' +
       '</div>' +
       '</div>';
 
     if (layerNames.length > 0) {
       rulesHtml +=
         '<div style="background: #1e293b; padding: 12px; border-radius: 8px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.06);">' +
-        '<div style="font-size: 0.75rem; font-weight: 800; color: #a78bfa; margin-bottom: 6px;">🧱 Mimari Katman Sınırları (G4)</div>' +
+        '<div style="font-size: 0.75rem; font-weight: 800; color: #a78bfa; margin-bottom: 6px;">🧱 ' + t('rules.layers') + '</div>' +
         '<div style="font-size: 0.7rem; color: #cbd5e1; line-height: 1.5;">';
       for (const lyr of layerNames) {
         const allowed = layers[lyr];
-        rulesHtml += '<div>• <code style="color: #38bdf8;">' + lyr + '</code> ➜ ' + (Array.isArray(allowed) && allowed.length ? allowed.join(', ') : '<i>yalnızca kendi katmanı</i>') + '</div>';
+        rulesHtml += '<div>• <code style="color: #38bdf8;">' + lyr + '</code> ➜ ' + (Array.isArray(allowed) && allowed.length ? allowed.join(', ') : '<i>isol</i>') + '</div>';
       }
       rulesHtml += '</div></div>';
     }
 
     rulesHtml +=
       '<div style="background: #1e293b; padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">' +
-      '<div style="font-size: 0.75rem; font-weight: 800; color: #10b981; margin-bottom: 6px;">🛡️ Değişmez Güvenlik Kuralları</div>' +
+      '<div style="font-size: 0.75rem; font-weight: 800; color: #10b981; margin-bottom: 6px;">🛡️ ' + t('rules.invariantsTitle') + '</div>' +
       '<div style="font-size: 0.7rem; color: #94a3b8; line-height: 1.5;">' +
-      '<div><b>G0:</b> Gizli anahtar / token sızıntısı engeli (HER text dosyası)</div>' +
-      '<div><b>G1:</b> Sessiz hata yutma yasağı (except pass / boş handler)</div>' +
-      '<div><b>G2:</b> Test bütünlüğü koruması (silme / assert zayıflatma engeli)</div>' +
-      '<div><b>G4:</b> Katmanlar arası ters import engeli</div>' +
-      '<div><b>T1/T2:</b> Test kanıtı ve gözlemlenebilir assertion şartı</div>' +
+      '<div><b>G0:</b> Secret / Token leak shield (all text files)</div>' +
+      '<div><b>G1:</b> Silent error swallowing forbidden (except pass)</div>' +
+      '<div><b>G2:</b> Test integrity protection (no deletion/weakening)</div>' +
+      '<div><b>G4:</b> Forbidden cross-layer architectural imports</div>' +
+      '<div><b>T1/T2:</b> Test evidence and observable assertions required</div>' +
       '</div>' +
       '</div>';
 
-    const statBoxBlocked = '<div class="stat-box"><div class="stat-val" style="color: #ef4444;">' + blockedCount + '</div><div class="stat-lbl">Engellenen</div></div>';
-    const statBoxWarning = '<div class="stat-box"><div class="stat-val" style="color: #f59e0b;">' + warningCount + '</div><div class="stat-lbl">Uyarılar</div></div>';
-    const statBoxApproved = '<div class="stat-box"><div class="stat-val" style="color: #10b981;">' + approvedCount + '</div><div class="stat-lbl">Onaylanan</div></div>';
+    const statBoxBlocked = '<div class="stat-box"><div class="stat-val" style="color: #ef4444;">' + blockedCount + '</div><div class="stat-lbl">' + t('stats.blocked') + '</div></div>';
+    const statBoxWarning = '<div class="stat-box"><div class="stat-val" style="color: #f59e0b;">' + warningCount + '</div><div class="stat-lbl">' + t('stats.warning') + '</div></div>';
+    const statBoxApproved = '<div class="stat-box"><div class="stat-val" style="color: #10b981;">' + approvedCount + '</div><div class="stat-lbl">' + t('stats.approved') + '</div></div>';
 
     this._view.webview.html =
       '<!DOCTYPE html>' +
@@ -633,13 +644,16 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       '<div class="title">GravityGuard</div>' +
       '</div>' +
       '<div class="btn-group">' +
+      '<button class="action-btn" onclick="toggleLanguage()" title="Switch Language">' +
+      '🌐 ' + (getCurrentLanguage() === 'tr' ? 'EN' : 'TR') +
+      '</button>' +
       '<button class="action-btn" onclick="refresh()">' +
       '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>' +
-      'Yenile' +
+      t('actions.refresh') +
       '</button>' +
       '<button class="action-btn danger" onclick="clearLogs()">' +
       '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>' +
-      'Temizle' +
+      t('actions.clear') +
       '</button>' +
       '</div>' +
       '</div>' +
@@ -649,14 +663,14 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       statBoxApproved +
       '</div>' +
       '<div class="tabs">' +
-      '<button class="tab-btn active" id="btn-events" onclick="setTab(\'events\')">🛡️ Olaylar</button>' +
-      '<button class="tab-btn" id="btn-obligations" onclick="setTab(\'obligations\')">📋 Yükümlülükler' + (totalObligations > 0 ? '<span class="badge-pill">' + totalObligations + '</span>' : '') + '</button>' +
-      '<button class="tab-btn" id="btn-rules" onclick="setTab(\'rules\')">📐 Kurallar & Context</button>' +
+      '<button class="tab-btn active" id="btn-events" onclick="setTab(\'events\')">' + t('tabs.events') + '</button>' +
+      '<button class="tab-btn" id="btn-obligations" onclick="setTab(\'obligations\')">' + t('tabs.obligations') + (totalObligations > 0 ? '<span class="badge-pill">' + totalObligations + '</span>' : '') + '</button>' +
+      '<button class="tab-btn" id="btn-rules" onclick="setTab(\'rules\')">' + t('tabs.rules') + '</button>' +
       '</div>' +
       '<div id="tab-events" class="tab-content active">' +
       '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">' +
-      '<span style="font-size: 0.7rem; font-weight: 800; color: #94a3b8; text-transform: uppercase;">Canlı Akış</span>' +
-      '<span style="display: flex; align-items: center; gap: 4px; font-size: 0.6rem; color: #10b981; font-weight: 800;"><span class="pulse-dot"></span> CANLI AKTİF</span>' +
+      '<span style="font-size: 0.7rem; font-weight: 800; color: #94a3b8; text-transform: uppercase;">' + (getCurrentLanguage() === 'tr' ? 'Canlı Akış' : 'Live Stream') + '</span>' +
+      '<span style="display: flex; align-items: center; gap: 4px; font-size: 0.6rem; color: #10b981; font-weight: 800;"><span class="pulse-dot"></span> ' + t('statusOnline') + '</span>' +
       '</div>' +
       eventsHtml +
       '</div>' +
@@ -682,6 +696,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       'if (window._lastTab) { setTab(window._lastTab); }' +
       'function clearLogs() { vscode.postMessage({ command: "clearLogs" }); }' +
       'function refresh() { vscode.postMessage({ command: "refresh" }); }' +
+      'function toggleLanguage() { vscode.postMessage({ command: "toggleLanguage" }); }' +
       '</script>' +
       '</body>' +
       '</html>';
