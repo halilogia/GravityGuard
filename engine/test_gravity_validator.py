@@ -648,6 +648,155 @@ class TestGravityGuardPhase1(unittest.TestCase):
             if os.path.exists(cfg_path):
                 os.remove(cfg_path)
 
+    # --- RED-TEAMING ADVERSARIAL EVASION TESTS ---
+
+    def test_g4_evasion_dynamic_import_blocked(self):
+        """Red Team Evasion: `await import('../network/client')` dynamic import -> BLOCK"""
+        test_dir = os.path.dirname(__file__)
+        cfg_path = os.path.join(test_dir, ".gravityguard.json")
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump({"layers": {"ui": {"forbiddenImports": ["network"]}}}, f)
+
+        try:
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": os.path.join(test_dir, "ui", "view.ts"),
+                        "TargetContent": "// ui code",
+                        "ReplacementContent": "const net = await import('../network/client');\n// ui code"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "deny")
+            self.assertIn("G4_IMPORT_MATRIX", res.get("reason", ""))
+        finally:
+            if os.path.exists(cfg_path):
+                os.remove(cfg_path)
+
+    def test_g4_evasion_template_literal_blocked(self):
+        """Red Team Evasion: backtick template literal import(`../network/client`) -> BLOCK"""
+        test_dir = os.path.dirname(__file__)
+        cfg_path = os.path.join(test_dir, ".gravityguard.json")
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump({"layers": {"ui": {"forbiddenImports": ["network"]}}}, f)
+
+        try:
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": os.path.join(test_dir, "ui", "view.ts"),
+                        "TargetContent": "// ui code",
+                        "ReplacementContent": "const net = import(`../network/client`);\n// ui code"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "deny")
+            self.assertIn("G4_IMPORT_MATRIX", res.get("reason", ""))
+        finally:
+            if os.path.exists(cfg_path):
+                os.remove(cfg_path)
+
+    def test_g4_evasion_string_concatenation_blocked(self):
+        """Red Team Evasion: require('../net' + 'work/client') string concatenation -> BLOCK"""
+        test_dir = os.path.dirname(__file__)
+        cfg_path = os.path.join(test_dir, ".gravityguard.json")
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump({"layers": {"ui": {"forbiddenImports": ["network"]}}}, f)
+
+        try:
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": os.path.join(test_dir, "ui", "view.ts"),
+                        "TargetContent": "// ui code",
+                        "ReplacementContent": "const net = require('../net' + 'work/client');\n// ui code"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "deny")
+            self.assertIn("G4_IMPORT_MATRIX", res.get("reason", ""))
+        finally:
+            if os.path.exists(cfg_path):
+                os.remove(cfg_path)
+
+    def test_g4_evasion_python_dynamic_import_blocked(self):
+        """Red Team Evasion: __import__('network.client') in Python -> BLOCK"""
+        test_dir = os.path.dirname(__file__)
+        cfg_path = os.path.join(test_dir, ".gravityguard.json")
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump({"layers": {"ui": {"forbiddenImports": ["network"]}}}, f)
+
+        try:
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": os.path.join(test_dir, "ui", "view.py"),
+                        "TargetContent": "# ui code",
+                        "ReplacementContent": "net = __import__('network.client')\n# ui code"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "deny")
+            self.assertIn("G4_IMPORT_MATRIX", res.get("reason", ""))
+        finally:
+            if os.path.exists(cfg_path):
+                os.remove(cfg_path)
+
+    def test_g2_security_tampering_escape_hatch_injection_blocked(self):
+        """Red Team Evasion: AI attempting to inject `// srp: allow-monolith` -> BLOCK G2_SECURITY_TAMPERING"""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            prod_file = os.path.join(temp_dir, "ordinary_service.py")
+            with open(prod_file, "w", encoding="utf-8") as f:
+                f.write("def run():\n    return True\n")
+
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": prod_file,
+                        "TargetContent": "def run():\n    return True\n",
+                        "ReplacementContent": "# srp: allow-monolith\ndef run():\n    return True\n"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "deny")
+            self.assertIn("G2_SECURITY_TAMPERING", res.get("reason", ""))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_g2_security_tampering_human_marker_preserved(self):
+        """Legitimate human-authored `# srp: allow-monolith` is not blocked on subsequent edits."""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            prod_file = os.path.join(temp_dir, "existing_monolith.py")
+            with open(prod_file, "w", encoding="utf-8") as f:
+                f.write("# srp: allow-monolith\ndef anchor():\n    return 0\n")
+
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": prod_file,
+                        "TargetContent": "def anchor():\n    return 0\n",
+                        "ReplacementContent": "def anchor():\n    return 42\n"
+                    }
+                }
+            }
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "allow")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
     # --- G0: SECRET LEAK GUARD TESTS ---
 
     def test_g0_block_private_key(self):

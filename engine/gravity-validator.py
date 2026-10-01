@@ -85,6 +85,28 @@ def _resolve_log_dir() -> str:
     return os.path.expanduser(r"~/.gemini/logs")
 
 
+def extract_project_info(target_file: str) -> Tuple[str, str]:
+    """Extracts project name and project root from target_file."""
+    if not target_file:
+        return "", ""
+    try:
+        p = Path(os.path.abspath(target_file))
+        curr = p.parent
+        for _ in range(6):
+            if (curr / ".git").exists() or (curr / ".gravityguard.json").exists():
+                return curr.name, str(curr)
+            curr = curr.parent
+        parts = p.parts
+        for i, part in enumerate(parts):
+            if part.lower() == "github" and i + 1 < len(parts):
+                if parts[i + 1].lower() in ("public", "private") and i + 2 < len(parts):
+                    return parts[i + 2], str(Path(*parts[:i + 3]))
+                return parts[i + 1], str(Path(*parts[:i + 2]))
+        return p.parent.name, str(p.parent)
+    except Exception:
+        return "", ""
+
+
 def log_event(action: str, status: str, target_file: str, reason: str, rule_id: str = "SRP"):
     log_dir = _resolve_log_dir()
     try:
@@ -115,8 +137,39 @@ def log_event(action: str, status: str, target_file: str, reason: str, rule_id: 
         
         with open(log_path, "w", encoding="utf-8") as f:
             json.dump(current_data, f, indent=2, ensure_ascii=False)
-    except Exception:
-        pass
+
+        # Permanent Audit & Telemetry Archive (JSONL for product R&D and failure analysis)
+        repo_archive_dir = r"C:\Users\Halil Emre\Desktop\GitHub\Public\GravityGuard\archives\audit-logs"
+        permanent_log_path = os.path.join(repo_archive_dir, "gravityguard_permanent_audit.jsonl")
+        if not os.path.isdir(repo_archive_dir):
+            permanent_log_path = os.path.join(log_dir, "gravityguard_permanent_audit.jsonl")
+
+        proj_name, proj_root = extract_project_info(target_file)
+        ext = os.path.splitext(target_file)[1].lower() if target_file else ""
+        conv_id = os.environ.get("ANTIGRAVITY_CONVERSATION_ID", os.environ.get("CONVERSATION_ID", ""))
+        model_id = os.environ.get("ANTIGRAVITY_MODEL", os.environ.get("MODEL_NAME", "unknown"))
+
+        telemetry_event = {
+            "timestamp": datetime.now().isoformat(),
+            "action": action,
+            "status": status,
+            "ruleId": rule_id,
+            "target": target_file,
+            "project": proj_name,
+            "projectRoot": proj_root,
+            "fileExt": ext,
+            "conversationId": conv_id,
+            "model": model_id,
+            "reason": reason
+        }
+
+        try:
+            with open(permanent_log_path, "a", encoding="utf-8") as af:
+                af.write(json.dumps(telemetry_event, ensure_ascii=False) + "\n")
+        except OSError as log_err:
+            sys.stderr.write(f"[GravityGuard Archive Error] {log_err}\n")
+    except Exception as exc:
+        sys.stderr.write(f"[GravityGuard Event Error] {exc}\n")
 
 
 # ============================================================================
@@ -508,6 +561,24 @@ def check_g3_compiler_bypass(added_text: str) -> List[str]:
     return detected
 
 
+# --- ESCAPE HATCH TAMPERING GUARD (BLOCK) ---
+def check_escape_hatch_tampering(added_text: str, old_full_content: str) -> Tuple[bool, str]:
+    """
+    Blocks AI attempts to inject escape hatch comments (e.g. `srp: allow-monolith`, `srp: bypass`)
+    to silence architectural / SRP guards.
+    Only human developers can add these markers; newly added markers in AI tool calls are blocked.
+    """
+    marker_pattern = r"(?://|/\*|#)\s*(?:srp\s*:\s*(?:allow-monolith|cohesive-monolith|bypass|noqa)|noqa\s*:\s*srp)\b"
+    if re.search(marker_pattern, added_text, re.IGNORECASE):
+        if not re.search(marker_pattern, old_full_content, re.IGNORECASE):
+            return True, (
+                "Güvenlik/Mimari susturma hilesi tespit edildi ('srp: allow-monolith' / 'srp: bypass'). "
+                "Yapay zeka ajanları kendi kendilerine guard muafiyeti veya bypass belirteci ekleyemez; "
+                "bu belirteç yalnızca insan geliştirici tarafından elle eklenebilir."
+            )
+    return False, ""
+
+
 # --- G4: IMPORT MATRIX (BLOCK) ---
 def load_gravityguard_config(target_file: str) -> Optional[dict]:
     """Traverse upward looking for .gravityguard.json config."""
@@ -557,17 +628,27 @@ def check_g4_import_matrix(target_file: str, added_text: str) -> Tuple[bool, str
     normalized_path = target_file.replace("\\", "/").lower()
     layers = cfg.get("layers", {})
 
-    # 1. Python imports
+    # 1. Python imports (static & dynamic)
     py_from_imports = re.findall(r"^\s*from\s+([\.\w]+)\s+import", added_text, re.MULTILINE)
     py_direct_imports = re.findall(r"^\s*import\s+([^\n#;]+)", added_text, re.MULTILINE)
+    py_dynamic_imports = re.findall(r"\b(?:__import__|importlib\.import_module)\s*\(\s*[\"']([^\"']+)[\"']", added_text)
 
-    # 2. TypeScript/JavaScript imports
+    # 2. TypeScript/JavaScript imports (static, dynamic, side-effects, backticks)
     ts_from_imports = re.findall(r"^\s*import\s+.*?from\s+[\"']([^\"']+)[\"']", added_text, re.MULTILINE)
     ts_side_effect_imports = re.findall(r"^\s*import\s+[\"']([^\"']+)[\"']", added_text, re.MULTILINE)
-    ts_require_imports = re.findall(r"\brequire\s*\(\s*[\"']([^\"']+)[\"']\s*\)", added_text, re.MULTILINE)
+    ts_dynamic_imports = re.findall(r"\bimport\s*\(\s*[`\"']([^`\"']+)[\"'`]\s*\)", added_text)
+    ts_require_imports = re.findall(r"\brequire\s*\(\s*[`\"']([^`\"']+)[\"'`]\s*\)", added_text)
+
+    # 3. String concatenation evasion detection: e.g. require('../net' + 'work/client')
+    concat_calls = re.findall(r"\b(?:require|import)\s*\(\s*([\"'`][^\"'`]+[\"'`](?:\s*\+\s*[\"'`][^\"'`]+[\"'`])+)\s*\)", added_text)
+    ts_concatenated_imports = []
+    for call_arg in concat_calls:
+        parts = re.findall(r"[\"'`]([^\"'`]+)[\"'`]", call_arg)
+        if parts:
+            ts_concatenated_imports.append("".join(parts))
 
     imported_modules: Set[str] = set()
-    for imp in py_from_imports:
+    for imp in py_from_imports + py_dynamic_imports:
         if imp:
             imported_modules.add(imp.lower())
     for imp_line in py_direct_imports:
@@ -575,7 +656,7 @@ def check_g4_import_matrix(target_file: str, added_text: str) -> Tuple[bool, str
             mod = part.strip().split()[0] if part.strip() else ""
             if mod:
                 imported_modules.add(mod.lower())
-    for imp in ts_from_imports + ts_side_effect_imports + ts_require_imports:
+    for imp in ts_from_imports + ts_side_effect_imports + ts_dynamic_imports + ts_require_imports + ts_concatenated_imports:
         if imp:
             imported_modules.add(imp.lower())
 
@@ -627,7 +708,7 @@ def check_g4_import_matrix(target_file: str, added_text: str) -> Tuple[bool, str
 #   so the out-of-the-box behaviour is unchanged from v1.2.7.
 DEFAULT_COMPLEXITY_THRESHOLDS: Dict[str, int] = {
     "monolithLoc": 1000,              # projected LOC that makes a file a monolith
-    "singleWriteLoc": 180,            # one tool call adding this much to an EXISTING file
+    "singleWriteLoc": 200,            # one tool call adding this much to an EXISTING file
     "creepBaseLoc": 800,              # file size above which additions are "creep"
     "creepAddedLoc": 80,              # addition that counts as creep on such a file
     "overEngineeringMaxLoc": 50,      # "small change" window for the abstraction spike
@@ -721,6 +802,55 @@ def _has_declared_cohesion_marker(content: str) -> bool:
     return bool(re.search(r"#\s*noqa\s*:\s*srp\b", content, re.IGNORECASE))
 
 
+def record_and_check_cumulative_growth(target_file: str, added_clean_count: int, threshold: int = 200, window_seconds: int = 900) -> Tuple[bool, int]:
+    """
+    Tracks cumulative LOC additions to existing files within an active session window (15 minutes).
+    Thwarts the 'Micro-Chunking' evasion tactic where an agent adds 199 lines repeatedly
+    to circumvent the singleWriteLoc threshold.
+    Returns: (is_cumulative_spike, total_accumulated_loc)
+    """
+    if added_clean_count <= 0 or not target_file or not os.path.isabs(target_file):
+        return False, 0
+
+    log_dir = _resolve_log_dir()
+    delta_file = os.path.join(log_dir, "gravityguard_session_deltas.json")
+    now = time.time()
+    
+    data = {}
+    try:
+        if os.path.exists(delta_file):
+            with open(delta_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+    except Exception:
+        data = {}
+
+    norm_target = os.path.normpath(target_file).lower()
+    file_records = data.get(norm_target, [])
+    valid_records = [r for r in file_records if isinstance(r, dict) and now - r.get("ts", 0) <= window_seconds]
+    
+    current_total = sum(r.get("added", 0) for r in valid_records) + added_clean_count
+    valid_records.append({"ts": now, "added": added_clean_count})
+    data[norm_target] = valid_records
+
+    # Prune stale records (> 1 hour)
+    pruned_data = {}
+    for path, recs in data.items():
+        recent = [r for r in recs if isinstance(r, dict) and now - r.get("ts", 0) <= 3600]
+        if recent:
+            pruned_data[path] = recent
+
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+        with open(delta_file, "w", encoding="utf-8") as f:
+            json.dump(pruned_data, f, indent=2)
+    except Exception as e:
+        sys.stderr.write(f"[GravityGuard Session Delta Error] {e}\n")
+
+    if current_total >= threshold:
+        return True, current_total
+    return False, current_total
+
+
 # --- ARCH_FILE_GROWTH: LARGE FILE & RAPID GROWTH DETECTION (WARN ONLY) ---
 def check_arch_file_growth(
     target_file: str,
@@ -728,7 +858,8 @@ def check_arch_file_growth(
     projected_content: str,
     added_lines: List[str],
     is_test_file: bool = False,
-    thresholds: Optional[Dict[str, int]] = None
+    thresholds: Optional[Dict[str, int]] = None,
+    cumulative_loc: int = 0
 ) -> Tuple[bool, str]:
     """
     Lightweight heuristic to prevent monolithic file accumulation.
@@ -740,6 +871,7 @@ def check_arch_file_growth(
       A) this write CROSSES the monolith line: old_loc < monolithLoc <= projected_loc
       B) old_loc >= creepBaseLoc AND added >= creepAddedLoc
       C) one tool call adds >= singleWriteLoc to an EXISTING file
+      D) cumulative additions to existing file >= singleWriteLoc within session window
     B and C are skipped for a file that does not exist yet: a new module's size
     is the result of modularisation, not accumulation. A is not skipped for
     them, because a brand-new 1,000+ line file is still a monolith.
@@ -784,6 +916,10 @@ def check_arch_file_growth(
         elif added_count >= single_write_loc:
             reasons.append(
                 f"tek seferde büyük kod bloğu eklendi (+{added_count} LOC)"
+            )
+        elif cumulative_loc >= single_write_loc:
+            reasons.append(
+                f"kümülatif oturum büyümesi eşiği aşıldı (son 15 dakikada peş peşe toplam +{cumulative_loc} LOC)"
             )
         # A file may declare itself a deliberate monolith with the same marker the
         # SRP boundary rule honours, so there is one escape hatch to learn. The
@@ -1891,6 +2027,18 @@ def validate_gravityguard():
             sys.exit(0)
 
     # ========================================================================
+    # GUARD 2B: G2_SECURITY_TAMPERING — ESCAPE HATCH INJECTION (BLOCK)
+    # ========================================================================
+    tamper_violated, tamper_reason = check_escape_hatch_tampering(added_text, old_full_content)
+    if tamper_violated:
+        log_event(tool_name, "BLOCKED", target_file, tamper_reason, rule_id="G2_SECURITY_TAMPERING")
+        print(json.dumps({
+            "decision": "deny",
+            "reason": f"🛑 [G2_SECURITY_TAMPERING]: '{target_file}' - {tamper_reason}"
+        }))
+        sys.exit(0)
+
+    # ========================================================================
     # GUARD 3: G3 — COMPILER & LINTER BYPASS (WARN ONLY)
     # ========================================================================
     g3_matches = check_g3_compiler_bypass(added_text)
@@ -1922,13 +2070,18 @@ def validate_gravityguard():
     # ========================================================================
     # GUARD 6: ARCH_FILE_GROWTH — LARGE FILE & RAPID GROWTH (WARN ONLY)
     # ========================================================================
+    added_clean_lines = [l for l in added_lines if l.strip() and not l.strip().startswith(("#", "//", "/*", "*"))]
+    single_write_thresh = complexity_thresholds.get("singleWriteLoc", 200) if complexity_thresholds else 200
+    is_cumul, cum_loc = record_and_check_cumulative_growth(target_file, len(added_clean_lines), threshold=single_write_thresh)
+
     arch_triggered, arch_msg = check_arch_file_growth(
         target_file=target_file,
         old_full_content=old_full_content,
         projected_content=projected_content,
         added_lines=added_lines,
         is_test_file=is_test_file,
-        thresholds=complexity_thresholds
+        thresholds=complexity_thresholds,
+        cumulative_loc=cum_loc if is_cumul else 0
     )
     if arch_triggered:
         log_event(tool_name, "WARNING", target_file, arch_msg, rule_id="ARCH_FILE_GROWTH")

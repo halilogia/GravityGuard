@@ -48,7 +48,7 @@ PAIRS = [
 ]
 
 PLUGIN_DIR = os.path.join(
-    os.path.expanduser("~"), ".gemini", "config", "plugins", "srp-swarm-guardian"
+    os.path.expanduser("~"), ".gemini", "config", "plugins", "gravityguard"
 )
 BACKUP_DIR = os.path.join(os.path.expanduser("~"), ".git-hook-backups", "plugin-sync")
 
