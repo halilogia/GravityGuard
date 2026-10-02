@@ -92,19 +92,21 @@ def _repair_journal_tail(permanent_log_path: str) -> None:
                 return
 
             last_line = lines[-1]
-            is_clean = False
-            if last_line.endswith(b"\n") or last_line.endswith(b"\r"):
-                stripped = last_line.strip()
-                if stripped:
-                    try:
-                        json.loads(stripped.decode("utf-8"))
-                        is_clean = True
-                    except Exception:
-                        is_clean = False
-                else:
-                    is_clean = True
-
-            if is_clean:
+            stripped = last_line.strip()
+            if stripped:
+                try:
+                    json.loads(stripped.decode("utf-8"))
+                    # Complete valid JSON! If trailing newline delimiter was omitted, append it
+                    if not (last_line.endswith(b"\n") or last_line.endswith(b"\r")):
+                        f.seek(0, os.SEEK_END)
+                        f.write(b"\n")
+                        f.flush()
+                    return
+                except Exception as parse_err:
+                    # Broken / partial JSON: fall through to truncate
+                    sys.stderr.write(f"[GravityGuard WAL Tail Notice] Incomplete trailing JSON: {parse_err}\n")
+            elif last_line.endswith(b"\n") or last_line.endswith(b"\r"):
+                # Clean trailing whitespace/newline
                 return
 
             sys.stderr.write("[GravityGuard WAL Repair] Torn journal tail detected; repairing to last valid newline\n")

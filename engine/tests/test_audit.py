@@ -516,6 +516,42 @@ class TestAuditSubsystem(unittest.TestCase):
         self.assertEqual(live_reconciled["effectiveness"]["totalBlocked"], 1)
         self.assertEqual(live_reconciled["lastAuditSeq"], 3)
 
+    def test_valid_journal_tail_without_newline_is_preserved(self):
+        # 1. Produce 2 valid events (seq 1, seq 2)
+        log_event("write", "APPROVED", "src/v1.py", "clean 1", rule_id="PASS")
+        log_event("write", "APPROVED", "src/v2.py", "clean 2", rule_id="PASS")
+
+        perm_path = os.path.join(self.test_dir, "gravityguard_permanent_audit.jsonl")
+        # 2. Strip final newline character (simulating crash right after writing JSON but before \n delimiter)
+        with open(perm_path, "rb+") as f:
+            data = f.read()
+            self.assertTrue(data.endswith(b"\n"))
+            f.seek(0)
+            f.write(data[:-1])
+            f.truncate()
+
+        # Check that file currently does not end with newline
+        with open(perm_path, "rb") as f:
+            self.assertFalse(f.read().endswith(b"\n"))
+
+        # 3. Next log_event should detect that the JSON is valid, restore the missing newline delimiter, and append seq 3
+        log_event("write", "APPROVED", "src/v3.py", "clean 3", rule_id="PASS")
+
+        # 4. Assert seq 1, 2, 3 are ALL preserved
+        perm_events = []
+        with open(perm_path, "r", encoding="utf-8") as pf:
+            for line in pf:
+                line = line.strip()
+                if line:
+                    perm_events.append(json.loads(line))
+
+        self.assertEqual([e["auditSeq"] for e in perm_events], [1, 2, 3])
+
+        live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
+        with open(live_path, "r", encoding="utf-8") as lf:
+            live = json.load(lf)
+        self.assertEqual(live["lastAuditSeq"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()

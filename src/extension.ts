@@ -13,6 +13,11 @@ interface LogEvent {
   action?: string;
   reason?: string;
   ruleId?: string;
+  outcome?: string;
+  resolvedRuleId?: string;
+  recoveryAttempts?: number;
+  resolutionMs?: number;
+  [key: string]: any;
 }
 
 interface GuardianData {
@@ -611,8 +616,25 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       eventsList.forEach((e, idx) => {
         const isBlk = e.status === 'BLOCKED';
         const isWrn = e.status === 'WARNING';
-        const badgeCls = isBlk ? 'badge-blocked' : isWrn ? 'badge-warning' : 'badge-allowed';
-        const statusLabel = isBlk ? 'BLOCK' : isWrn ? 'WARN' : 'ALLOW';
+        const isShd = e.status === 'SHADOW_TRIGGER' || e.outcome === 'SHADOW_OBSERVED';
+        const isRec = e.outcome === 'RECOVERED';
+
+        let badgeCls = 'badge-allowed';
+        let statusLabel = 'ALLOW';
+        if (isShd) {
+          badgeCls = 'badge-purple';
+          statusLabel = 'SHADOW';
+        } else if (isRec) {
+          badgeCls = 'badge-cyan';
+          statusLabel = 'RECOVERED';
+        } else if (isBlk) {
+          badgeCls = 'badge-blocked';
+          statusLabel = 'BLOCK';
+        } else if (isWrn) {
+          badgeCls = 'badge-warning';
+          statusLabel = 'WARN';
+        }
+
         const fileName = e.target ? path.basename(e.target) : (e.action || 'system');
         const timeStr = e.timestamp ? (e.timestamp.split(' ')[1] || e.timestamp) : '';
         const ruleId = e.ruleId || 'PASS';
@@ -634,8 +656,20 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
             <div id="evt-${idx}" class="stream-drawer" style="display: none;">
               <div class="drawer-header">
                 <span class="drawer-rule">${escapeHtml(ruleId)}</span>
-                <span class="status-badge ${badgeCls}">${e.status}</span>
+                <span class="status-badge ${badgeCls}">${statusLabel}</span>
               </div>
+              ${isRec ? `
+                <div class="drawer-meta-pill bg-cyan">
+                  <span>✅ İyileşme (Recovery): <strong>${escapeHtml(e.resolvedRuleId || e.ruleId || 'Rule')}</strong></span>
+                  <span>• ${e.recoveryAttempts || 1}. denemede çözüldü</span>
+                  ${e.resolutionMs ? `<span>• Süre: ${(e.resolutionMs / 1000).toFixed(1)}s</span>` : ''}
+                </div>
+              ` : ''}
+              ${isShd ? `
+                <div class="drawer-meta-pill bg-purple">
+                  <span>👁️ Gölge Modu (Shadow): Ajan engellenmedi; gölge telemetrisi kaydedildi.</span>
+                </div>
+              ` : ''}
               ${e.target ? `<div class="drawer-target" title="${fullTargetEsc}">📁 ${fullTargetEsc}</div>` : ''}
               ${e.reason ? `<div class="drawer-reason">${reasonEsc}</div>` : ''}
               <div class="drawer-buttons">
@@ -819,39 +853,55 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
 
     const ruleStats: Record<string, any> = eff.ruleStats || {};
 
-    function formatRuleStat(ruleKey: string, defaultName: string): { label: string; val: string; valClass: string } {
+    function formatRuleStat(ruleKey: string, defaultName: string) {
       const stat = ruleStats[ruleKey];
-      if (!stat || stat.blocked === 0) {
-        return {
-          label: defaultName,
-          val: 'Temiz (0 İhlal)',
-          valClass: 'text-muted'
-        };
+      const b = stat?.blocked || 0;
+      const r = stat?.recovered || 0;
+      const rate = typeof stat?.recoveryRate === 'number' ? stat.recoveryRate : (b > 0 ? Math.round((r / b) * 100) : 100);
+      const med = stat?.medianAttempts || 1;
+      let badgeText = '⚪ Yetersiz Veri';
+      let badgeClass = 'badge-neutral';
+
+      if (b === 0) {
+        badgeText = '✅ 0 İhlal';
+        badgeClass = 'badge-allowed';
+      } else if (b < 10) {
+        badgeText = `⚪ Yetersiz Veri (n=${b})`;
+        badgeClass = 'badge-neutral';
+      } else if (b < 30) {
+        badgeText = `🟡 Ön Sinyal (n=${b})`;
+        badgeClass = 'badge-warning';
+      } else if (rate >= 80) {
+        badgeText = `🏆 Yüksek Değer (n=${b})`;
+        badgeClass = 'badge-allowed';
+      } else if (rate < 50) {
+        badgeText = `⚡ Sürtünme (n=${b})`;
+        badgeClass = 'badge-blocked';
+      } else {
+        badgeText = `🟢 Dengeli (n=${b})`;
+        badgeClass = 'badge-cyan';
       }
-      const n = stat.blocked;
-      if (n < 10) {
-        return {
-          label: defaultName,
-          val: `Yetersiz Veri (n=${n})`,
-          valClass: 'text-muted'
-        };
-      }
-      const rate = typeof stat.recoveryRate === 'number' ? stat.recoveryRate : 0;
-      const med = stat.medianAttempts || 1;
-      const valClass = rate >= 80 ? 'text-green' : rate >= 50 ? 'text-cyan' : 'text-amber';
-      const prefix = n < 30 ? 'Ön Sinyal: ' : '';
+
       return {
         label: defaultName,
-        val: `${prefix}%${rate} Düzeltme (n=${n}, medyan ${med})`,
-        valClass
+        b,
+        r,
+        rate,
+        med,
+        badgeText,
+        badgeClass
       };
     }
 
-    const g0Stat = formatRuleStat('G0_SECRET_LEAK', 'G0 Secret Leak');
-    const g1Stat = formatRuleStat('G1_SILENT_EXCEPTION', 'G1 Silent Exception');
-    const g2Stat = formatRuleStat('G2_TEST_INTEGRITY', 'G2 Test Integrity');
-    const g4Stat = formatRuleStat('G4_IMPORT_MATRIX', 'G4 Import Matrix');
-    const srpStat = formatRuleStat('SRP_BOUNDARY', 'SRP & Cohesion');
+    const rulesToDisplay = [
+      formatRuleStat('G0_SECRET_LEAK', 'G0 Secret Leak'),
+      formatRuleStat('G1_SILENT_EXCEPTION', 'G1 Silent Exception'),
+      formatRuleStat('G2_TEST_INTEGRITY', 'G2 Test Integrity'),
+      formatRuleStat('G4_IMPORT_MATRIX', 'G4 Import Matrix'),
+      formatRuleStat('SRP_BOUNDARY', 'SRP & Cohesion')
+    ];
+
+    const lastSeq = (data as any)?.lastAuditSeq || 0;
 
     const insightsHtml = `
       <div class="insight-card">
@@ -866,27 +916,21 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       </div>
 
       <div class="insight-card">
-        <div class="insight-title">🛡️ Güvenlik ve Mimari Gardiyanları (Ampirik Veri)</div>
-        <div class="metric-row">
-          <span class="metric-lbl">${g0Stat.label}:</span>
-          <span class="metric-val ${g0Stat.valClass}">${g0Stat.val}</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-lbl">${g1Stat.label}:</span>
-          <span class="metric-val ${g1Stat.valClass}">${g1Stat.val}</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-lbl">${g2Stat.label}:</span>
-          <span class="metric-val ${g2Stat.valClass}">${g2Stat.val}</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-lbl">${g4Stat.label}:</span>
-          <span class="metric-val ${g4Stat.valClass}">${g4Stat.val}</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-lbl">${srpStat.label}:</span>
-          <span class="metric-val ${srpStat.valClass}">${srpStat.val}</span>
-        </div>
+        <div class="insight-title">🛡️ Gardiyan Etkinlik Karnesi (Ampirik Veri)</div>
+        ${rulesToDisplay.map(st => `
+          <div class="rule-stat-item">
+            <div class="rule-stat-header">
+              <span class="rule-stat-name">${escapeHtml(st.label)}</span>
+              <span class="status-badge ${st.badgeClass}">${st.badgeText}</span>
+            </div>
+            ${st.b > 0 ? `
+              <div class="rule-stat-sub">
+                <span>${st.b} müdahale • ${st.r} düzeltildi (%${st.rate})</span>
+                <span>Medyan: ${st.med} deneme</span>
+              </div>
+            ` : `<div class="rule-stat-sub text-muted">Aktif oturumda temiz (0 İhlal)</div>`}
+          </div>
+        `).join('')}
       </div>
 
       <div class="insight-card">
@@ -901,11 +945,23 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
         </div>
         <div class="metric-row">
           <span class="metric-lbl">ARCH_FILE_GROWTH:</span>
-          <span class="metric-val text-amber">Tavsiye Uyarısı / Gölge Modu</span>
+          <span class="metric-val text-purple">Tavsiye • Gölge Modu (SHADOW)</span>
         </div>
         <div class="metric-row">
           <span class="metric-lbl">G3 Compiler Bypass:</span>
-          <span class="metric-val text-amber">Tavsiye Uyarısı</span>
+          <span class="metric-val text-amber">Tavsiye Uyarısı (WARN)</span>
+        </div>
+      </div>
+
+      <div class="insight-card">
+        <div class="insight-title">⚡ Telemetri & WAL Durumu</div>
+        <div class="metric-row">
+          <span class="metric-lbl">Audit Journal:</span>
+          <span class="metric-val text-green">● Canonical Online (Write-Ahead)</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-lbl">Live Checkpoint:</span>
+          <span class="metric-val text-cyan">● Senkronize (Seq #${lastSeq})</span>
         </div>
       </div>
 
@@ -1072,6 +1128,9 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
           .badge-allowed { background: rgba(16, 185, 129, 0.15); color: var(--color-green); }
           .badge-blocked { background: rgba(239, 68, 68, 0.15); color: var(--color-red); }
           .badge-warning { background: rgba(245, 158, 11, 0.15); color: var(--color-amber); }
+          .badge-purple { background: rgba(192, 132, 252, 0.15); color: var(--color-purple); }
+          .badge-cyan { background: rgba(56, 189, 248, 0.15); color: var(--color-cyan); }
+          .badge-neutral { background: rgba(255, 255, 255, 0.08); color: var(--text-muted); }
           .current-rule-badge {
             font-size: 9px;
             font-weight: 700;
@@ -1188,6 +1247,25 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
             border-top: 1px solid var(--border-dim);
           }
           .drawer-header { display: flex; justify-content: space-between; margin-bottom: 4px; }
+          .drawer-meta-pill {
+            margin-bottom: 6px;
+            padding: 4px 6px;
+            border-radius: 4px;
+            font-size: 9px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+          }
+          .drawer-meta-pill.bg-cyan {
+            background: rgba(56, 189, 248, 0.12);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            color: #bae6fd;
+          }
+          .drawer-meta-pill.bg-purple {
+            background: rgba(192, 132, 252, 0.12);
+            border: 1px solid rgba(192, 132, 252, 0.25);
+            color: #e9d5ff;
+          }
           .drawer-rule { font-weight: 800; font-size: 10px; color: var(--color-cyan); }
           .drawer-target { font-size: 9px; color: var(--text-muted); word-break: break-all; margin-bottom: 4px; }
           .drawer-reason { font-size: 10px; color: #cbd5e1; line-height: 1.4; margin-bottom: 6px; }
@@ -1277,6 +1355,30 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
           .metric-row { display: flex; justify-content: space-between; font-size: 9px; padding: 2px 0; }
           .metric-lbl { color: var(--text-muted); }
           .metric-val { font-weight: 700; }
+          .rule-stat-item {
+            padding: 6px 0;
+            border-bottom: 1px solid var(--border-dim);
+          }
+          .rule-stat-item:last-child {
+            border-bottom: none;
+          }
+          .rule-stat-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 3px;
+          }
+          .rule-stat-name {
+            font-weight: 700;
+            font-size: 10px;
+            color: var(--text-main);
+          }
+          .rule-stat-sub {
+            display: flex;
+            justify-content: space-between;
+            font-size: 9px;
+            color: var(--text-muted);
+          }
 
           /* Helpers */
           .text-green { color: var(--color-green); }

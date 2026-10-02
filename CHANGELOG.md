@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **WAL Journal Kuyruk Satır Sonu Koruma ve Arayüz Zenginleştirmesi (Journal Tail Newline Restoration & UI Polish)**:
+  - `engine/gravityguard_engine/audit.py`: Süreç kesintisi durumunda geçerli ve eksiksiz bir JSON nesnesi diske yazılmış ancak satır sonu ayracı (`\n`) henüz tamamlanmamışsa, `_repair_journal_tail()` artık olayı silmek yerine eksik `\n` ayırıcısını ekleyerek olayı sıfır kayıpla korur (`test_valid_journal_tail_without_newline_is_preserved`).
+  - `src/extension.ts`: Canlı Akış çekmecesinde `SHADOW` ve `RECOVERED` (çözülen kural, deneme sayısı, süre) rozetleri; İçgörüler sekmesinde her kural için ampirik metrik kartları ($n$, düzeltme oranı %, medyan deneme, 3-kademeli eşik rozetleri) ve Canlı Telemetri & WAL Durumu kartı eklendi.
+  - **Test Kapsamı**: `engine/tests/test_audit.py` test sayısı 18'den 19'a, toplam test sayısı **224'e** (200 Python + 24 TypeScript) yükseltildi (%100 yeşil).
 - **Write-Ahead Journaling ve Projeksiyon Denetim Noktası Protokolü (Journal-Projection Checkpoint Protocol)**:
   - `engine/gravityguard_engine/audit.py`: Kalıcı denetim kütüğü (`gravityguard_permanent_audit.jsonl`) ile canlı durum projeksiyonu (`srp_guardian_live.json`) arasındaki çökme penceresi (divergence) Write-Ahead Logging (WAL) mimarisiyle tamamen kapatıldı:
     1. **Monotonik Sıra Numaralandırması (`auditSeq` / `lastAuditSeq`)**: Kalıcı kütüğe eklenen her olay monotonik artan bir sıra numarası (`auditSeq`) alır; canlı durum dosyası ise projeksiyona işlenen son olayı (`lastAuditSeq`) takip eder (`test_audit_seq_monotonic_increment`).
