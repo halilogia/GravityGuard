@@ -21,9 +21,11 @@ from gravityguard_engine.governance import (
     clear_test_evidence_state,
     compute_file_digest,
     get_governance_file_path,
+    get_governance_lock_path,
     get_session_stop_retries,
     get_unresolved_doc_obligations,
     get_unresolved_test_evidence,
+    governance_transaction,
     increment_session_stop_retries,
     load_governance_state,
     load_test_evidence_state,
@@ -221,6 +223,68 @@ class TestGovernanceDomain(unittest.TestCase):
         res_tests, _ = reconcile_obligations_on_disk(root, cid)
         self.assertIn("engine/sample.py", res_tests)
         self.assertEqual(len(get_unresolved_test_evidence(root, cid)), 0)
+
+    def test_governance_transaction_nested_and_abort(self):
+        """Nested transactions must share state in-memory, and exceptions must abort save."""
+        root = Path(self.temp_dir)
+        # 1. Nested transaction
+        with governance_transaction(root) as s1:
+            s1.setdefault("custom", {})["outer"] = 1
+            with governance_transaction(root) as s2:
+                s2.setdefault("custom", {})["inner"] = 2
+
+        loaded = load_governance_state(root)
+        self.assertEqual(loaded.get("custom", {}).get("outer"), 1)
+        self.assertEqual(loaded.get("custom", {}).get("inner"), 2)
+
+        # 2. Transaction abort on exception
+        try:
+            with governance_transaction(root) as s3:
+                s3["custom"]["corrupted"] = 999
+                raise RuntimeError("Simulated crash")
+        except RuntimeError:
+            pass
+
+        reloaded = load_governance_state(root)
+        self.assertNotIn("corrupted", reloaded.get("custom", {}))
+
+    def test_concurrent_processes_no_lost_update(self):
+        """Two concurrent OS processes modifying state concurrently must not lose updates."""
+        root = Path(self.temp_dir)
+        worker_code = """
+import sys, os
+from pathlib import Path
+
+_ENGINE_DIR = sys.argv[1]
+sys.path.insert(0, _ENGINE_DIR)
+os.environ['GRAVITYGUARD_LOG_DIR'] = sys.argv[2]
+
+from gravityguard_engine.governance import record_pending_doc_obligation
+
+cid = sys.argv[3]
+prod_file = sys.argv[4]
+
+record_pending_doc_obligation(prod_file, ['CHANGELOG.md'], 'Test obligation', conversation_id=cid)
+"""
+        script_p = root / "_concur_worker.py"
+        script_p.write_text(worker_code, encoding="utf-8")
+        engine_dir = str(Path(_ENGINE_DIR).resolve())
+
+        import subprocess
+        p1 = subprocess.Popen([sys.executable, str(script_p), engine_dir, str(root), "proc-A", "engine/mod_a.py"])
+        p2 = subprocess.Popen([sys.executable, str(script_p), engine_dir, str(root), "proc-B", "engine/mod_b.py"])
+
+        rc1 = p1.wait()
+        rc2 = p2.wait()
+
+        self.assertEqual(rc1, 0, f"Worker A failed with exit code {rc1}")
+        self.assertEqual(rc2, 0, f"Worker B failed with exit code {rc2}")
+
+        state = load_governance_state(root)
+        self.assertIn("proc-A", state.get("sessions", {}), "Session A must be present in state")
+        self.assertIn("proc-B", state.get("sessions", {}), "Session B must be present in state")
+        self.assertIn("engine/mod_a.py", state.get("doc_obligations", {}).get("pending", {}))
+        self.assertIn("engine/mod_b.py", state.get("doc_obligations", {}).get("pending", {}))
 
 
 if __name__ == "__main__":
