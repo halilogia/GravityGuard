@@ -444,6 +444,78 @@ class TestAuditSubsystem(unittest.TestCase):
             else:
                 os.environ.pop("GRAVITYGUARD_DURABILITY", None)
 
+    def test_torn_journal_tail_repair_and_append(self):
+        import io
+        from unittest.mock import patch
+
+        # 1. Produce 2 valid events (seq 1, seq 2)
+        log_event("write", "APPROVED", "src/valid1.py", "clean 1", rule_id="PASS")
+        log_event("write", "APPROVED", "src/valid2.py", "clean 2", rule_id="PASS")
+
+        perm_path = os.path.join(self.test_dir, "gravityguard_permanent_audit.jsonl")
+        # 2. Simulate torn/partial write caused by mid-write process kill or power cut
+        # Append half-written JSON without newline
+        with open(perm_path, "ab") as pf:
+            pf.write(b'{"auditSeq": 3, "broken_half_written":')
+
+        # 3. Next log_event should detect torn tail, truncate to last valid newline, and proceed
+        stderr_buf = io.StringIO()
+        with patch("sys.stderr", stderr_buf):
+            id3 = log_event("write", "APPROVED", "src/repaired.py", "clean 3", rule_id="PASS")
+
+        self.assertIn("[GravityGuard WAL Repair]", stderr_buf.getvalue())
+
+        # 4. Verify all lines in permanent log parse as valid JSON and seq 3 is cleanly recorded
+        perm_events = []
+        with open(perm_path, "r", encoding="utf-8") as pf:
+            for line in pf:
+                line = line.strip()
+                if line:
+                    perm_events.append(json.loads(line))
+
+        self.assertEqual(len(perm_events), 3)
+        self.assertEqual(perm_events[0]["auditSeq"], 1)
+        self.assertEqual(perm_events[1]["auditSeq"], 2)
+        self.assertEqual(perm_events[2]["auditSeq"], 3)
+        self.assertEqual(perm_events[2]["eventId"], id3)
+
+        live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
+        with open(live_path, "r", encoding="utf-8") as lf:
+            live = json.load(lf)
+        self.assertEqual(live["lastAuditSeq"], 3)
+
+    def test_projection_ahead_of_journal_triggers_reconciliation(self):
+        import io
+        from unittest.mock import patch
+
+        # 1. Produce 2 valid events
+        log_event("write", "BLOCKED", "src/file1.py", "block 1", rule_id="G1_SILENT_EXCEPTION")
+        log_event("write", "APPROVED", "src/file1.py", "clean 1", rule_id="PASS")
+
+        live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
+        with open(live_path, "r", encoding="utf-8") as lf:
+            live = json.load(lf)
+
+        # 2. Corrupt live state by artificially pushing lastAuditSeq ahead of journal
+        live["lastAuditSeq"] = 99
+        live["effectiveness"]["totalBlocked"] = 999
+        with open(live_path, "w", encoding="utf-8") as lf:
+            json.dump(live, lf)
+
+        # 3. Next event should detect live > journal, warn, and reconcile from canonical journal
+        stderr_buf = io.StringIO()
+        with patch("sys.stderr", stderr_buf):
+            log_event("write", "APPROVED", "src/file2.py", "clean 2", rule_id="PASS")
+
+        self.assertIn("[GravityGuard Projection Ahead Of Journal]", stderr_buf.getvalue())
+
+        with open(live_path, "r", encoding="utf-8") as lf:
+            live_reconciled = json.load(lf)
+
+        # Bogus totalBlocked=999 was discarded; true history (1 block from file1) + current event
+        self.assertEqual(live_reconciled["effectiveness"]["totalBlocked"], 1)
+        self.assertEqual(live_reconciled["lastAuditSeq"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()

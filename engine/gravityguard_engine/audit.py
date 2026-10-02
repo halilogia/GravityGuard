@@ -68,6 +68,90 @@ def _read_last_journal_entry(permanent_log_path: str) -> Optional[Dict[str, Any]
     return None
 
 
+def _repair_journal_tail(permanent_log_path: str) -> None:
+    """
+    Repairs a torn or partial tail in the permanent audit journal (WAL).
+    If a process crashes or loses power mid-write, the last line may be truncated
+    or unparseable JSON. Truncates the file back to the last valid newline boundary.
+    """
+    if not os.path.exists(permanent_log_path):
+        return
+    try:
+        with open(permanent_log_path, "rb+") as f:
+            f.seek(0, os.SEEK_END)
+            total_size = f.tell()
+            if total_size == 0:
+                return
+
+            chunk_size = min(total_size, 16384)
+            f.seek(total_size - chunk_size)
+            chunk = f.read(chunk_size)
+
+            lines = chunk.splitlines(keepends=True)
+            if not lines:
+                return
+
+            last_line = lines[-1]
+            is_clean = False
+            if last_line.endswith(b"\n") or last_line.endswith(b"\r"):
+                stripped = last_line.strip()
+                if stripped:
+                    try:
+                        json.loads(stripped.decode("utf-8"))
+                        is_clean = True
+                    except Exception:
+                        is_clean = False
+                else:
+                    is_clean = True
+
+            if is_clean:
+                return
+
+            sys.stderr.write("[GravityGuard WAL Repair] Torn journal tail detected; repairing to last valid newline\n")
+
+            valid_offset = 0
+            found_valid = False
+            curr_offset = total_size - len(last_line)
+            for prev_line in reversed(lines[:-1]):
+                p_strip = prev_line.strip()
+                if not p_strip:
+                    curr_offset -= len(prev_line)
+                    continue
+                try:
+                    json.loads(p_strip.decode("utf-8"))
+                    found_valid = True
+                    valid_offset = curr_offset
+                    break
+                except Exception:
+                    curr_offset -= len(prev_line)
+
+            if not found_valid and chunk_size < total_size:
+                f.seek(0)
+                all_data = f.read()
+                all_lines = all_data.splitlines(keepends=True)
+                accum = 0
+                for line in all_lines:
+                    l_str = line.strip()
+                    if l_str:
+                        try:
+                            json.loads(l_str.decode("utf-8"))
+                            accum += len(line)
+                            valid_offset = accum
+                        except Exception:
+                            break
+                    else:
+                        accum += len(line)
+                        valid_offset = accum
+            elif not found_valid:
+                valid_offset = 0
+
+            f.seek(valid_offset)
+            f.truncate()
+            f.flush()
+    except Exception as err:
+        sys.stderr.write(f"[GravityGuard WAL Tail Repair Error] {err}\n")
+
+
 def _get_journal_last_seq(permanent_log_path: str) -> int:
     """
     Returns the highest auditSeq in the permanent audit journal.
@@ -397,6 +481,9 @@ def log_event(
             return event_id
 
         try:
+            # Repair torn tail if prior process crashed during WAL write
+            _repair_journal_tail(permanent_log_path)
+
             current_data = None
             if os.path.exists(log_path):
                 try:
@@ -417,6 +504,11 @@ def log_event(
                     current_data["lastAuditSeq"] = journal_last_seq
                 elif live_seq < journal_last_seq:
                     _replay_missing_journal_events(current_data, permanent_log_path, from_seq=live_seq)
+                elif live_seq > journal_last_seq:
+                    sys.stderr.write(
+                        f"[GravityGuard Projection Ahead Of Journal] live ({live_seq}) > journal ({journal_last_seq}); reconciling projection from canonical journal\n"
+                    )
+                    current_data = _rebuild_live_state_from_permanent_audit(permanent_log_path)
 
             active_violations = current_data.setdefault("activeViolations", {})
             if not isinstance(active_violations, dict):
