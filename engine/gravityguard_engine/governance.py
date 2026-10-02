@@ -268,31 +268,46 @@ def resolve_pending_test_evidence(
                 break
 
     state = load_governance_state(project_root)
-    pending = state.get("test_obligations", {}).get("pending", {})
     resolved = []
 
-    for prod_path, entry in list(pending.items()):
+    def _matches(prod_path: str, entry: dict) -> bool:
         cand = (entry.get("candidate_path") or "").lower()
         exp = (entry.get("expected_name") or "").lower()
         prod_stem = Path(prod_path).stem.lower()
 
-        matched = False
         if prod_path.lower() == norm_test or norm_test.endswith(prod_path.lower()):
-            matched = True
-        elif cand and (norm_test.endswith(cand) or cand.endswith(norm_test) or Path(cand).name == Path(norm_test).name):
-            matched = True
-        elif exp and (norm_test.endswith(exp) or Path(norm_test).name == exp):
-            matched = True
-        elif base_stem == prod_stem or base_stem.replace("-", "_") == prod_stem.replace("-", "_"):
-            matched = True
+            return True
+        if cand and (norm_test.endswith(cand) or cand.endswith(norm_test) or Path(cand).name == Path(norm_test).name):
+            return True
+        if exp and (norm_test.endswith(exp) or Path(norm_test).name == exp):
+            return True
+        if base_stem == prod_stem or base_stem.replace("-", "_") == prod_stem.replace("-", "_"):
+            return True
+        return False
 
-        if matched:
-            resolved.append(prod_path)
-            del pending[prod_path]
-            for s_id, s_data in state.get("sessions", {}).items():
-                s_pending = s_data.get("test_obligations", {}).get("pending", {})
-                if prod_path in s_pending:
-                    del s_pending[prod_path]
+    cid = conversation_id
+    if cid and cid in state.get("sessions", {}):
+        session = state["sessions"][cid]
+        pending = session.get("test_obligations", {}).get("pending", {})
+        for prod_path, entry in list(pending.items()):
+            if _matches(prod_path, entry):
+                resolved.append(prod_path)
+                del pending[prod_path]
+                # Prune from global pending only if no other session holds it
+                still_held = any(
+                    s_id != cid and prod_path in s_data.get("test_obligations", {}).get("pending", {})
+                    for s_id, s_data in state.get("sessions", {}).items()
+                )
+                if not still_held:
+                    state.get("test_obligations", {}).get("pending", {}).pop(prod_path, None)
+    else:
+        pending = state.get("test_obligations", {}).get("pending", {})
+        for prod_path, entry in list(pending.items()):
+            if _matches(prod_path, entry):
+                resolved.append(prod_path)
+                del pending[prod_path]
+                for s_id, s_data in state.get("sessions", {}).items():
+                    s_data.get("test_obligations", {}).get("pending", {}).pop(prod_path, None)
 
     if resolved:
         reset_session_stop_retries(project_root, conversation_id)
@@ -362,22 +377,41 @@ def resolve_pending_doc_obligations(
     doc_name = Path(norm_doc).name
 
     state = load_governance_state(project_root)
-    pending = state.get("doc_obligations", {}).get("pending", {})
     resolved = []
 
-    for prod_path, entry in list(pending.items()):
-        reqs = [r.lower() for r in entry.get("required_docs", ["changelog.md"])]
-        if any(doc_name == req or norm_doc.endswith(req) for req in reqs):
-            remaining = [r for r in entry.get("required_docs", []) if r.lower() != doc_name and not norm_doc.endswith(r.lower())]
-            if not remaining:
-                resolved.append(prod_path)
-                del pending[prod_path]
-                for s_id, s_data in state.get("sessions", {}).items():
-                    s_pending = s_data.get("doc_obligations", {}).get("pending", {})
-                    if prod_path in s_pending:
-                        del s_pending[prod_path]
-            else:
-                entry["required_docs"] = remaining
+    cid = conversation_id
+    if cid and cid in state.get("sessions", {}):
+        session = state["sessions"][cid]
+        pending = session.get("doc_obligations", {}).get("pending", {})
+        for prod_path, entry in list(pending.items()):
+            reqs = [r.lower() for r in entry.get("required_docs", ["changelog.md"])]
+            if any(doc_name == req or norm_doc.endswith(req) for req in reqs):
+                remaining = [r for r in entry.get("required_docs", []) if r.lower() != doc_name and not norm_doc.endswith(r.lower())]
+                if not remaining:
+                    resolved.append(prod_path)
+                    del pending[prod_path]
+                    # Prune from global pending only if no other session still holds it
+                    still_held = any(
+                        s_id != cid and prod_path in s_data.get("doc_obligations", {}).get("pending", {})
+                        for s_id, s_data in state.get("sessions", {}).items()
+                    )
+                    if not still_held:
+                        state.get("doc_obligations", {}).get("pending", {}).pop(prod_path, None)
+                else:
+                    entry["required_docs"] = remaining
+    else:
+        pending = state.get("doc_obligations", {}).get("pending", {})
+        for prod_path, entry in list(pending.items()):
+            reqs = [r.lower() for r in entry.get("required_docs", ["changelog.md"])]
+            if any(doc_name == req or norm_doc.endswith(req) for req in reqs):
+                remaining = [r for r in entry.get("required_docs", []) if r.lower() != doc_name and not norm_doc.endswith(r.lower())]
+                if not remaining:
+                    resolved.append(prod_path)
+                    del pending[prod_path]
+                    for s_id, s_data in state.get("sessions", {}).items():
+                        s_data.get("doc_obligations", {}).get("pending", {}).pop(prod_path, None)
+                else:
+                    entry["required_docs"] = remaining
 
     if resolved:
         reset_session_stop_retries(project_root, conversation_id)
@@ -484,6 +518,13 @@ def reconcile_obligations_on_disk(
         target_path_str = intent.get("target_path")
         if not target_path_str:
             continue
+
+        intent_cid = intent.get("conversation_id", "default")
+        # Session isolation: if reconciling for a specific conversation, only process its intents!
+        if conversation_id and intent_cid != conversation_id:
+            remaining_intents.append(intent)
+            continue
+
         p = Path(target_path_str)
         curr_hash, curr_mtime, curr_size = compute_file_digest(p)
         pre_hash = intent.get("pre_hash")
@@ -501,7 +542,6 @@ def reconcile_obligations_on_disk(
         if physically_modified:
             kind = intent.get("kind")
             target_f = intent.get("target_file", str(p))
-            intent_cid = intent.get("conversation_id", cid)
             if kind == "doc":
                 res = resolve_pending_doc_obligations(target_f, root, intent_cid)
                 resolved_docs.extend(res)
@@ -521,7 +561,7 @@ def reconcile_obligations_on_disk(
     active_intent_paths = {
         Path(intent["target_path"]).resolve()
         for intent in remaining_intents
-        if intent.get("target_path")
+        if intent.get("target_path") and (not conversation_id or intent.get("conversation_id") == conversation_id)
     }
 
     # 2. Cryptographic baseline & fallback disk verification
@@ -580,19 +620,29 @@ def reconcile_obligations_on_disk(
             continue
 
         curr_h, _, _ = compute_file_digest(cand_path_obj) if cand_path_obj else (None, None, 0)
-        base_h = test_info.get("baseline_hash")
         ts = test_info.get("timestamp", 0)
+
+        test_satisfied = False
         if cand_path_obj and cand_path_obj.is_file():
-            if base_h is not None:
-                if curr_h != base_h:
-                    res = resolve_pending_test_evidence(candidate, root, cid)
-                    resolved_tests.extend(res)
+            if "baseline_hash" in test_info:
+                base_h = test_info.get("baseline_hash")
+                if base_h is None:
+                    # File did not exist at obligation creation time; now created on disk!
+                    if curr_h is not None:
+                        test_satisfied = True
+                else:
+                    # File existed at obligation creation time; hash must have changed!
+                    if curr_h != base_h:
+                        test_satisfied = True
             else:
                 try:
                     if os.path.getmtime(candidate) >= (ts - 5):
-                        res = resolve_pending_test_evidence(candidate, root, cid)
-                        resolved_tests.extend(res)
+                        test_satisfied = True
                 except OSError:
-                    continue
+                    test_satisfied = False
+
+        if test_satisfied:
+            res = resolve_pending_test_evidence(candidate, root, cid)
+            resolved_tests.extend(res)
 
     return resolved_tests, resolved_docs

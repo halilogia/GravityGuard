@@ -186,6 +186,42 @@ class TestGovernanceDomain(unittest.TestCase):
         self.assertIn("engine/mod_a.py", res_docs_a)
         self.assertEqual(len(get_unresolved_doc_obligations(root, "sess-A")), 0)
 
+        # Session isolation: sess-B's obligation MUST remain open!
+        unresolved_b = get_unresolved_doc_obligations(root, "sess-B")
+        self.assertIn("engine/mod_b.py", unresolved_b, "sess-B's obligation must NOT be prematurely cross-resolved by sess-A")
+
+        # Reconciling sess-B now resolves sess-B's obligation
+        res_tests_b, res_docs_b = reconcile_obligations_on_disk(root, "sess-B")
+        self.assertIn("engine/mod_b.py", res_docs_b)
+        self.assertEqual(len(get_unresolved_doc_obligations(root, "sess-B")), 0)
+
+    def test_test_evidence_fallback_hash_based(self):
+        """Fallback reconciliation for tests must be deterministic based on baseline_hash presence."""
+        root = Path(self.temp_dir)
+        cid = "sess-fallback-test"
+        cand_test = root / "tests" / "test_sample.py"
+        cand_test.parent.mkdir(parents=True, exist_ok=True)
+
+        # 1. Candidate test does NOT exist at obligation creation time
+        record_pending_test_evidence(
+            "engine/sample.py", str(cand_test), "test_sample.py", "missing test",
+            project_root=root, conversation_id=cid
+        )
+        unresolved = get_unresolved_test_evidence(root, cid)
+        self.assertIn("engine/sample.py", unresolved)
+        self.assertIsNone(unresolved["engine/sample.py"].get("baseline_hash"))
+
+        # Test file not created yet -> reconcile keeps it unresolved
+        res_tests, _ = reconcile_obligations_on_disk(root, cid)
+        self.assertEqual(res_tests, [])
+        self.assertIn("engine/sample.py", get_unresolved_test_evidence(root, cid))
+
+        # Now test file created on disk (without PreTool intent)
+        cand_test.write_text("def test_ok(): pass\n", encoding="utf-8")
+        res_tests, _ = reconcile_obligations_on_disk(root, cid)
+        self.assertIn("engine/sample.py", res_tests)
+        self.assertEqual(len(get_unresolved_test_evidence(root, cid)), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
