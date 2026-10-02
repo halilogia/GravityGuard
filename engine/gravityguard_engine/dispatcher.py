@@ -9,7 +9,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Optional, Dict
 
 
 from .architecture_rules import (
@@ -57,6 +57,20 @@ from .test_evidence import (
     evaluate_test_evidence,
     resolve_candidate_test_file,
 )
+
+
+def is_rule_shadow(rule_id: str, cfg: Optional[dict]) -> bool:
+    """Checks if a rule is configured in shadow mode (observes without blocking/warning)."""
+    if not isinstance(cfg, dict):
+        return False
+    rules_cfg = cfg.get("rules", {})
+    if isinstance(rules_cfg, dict):
+        r_entry = rules_cfg.get(rule_id)
+        if isinstance(r_entry, dict) and r_entry.get("mode") == "shadow":
+            return True
+        if r_entry == "shadow":
+            return True
+    return False
 
 
 def validate_gravityguard() -> None:
@@ -225,15 +239,21 @@ def validate_gravityguard() -> None:
     # ========================================================================
     g0_violated, g0_reason, g0_warn = check_g0_secret_leak(added_text)
     if g0_warn:
-        log_event(tool_name, "WARNING", target_file, g0_warn, rule_id="G0_SECRET_LEAK")
-        all_warnings.append(("G0_SECRET_LEAK", g0_warn))
+        if is_rule_shadow("G0_SECRET_LEAK", cfg):
+            log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {g0_warn}", rule_id="G0_SECRET_LEAK")
+        else:
+            log_event(tool_name, "WARNING", target_file, g0_warn, rule_id="G0_SECRET_LEAK")
+            all_warnings.append(("G0_SECRET_LEAK", g0_warn))
     if g0_violated:
-        log_event(tool_name, "BLOCKED", target_file, g0_reason, rule_id="G0_SECRET_LEAK")
-        print(json.dumps({
-            "decision": "deny",
-            "reason": f"🛑 [G0_SECRET_LEAK]: '{target_file}' - {g0_reason}"
-        }))
-        sys.exit(0)
+        if is_rule_shadow("G0_SECRET_LEAK", cfg):
+            log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {g0_reason}", rule_id="G0_SECRET_LEAK")
+        else:
+            log_event(tool_name, "BLOCKED", target_file, g0_reason, rule_id="G0_SECRET_LEAK")
+            print(json.dumps({
+                "decision": "deny",
+                "reason": f"🛑 [G0_SECRET_LEAK]: '{target_file}' - {g0_reason}"
+            }))
+            sys.exit(0)
 
     # Fast-pass for vendor, cache, and non-code text assets (ONLY AFTER G0 IS CLEAN)
     if is_vendor_or_cache or (is_data_or_doc and not file_lower.endswith((".py", ".ts", ".tsx", ".js", ".jsx"))):
@@ -268,12 +288,15 @@ def validate_gravityguard() -> None:
             added_lines, added_text, added_line_numbers, projected_content, is_python, is_ts
         )
         if g1_violated:
-            log_event(tool_name, "BLOCKED", target_file, g1_reason, rule_id="G1_SILENT_EXCEPTION")
-            print(json.dumps({
-                "decision": "deny",
-                "reason": f"🛑 [G1_SILENT_EXCEPTION]: '{target_file}' - {g1_reason}"
-            }))
-            sys.exit(0)
+            if is_rule_shadow("G1_SILENT_EXCEPTION", cfg):
+                log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {g1_reason}", rule_id="G1_SILENT_EXCEPTION")
+            else:
+                log_event(tool_name, "BLOCKED", target_file, g1_reason, rule_id="G1_SILENT_EXCEPTION")
+                print(json.dumps({
+                    "decision": "deny",
+                    "reason": f"🛑 [G1_SILENT_EXCEPTION]: '{target_file}' - {g1_reason}"
+                }))
+                sys.exit(0)
 
     # ========================================================================
     # GUARD 2: G2 — TEST INTEGRITY (BLOCK / WARN)
@@ -283,27 +306,36 @@ def validate_gravityguard() -> None:
             added_text, old_full_content, projected_content, is_test_file
         )
         if g2_warn:
-            log_event(tool_name, "WARNING", target_file, g2_warn, rule_id="G2_TEST_INTEGRITY")
-            all_warnings.append(("G2_TEST_INTEGRITY", g2_warn))
+            if is_rule_shadow("G2_TEST_INTEGRITY", cfg):
+                log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {g2_warn}", rule_id="G2_TEST_INTEGRITY")
+            else:
+                log_event(tool_name, "WARNING", target_file, g2_warn, rule_id="G2_TEST_INTEGRITY")
+                all_warnings.append(("G2_TEST_INTEGRITY", g2_warn))
         if g2_violated:
-            log_event(tool_name, "BLOCKED", target_file, g2_reason, rule_id="G2_TEST_INTEGRITY")
-            print(json.dumps({
-                "decision": "deny",
-                "reason": f"🛑 [G2_TEST_INTEGRITY]: '{target_file}' - {g2_reason}"
-            }))
-            sys.exit(0)
+            if is_rule_shadow("G2_TEST_INTEGRITY", cfg):
+                log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {g2_reason}", rule_id="G2_TEST_INTEGRITY")
+            else:
+                log_event(tool_name, "BLOCKED", target_file, g2_reason, rule_id="G2_TEST_INTEGRITY")
+                print(json.dumps({
+                    "decision": "deny",
+                    "reason": f"🛑 [G2_TEST_INTEGRITY]: '{target_file}' - {g2_reason}"
+                }))
+                sys.exit(0)
 
     # ========================================================================
     # GUARD 2B: G2_SECURITY_TAMPERING — ESCAPE HATCH INJECTION (BLOCK)
     # ========================================================================
     tamper_violated, tamper_reason = check_escape_hatch_tampering(added_text, old_full_content)
     if tamper_violated:
-        log_event(tool_name, "BLOCKED", target_file, tamper_reason, rule_id="G2_SECURITY_TAMPERING")
-        print(json.dumps({
-            "decision": "deny",
-            "reason": f"🛑 [G2_SECURITY_TAMPERING]: '{target_file}' - {tamper_reason}"
-        }))
-        sys.exit(0)
+        if is_rule_shadow("G2_SECURITY_TAMPERING", cfg):
+            log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {tamper_reason}", rule_id="G2_SECURITY_TAMPERING")
+        else:
+            log_event(tool_name, "BLOCKED", target_file, tamper_reason, rule_id="G2_SECURITY_TAMPERING")
+            print(json.dumps({
+                "decision": "deny",
+                "reason": f"🛑 [G2_SECURITY_TAMPERING]: '{target_file}' - {tamper_reason}"
+            }))
+            sys.exit(0)
 
     # ========================================================================
     # GUARD 3: G3 — COMPILER & LINTER BYPASS (WARN ONLY)
@@ -311,28 +343,37 @@ def validate_gravityguard() -> None:
     g3_matches = check_g3_compiler_bypass(added_text)
     if g3_matches:
         warn_msg = f"Yeni linter/derleyici susturması eklendi ({', '.join(g3_matches)}). Hatanın kök nedenini çözmeyi değerlendirin."
-        log_event(tool_name, "WARNING", target_file, warn_msg, rule_id="G3_COMPILER_BYPASS")
-        all_warnings.append(("G3_COMPILER_BYPASS", warn_msg))
+        if is_rule_shadow("G3_COMPILER_BYPASS", cfg):
+            log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {warn_msg}", rule_id="G3_COMPILER_BYPASS")
+        else:
+            log_event(tool_name, "WARNING", target_file, warn_msg, rule_id="G3_COMPILER_BYPASS")
+            all_warnings.append(("G3_COMPILER_BYPASS", warn_msg))
 
     # ========================================================================
     # GUARD 4: G4 — IMPORT MATRIX (BLOCK)
     # ========================================================================
     g4_violated, g4_reason = check_g4_import_matrix(target_file, added_text)
     if g4_violated:
-        log_event(tool_name, "BLOCKED", target_file, g4_reason, rule_id="G4_IMPORT_MATRIX")
-        print(json.dumps({
-            "decision": "deny",
-            "reason": f"🛑 [G4_IMPORT_MATRIX]: '{target_file}' - {g4_reason}"
-        }))
-        sys.exit(0)
+        if is_rule_shadow("G4_IMPORT_MATRIX", cfg):
+            log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {g4_reason}", rule_id="G4_IMPORT_MATRIX")
+        else:
+            log_event(tool_name, "BLOCKED", target_file, g4_reason, rule_id="G4_IMPORT_MATRIX")
+            print(json.dumps({
+                "decision": "deny",
+                "reason": f"🛑 [G4_IMPORT_MATRIX]: '{target_file}' - {g4_reason}"
+            }))
+            sys.exit(0)
 
     # ========================================================================
     # GUARD 5: OE_SPIKE — OVER-ENGINEERING (WARN ONLY)
     # ========================================================================
     oe_triggered, oe_msg = check_oe_spike(added_text, complexity_thresholds)
     if oe_triggered:
-        log_event(tool_name, "WARNING", target_file, oe_msg, rule_id="OE_SPIKE")
-        all_warnings.append(("OE_SPIKE", oe_msg))
+        if is_rule_shadow("OE_SPIKE", cfg):
+            log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {oe_msg}", rule_id="OE_SPIKE")
+        else:
+            log_event(tool_name, "WARNING", target_file, oe_msg, rule_id="OE_SPIKE")
+            all_warnings.append(("OE_SPIKE", oe_msg))
 
     # ========================================================================
     # GUARD 6: ARCH_FILE_GROWTH — LARGE FILE & RAPID GROWTH (WARN ONLY)
@@ -351,8 +392,11 @@ def validate_gravityguard() -> None:
         cumulative_loc=cum_loc if is_cumul else 0
     )
     if arch_triggered:
-        log_event(tool_name, "WARNING", target_file, arch_msg, rule_id="ARCH_FILE_GROWTH")
-        all_warnings.append(("ARCH_FILE_GROWTH", arch_msg))
+        if is_rule_shadow("ARCH_FILE_GROWTH", cfg):
+            log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {arch_msg}", rule_id="ARCH_FILE_GROWTH")
+        else:
+            log_event(tool_name, "WARNING", target_file, arch_msg, rule_id="ARCH_FILE_GROWTH")
+            all_warnings.append(("ARCH_FILE_GROWTH", arch_msg))
 
     # ========================================================================
     # GUARD 7: EXISTING SRP (Single Responsibility Principle)
@@ -361,12 +405,15 @@ def validate_gravityguard() -> None:
         if is_python:
             is_violation, reason = analyze_python_srp(projected_content, file_path=target_file)
             if is_violation:
-                log_event(tool_name, "BLOCKED", target_file, reason, rule_id="SRP_BOUNDARY")
-                print(json.dumps({
-                    "decision": "deny",
-                    "reason": f"🛑 [SRP_BOUNDARY]: '{target_file}' - {reason}"
-                }))
-                sys.exit(0)
+                if is_rule_shadow("SRP_BOUNDARY", cfg):
+                    log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {reason}", rule_id="SRP_BOUNDARY")
+                else:
+                    log_event(tool_name, "BLOCKED", target_file, reason, rule_id="SRP_BOUNDARY")
+                    print(json.dumps({
+                        "decision": "deny",
+                        "reason": f"🛑 [SRP_BOUNDARY]: '{target_file}' - {reason}"
+                    }))
+                    sys.exit(0)
 
         elif is_ts:
             tab_matches = len(re.findall(r"activeTab\s*===", projected_content))
@@ -377,12 +424,15 @@ def validate_gravityguard() -> None:
 
             if multi_job and not is_ts_cohesive_monolith(projected_content):
                 reason_msg = f"SRP İhlali: Dosya {tab_matches} sekme, {card_matches} kart ve {grid_blocks} grid bloğu içeriyor."
-                log_event(tool_name, "BLOCKED", target_file, reason_msg, rule_id="SRP_BOUNDARY")
-                print(json.dumps({
-                    "decision": "deny",
-                    "reason": f"🛑 [SRP_BOUNDARY]: '{target_file}' - {reason_msg}"
-                }))
-                sys.exit(0)
+                if is_rule_shadow("SRP_BOUNDARY", cfg):
+                    log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {reason_msg}", rule_id="SRP_BOUNDARY")
+                else:
+                    log_event(tool_name, "BLOCKED", target_file, reason_msg, rule_id="SRP_BOUNDARY")
+                    print(json.dumps({
+                        "decision": "deny",
+                        "reason": f"🛑 [SRP_BOUNDARY]: '{target_file}' - {reason_msg}"
+                    }))
+                    sys.exit(0)
 
     # ========================================================================
     # GUARD 8: PHASE 2 TEST EVIDENCE AIRBAG (T1, T2, T3) — WARN ONLY

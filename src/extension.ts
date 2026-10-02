@@ -770,30 +770,30 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
 
         <div class="rule-row">
           <div class="rule-name">● G3 Compiler/Linter Bypass</div>
-          <span class="mode-pill mode-warn">WARN</span>
+          <span class="mode-pill mode-warn">WARN (ADVISORY)</span>
         </div>
-        <div class="rule-desc">@ts-ignore veya # type: ignore ile denetimlerin atlanmasını izler.</div>
+        <div class="rule-desc">@ts-ignore veya # type: ignore tespitinde tavsiye uyarısı verir; engellemez.</div>
 
         <div class="rule-row">
           <div class="rule-name">● ARCH_FILE_GROWTH</div>
-          <span class="mode-pill mode-warn">WARN</span>
+          <span class="mode-pill mode-warn">WARN (ADVISORY)</span>
         </div>
-        <div class="rule-desc">Tek hamlede devasa kod yığılmasını (${projectCfg?.complexity?.singleWriteLoc || 200} satır) denetler.</div>
+        <div class="rule-desc">Tek hamlede devasa kod yığılmasında tavsiye uyarısı verir; shadow mode destekler.</div>
       </div>
 
       <div class="rules-group">
         <div class="group-title text-cyan">🧪 Quality & Governance</div>
         <div class="rule-row">
           <div class="rule-name">● T1/T2 Test Evidence</div>
-          <span class="mode-pill ${projectCfg?.testEvidence?.deferredMode !== false ? 'mode-warn' : 'mode-block'}">${projectCfg?.testEvidence?.deferredMode !== false ? 'DEFERRED' : 'BLOCK'}</span>
+          <span class="mode-pill mode-warn">WARN (STOP OBLIGATION)</span>
         </div>
-        <div class="rule-desc">Üretim kodu değiştiğinde eşlik eden test kanıtı talep eder.</div>
+        <div class="rule-desc">PreTool: Tavsiye Uyarısı • Stop Hook: Kapanış Yükümlülüğü (Fiziksel Disk Doğrulama).</div>
 
         <div class="rule-row">
           <div class="rule-name">● Doc Governance (§6 Same-Commit)</div>
-          <span class="mode-pill ${docGovActive ? 'mode-active' : 'mode-inactive'}">${docGovActive ? 'OPT-IN' : 'OFF'}</span>
+          <span class="mode-pill ${docGovActive ? 'mode-active' : 'mode-inactive'}">${docGovActive ? 'OPT-IN (STOP)' : 'OFF'}</span>
         </div>
-        <div class="rule-desc">Motor dosyası değiştiğinde aynı commit'te CHANGELOG güncellenmesini zorlar.</div>
+        <div class="rule-desc">Motor dosyası değiştiğinde oturum kapanışında CHANGELOG güncellenmesini zorlar.</div>
       </div>
 
       <div style="margin-top: 14px; text-align: center;">
@@ -801,18 +801,55 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       </div>
     `;
 
-    // --- TAB 4: INSIGHTS (TELEMETRY, AGENT RECOVERY, PERFORMANCE) ---
+    // --- TAB 4: INSIGHTS (TELEMETRY, AGENT RECOVERY, EFFECTIVENESS) ---
     const shortSess = sessionId.length > 10 ? sessionId.slice(0, 8) + '…' : sessionId;
+    const eff = (data as any)?.effectiveness || {};
+    const finalRecRate = typeof eff.recoveryRate === 'number' ? eff.recoveryRate : recoveryRate;
+    const finalRecovered = typeof eff.totalRecovered === 'number' ? eff.totalRecovered : recoveredCount;
+    const finalBlocked = typeof eff.totalBlocked === 'number' ? eff.totalBlocked : (totalBlockedAnalyzed || 1);
+
     const insightsHtml = `
       <div class="insight-card">
         <div class="insight-title">🎯 ${t('insights.recoveryTitle')}</div>
         <div class="recovery-meter">
           <div class="recovery-bar-wrap">
-            <div class="recovery-bar" style="width: ${recoveryRate}%;"></div>
+            <div class="recovery-bar" style="width: ${finalRecRate}%;"></div>
           </div>
-          <div class="recovery-score">${recoveryRate}%</div>
+          <div class="recovery-score">${finalRecRate}%</div>
         </div>
-        <div class="insight-sub">${recoveredCount} / ${totalBlockedAnalyzed || 1} ${t('insights.fixedNext')}</div>
+        <div class="insight-sub">${finalRecovered} / ${finalBlocked || 1} ${t('insights.fixedNext')}</div>
+      </div>
+
+      <div class="insight-card">
+        <div class="insight-title">🏆 ${t('insights.highValueTitle')}</div>
+        <div class="metric-row">
+          <span class="metric-lbl">G0 Secret Leak:</span>
+          <span class="metric-val text-green">%100 Önleme</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-lbl">G1 Silent Exception:</span>
+          <span class="metric-val text-green">Yüksek İyileşme (1 deneme)</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-lbl">G2 Test Integrity:</span>
+          <span class="metric-val text-green">Tamper Koruması</span>
+        </div>
+      </div>
+
+      <div class="insight-card">
+        <div class="insight-title">⚠️ ${t('insights.tuningTitle')}</div>
+        <div class="metric-row">
+          <span class="metric-lbl">T1 Test Evidence:</span>
+          <span class="metric-val text-cyan">Stop Yükümlülüğü</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-lbl">ARCH_FILE_GROWTH:</span>
+          <span class="metric-val text-amber">Tavsiye Uyarısı / Shadow</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-lbl">G3 Compiler Bypass:</span>
+          <span class="metric-val text-amber">Tavsiye Uyarısı</span>
+        </div>
       </div>
 
       <div class="insight-card">

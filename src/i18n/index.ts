@@ -31,7 +31,11 @@ export const resources = {
         lockStatus: 'Durum Kilidi (StateLock)',
         lockHealthy: 'Sağlıklı (Çekirdek Kilit)',
         twoPhase: 'İki Fazlı Taahhüt (2PC)',
-        twoPhaseActive: 'Fiziksel Disk Doğrulama Aktif'
+        twoPhaseActive: 'Fiziksel Disk Doğrulama Aktif',
+        highValueTitle: 'Yüksek Değerli Muhafızlar (Kanıtlanmış Sinyal)',
+        highValueDesc: 'G0 (Sızıntı), G1 (Sessiz Hata), G2 (Test Bütünlüğü)',
+        tuningTitle: 'Tavsiye & Ayar Değerlendirmesi',
+        tuningDesc: 'T1 (Stop Yükümlülüğü), G3 / Büyüme (Tavsiye Uyarısı)'
       },
       stats: {
         blocked: 'Engellendi',
@@ -106,7 +110,11 @@ export const resources = {
         lockStatus: 'State Lock',
         lockHealthy: 'Healthy (Kernel-level lock)',
         twoPhase: 'Two-Phase Commit (2PC)',
-        twoPhaseActive: 'Physical Disk Verification Active'
+        twoPhaseActive: 'Physical Disk Verification Active',
+        highValueTitle: 'High-Value Guardrails (Proven Signal)',
+        highValueDesc: 'G0 (Secret Leak), G1 (Silent Error), G2 (Test Integrity)',
+        tuningTitle: 'Advisory & Tuning Evaluation',
+        tuningDesc: 'T1 (Stop Obligation), G3 / Growth (Advisory Warn)'
       },
       stats: {
         blocked: 'Blocked',

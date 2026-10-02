@@ -68,6 +68,78 @@ def format_bar(val: int, max_val: int, width: int = 24) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
+def render_effectiveness_analytics(events):
+    """
+    Renders deep effectiveness metrics, causal recovery rates,
+    friction delta (retries), and noise index analysis.
+    """
+    print("\n🎯 ETKİNLİK VE AJAN KURTARMA ANALİZİ (EFFECTIVENESS ANALYTICS)")
+    print("-" * 80)
+
+    blocked_events = [e for e in events if e.get("status") == "BLOCKED" and e.get("outcome") != "REPEATED_VIOLATION"]
+    recovered_events = [e for e in events if e.get("outcome") == "RECOVERED"]
+    repeated_events = [e for e in events if e.get("outcome") == "REPEATED_VIOLATION"]
+    shadow_events = [e for e in events if e.get("status") == "SHADOW_TRIGGER"]
+    warning_events = [e for e in events if e.get("status") == "WARNING"]
+
+    total_blocked = len(blocked_events)
+    total_recovered = len(recovered_events)
+    rec_rate = (total_recovered / total_blocked * 100) if total_blocked > 0 else 100.0
+
+    attempts_list = [e.get("recoveryAttempts", 1) for e in recovered_events if isinstance(e.get("recoveryAttempts"), (int, float))]
+    median_attempts = sorted(attempts_list)[len(attempts_list) // 2] if attempts_list else 1.0
+
+    durations_ms = [e.get("resolutionMs") for e in recovered_events if isinstance(e.get("resolutionMs"), (int, float))]
+    avg_duration_s = (sum(durations_ms) / len(durations_ms) / 1000) if durations_ms else 0.0
+
+    print(f"  Toplam Engellenen İlk Müdahale (Blocked Root) : {total_blocked}")
+    print(f"  Ajan Tarafından Düzeltilen (Recovered)       : {total_recovered} (İyileşme Oranı: %{rec_rate:.1f})")
+    print(f"  Medyan Düzeltme Denemesi (Friction Delta)     : {median_attempts} deneme")
+    if avg_duration_s > 0:
+        print(f"  Ortalama Çözümleme Süresi (Time-to-Resolve)  : {avg_duration_s:.1f} saniye")
+
+    # Rule-by-rule classification
+    rule_blocked = Counter(e.get("ruleId", "UNKNOWN") for e in blocked_events)
+    rule_recovered = Counter(e.get("ruleId", "UNKNOWN") for e in recovered_events)
+
+    if rule_blocked:
+        print("\n  🛡️  KURAL BAZLI ETKİNLİK VE DEĞER TABLOSU:")
+        print("  " + "-" * 76)
+        print(f"  {'Kural':<24} | {'Engelleme':<9} | {'Kurtarma':<8} | {'Oran':<6} | {'Sınıf':<16}")
+        print("  " + "-" * 76)
+
+        for rule, b_cnt in rule_blocked.most_common():
+            r_cnt = rule_recovered.get(rule, 0)
+            rate = (r_cnt / b_cnt * 100) if b_cnt > 0 else 0.0
+            if rate >= 85.0:
+                classification = "🏆 YÜKSEK DEĞER"
+            elif rate < 50.0:
+                classification = "⚡ SÜRTÜNME"
+            else:
+                classification = "🟢 DENGELİ"
+            print(f"  {rule:<24} | {b_cnt:>9} | {r_cnt:>8} | %{rate:>4.1f} | {classification}")
+
+    # Advisory & Noise Index
+    if warning_events:
+        warn_rules = Counter(e.get("ruleId", "UNKNOWN") for e in warning_events)
+        print("\n  ⚠️  TAVSİYE KURALLARI VE GÜRÜLTÜ ANALİZİ (Advisory & Noise Index):")
+        print("  " + "-" * 76)
+        for w_rule, w_cnt in warn_rules.most_common(5):
+            if "T1" in w_rule or "DOC" in w_rule:
+                role_desc = "Stop Yükümlülüğü (Lifecycle)"
+            else:
+                role_desc = "Tavsiye Uyarısı (Advisory)"
+            print(f"  • {w_rule:<22} : {w_cnt:>3} uyarı ({role_desc})")
+
+    # Shadow Mode Observations
+    if shadow_events:
+        print("\n  🧪 GÖLGE MODU GÖZLEMLERİ (Shadow Mode Observation):")
+        print("  " + "-" * 76)
+        shadow_rules = Counter(e.get("ruleId", "UNKNOWN") for e in shadow_events)
+        for s_rule, s_cnt in shadow_rules.most_common():
+            print(f"  • {s_rule:<22} : {s_cnt} sessiz gözlem (Ajan engellenmeden izlendi)")
+
+
 def render_dashboard(events):
     print("=" * 80)
     print("           GRAVITYGUARD GÜVENLİK VE MİMARİ TELEMETRİ MERKEZİ            ")
@@ -94,6 +166,8 @@ def render_dashboard(events):
     print(f"  ✅ ONAYLANAN (APPROVED)  : {approved:<5} %{(approved / total * 100):.1f}")
     print(f"  🛑 ENGELLENEN (BLOCKED)  : {blocked:<5} %{(blocked / total * 100):.1f}")
     print(f"  ⚠️  UYARI ALAN (WARNING)  : {warnings:<5} %{(warnings / total * 100):.1f}")
+
+    render_effectiveness_analytics(events)
 
     print("\n🛡️  KURAL BAZLI İHLAL VE GÜVENLİK DAĞILIMI (Top Rules)")
     print("-" * 80)

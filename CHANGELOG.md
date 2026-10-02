@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Nedensel Etkinlik Telemetrisi ve Gölge Modu (Causal Effectiveness Telemetry & Shadow Mode)**:
+  - `engine/gravityguard_engine/audit.py`: Her güvenlik olayına benzersiz bir `eventId` atanarak nedensel olay zincirleme (`parentViolationId`, `outcome`, `recoveryAttempts`, `resolutionMs`) altyapısı kuruldu.
+  - Ajanın bir ihlal sonrası sonraki hamlesinde durumu düzeltip düzeltmediğini ölçen gerçek zamanlı iyileşme takibi (`BLOCKED` -> `RECOVERED` veya `REPEATED_VIOLATION`) eklendi.
+  - `engine/gravityguard_engine/dispatcher.py`: Kuralların deneysel olarak ajana hissettirilmeden izlenmesini sağlayan **Gölge Modu (Shadow Mode - `is_rule_shadow`)** desteği eklendi (`.gravityguard.json` içinde `"mode": "shadow"` olan kurallar ajanı engellemeden `SHADOW_TRIGGER` telemetrisi üretir).
+  - `tools/telemetry_dashboard.py`: Basit olay sayıcısından bilimsel **Etkinlik Analitiği (Effectiveness Analytics)** merkezine dönüştürüldü; kural bazlı iyileşme oranları (`Recovery Rate %`), sürtünme faktörü (`Friction Delta / attempts`), tavsiye uyarılarının eyleme dönüşme oranı (`Advisory Action Rate`) ve gürültü adayları (`Noise Candidates`) raporlanması sağlandı.
+  - `engine/tests/test_audit.py`: Causal chaining, recovery outcome, repeated violations ve shadow mode için 4 adet bağımsız regresyon testi eklendi.
+  - Arayüz kural ve içgörü ayrımı: `src/extension.ts` üzerinde kural şiddeti (`Severity: WARN`) ile yaşam döngüsü kapanış yükümlülüğü (`Lifecycle Effect: Stop Obligation`) net olarak ayrıştırıldı; yüksek değerli muhafızlar (G0, G1, G2) ve tavsiye kuralları (T1, G3, ARCH_GROWTH) analiz sekmesine yansıtıldı.
 - **Canlı Ajan Güvenlik Konsolu ve Yenilenen Kenar Çubuğu (Live Agent Security Console & Webview Overhaul)**:
   - Kenar çubuğu webview'ı statik bir gösterge panelinden anlık çalışan bir **Canlı Ajan Güvenlik Konsolu**'na dönüştürüldü.
   - **Canlı Eylem Kartı (Current Action Card)**: Ajanın en son tetiklediği dosya eylemini (`write_file`, `create_file` vb.), hedef dosya yolunu ve GravityGuard'ın güvenlik kararını (`ALLOWED` / `BLOCKED`, aktif kurallar G0-G4) tepe kartında anlık gösterir.
