@@ -313,6 +313,137 @@ class TestAuditSubsystem(unittest.TestCase):
         stderr_output = stderr_buf.getvalue()
         self.assertIn("[GravityGuard Invariant Violation]", stderr_output)
 
+    def test_audit_seq_monotonic_increment(self):
+        target = "src/seq_test.py"
+        conv = "conv-seq"
+        id1 = log_event("write", "BLOCKED", target, "block 1", rule_id="G1_SILENT_EXCEPTION", conversation_id=conv)
+        id2 = log_event("write", "BLOCKED", target, "repeat 2", rule_id="G1_SILENT_EXCEPTION", conversation_id=conv)
+        id3 = log_event("write", "APPROVED", target, "clean 3", rule_id="PASS", conversation_id=conv)
+
+        # 1. Verify permanent journal has monotonic auditSeq: 1, 2, 3
+        perm_path = os.path.join(self.test_dir, "gravityguard_permanent_audit.jsonl")
+        perm_events = []
+        with open(perm_path, "r", encoding="utf-8") as pf:
+            for line in pf:
+                perm_events.append(json.loads(line))
+
+        self.assertEqual(len(perm_events), 3)
+        self.assertEqual(perm_events[0]["auditSeq"], 1)
+        self.assertEqual(perm_events[1]["auditSeq"], 2)
+        self.assertEqual(perm_events[2]["auditSeq"], 3)
+
+        # 2. Verify live state has lastAuditSeq == 3 and events have auditSeq
+        live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
+        with open(live_path, "r", encoding="utf-8") as lf:
+            live = json.load(lf)
+
+        self.assertEqual(live["lastAuditSeq"], 3)
+        self.assertEqual(live["events"][0]["auditSeq"], 3)
+        self.assertEqual(live["events"][1]["auditSeq"], 2)
+        self.assertEqual(live["events"][2]["auditSeq"], 1)
+
+    def test_journal_ahead_of_live_triggers_projection_replay(self):
+        target = "src/crash_recovery_wal.py"
+        conv = "conv-wal-divergence"
+
+        # 1. Initial event: seq 1
+        log_event("write", "APPROVED", "src/init.py", "init passed", rule_id="PASS", conversation_id=conv)
+        live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
+        perm_path = os.path.join(self.test_dir, "gravityguard_permanent_audit.jsonl")
+
+        with open(live_path, "r", encoding="utf-8") as lf:
+            live_init = json.load(lf)
+        self.assertEqual(live_init["lastAuditSeq"], 1)
+
+        # 2. Simulate crash between journal append and live replace:
+        # Append event seq 2 directly to journal without updating live state
+        crash_event = {
+            "auditSeq": 2,
+            "eventId": "evt_crash_sim_999",
+            "timestamp": "2026-10-03T01:00:00",
+            "action": "write",
+            "status": "BLOCKED",
+            "ruleId": "G1_SILENT_EXCEPTION",
+            "resolvedRuleId": None,
+            "target": target,
+            "project": "TestProj",
+            "projectRoot": self.test_dir,
+            "fileExt": ".py",
+            "conversationId": conv,
+            "model": "test-model",
+            "reason": "Simulated unprojected block in journal",
+            "outcome": "BLOCKED",
+            "parentViolationId": None,
+            "recoveryAttempts": 1,
+            "resolutionMs": None
+        }
+        with open(perm_path, "a", encoding="utf-8") as pf:
+            pf.write(json.dumps(crash_event) + "\n")
+
+        # Live file still has lastAuditSeq == 1 (lagging behind journal)
+        with open(live_path, "r", encoding="utf-8") as lf:
+            live_before = json.load(lf)
+        self.assertEqual(live_before["lastAuditSeq"], 1)
+
+        # 3. Next tool action: approved edit for target.
+        # Should detect live (seq 1) < journal (seq 2), replay event 2 into live state,
+        # restore the active violation on target, and resolve it as RECOVERED!
+        rec_id = log_event("write", "APPROVED", target, "clean recovery after crash", rule_id="PASS", conversation_id=conv)
+
+        with open(live_path, "r", encoding="utf-8") as lf:
+            live_after = json.load(lf)
+
+        # Live state caught up to seq 3
+        self.assertEqual(live_after["lastAuditSeq"], 3)
+        # Event 3 is RECOVERED because the missing block (seq 2) was replayed into activeViolations!
+        latest_event = live_after["events"][0]
+        self.assertEqual(latest_event["eventId"], rec_id)
+        self.assertEqual(latest_event["outcome"], "RECOVERED")
+        self.assertEqual(latest_event["parentViolationId"], "evt_crash_sim_999")
+        self.assertEqual(live_after["effectiveness"]["totalRecovered"], 1)
+
+    def test_multi_rule_recovery_assigns_monotonic_seq_to_extra_events(self):
+        target = "src/multi_seq.py"
+        conv = "conv-multi-seq"
+
+        # 1. Trigger two blocks with different rules
+        log_event("write", "BLOCKED", target, "violation G1", rule_id="G1_SILENT_EXCEPTION", conversation_id=conv)
+        log_event("write", "BLOCKED", target, "violation G2", rule_id="G2_TEST_INTEGRITY", conversation_id=conv)
+
+        # 2. Approved edit resolves both
+        log_event("write", "APPROVED", target, "resolved both", rule_id="PASS", conversation_id=conv)
+
+        perm_path = os.path.join(self.test_dir, "gravityguard_permanent_audit.jsonl")
+        perm_events = []
+        with open(perm_path, "r", encoding="utf-8") as pf:
+            for line in pf:
+                perm_events.append(json.loads(line))
+
+        # 4 events total: Block G1 (1), Block G2 (2), Recover G1 (3), Recover G2 (4)
+        self.assertEqual(len(perm_events), 4)
+        seqs = [e["auditSeq"] for e in perm_events]
+        self.assertEqual(seqs, [1, 2, 3, 4])
+
+        live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
+        with open(live_path, "r", encoding="utf-8") as lf:
+            live = json.load(lf)
+        self.assertEqual(live["lastAuditSeq"], 4)
+
+    def test_durability_mode_fsync_handling(self):
+        from unittest.mock import patch
+        old_durability = os.environ.get("GRAVITYGUARD_DURABILITY")
+        os.environ["GRAVITYGUARD_DURABILITY"] = "durable"
+        try:
+            with patch("os.fsync") as mock_fsync:
+                log_event("write", "APPROVED", "src/fsync_test.py", "fsync test", rule_id="PASS")
+                # os.fsync should have been called for both the permanent log and the tmp live file
+                self.assertGreaterEqual(mock_fsync.call_count, 2)
+        finally:
+            if old_durability is not None:
+                os.environ["GRAVITYGUARD_DURABILITY"] = old_durability
+            else:
+                os.environ.pop("GRAVITYGUARD_DURABILITY", None)
+
 
 if __name__ == "__main__":
     unittest.main()
