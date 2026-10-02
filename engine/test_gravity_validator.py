@@ -3578,9 +3578,11 @@ class TestObligationGovernance(unittest.TestCase):
         }
         run_validator(payload_code)
 
-        # When executionNum > 5, circuit-breaker permits termination
+        # Defect A regression test: executionNum > 5 does NOT bypass the stop hook
         stop_res, _ = run_validator({"terminationReason": "model_stop", "executionNum": 6})
-        self.assertEqual(stop_res.get("decision"), "allow")
+        self.assertEqual(stop_res.get("decision"), "continue")
+        self.assertIn("Dokümantasyon Yükümlülüğü", stop_res.get("reason", ""))
+
 
     def test_stop_hook_allows_on_user_cancel(self):
         cfg_path = os.path.join(self.temp_dir, ".gravityguard.json")

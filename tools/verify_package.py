@@ -44,9 +44,23 @@ MUST_MATCH_REPO = [
     "extension/engine/async_runner.py",
 ]
 
+def _collect_engine_package_files() -> list[str]:
+    pkg_dir = REPO / "engine" / "gravityguard_engine"
+    files = []
+    if pkg_dir.is_dir():
+        for p in sorted(pkg_dir.glob("*.py")):
+            files.append(f"extension/engine/gravityguard_engine/{p.name}")
+    return files
+
+_pkg_files = _collect_engine_package_files()
+REQUIRED.extend(_pkg_files)
+MUST_MATCH_REPO.extend(_pkg_files)
+
 FORBIDDEN_PATTERNS = [
     (r"^extension/tests/", "test suite shipped in the artifact"),
     (r"^extension/engine/test_", "engine test suite shipped in the artifact"),
+    (r"^extension/engine/tests/", "engine domain test suite shipped in the artifact"),
+
     (r"^extension/docs/", "developer documentation shipped in the artifact"),
     (r"^extension/tools/", "repo tooling shipped in the artifact"),
     (r"^extension/plugin/", "Antigravity plugin manifests shipped in the artifact"),

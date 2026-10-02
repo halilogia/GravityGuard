@@ -37,16 +37,33 @@ import shutil
 import sys
 import time
 
-# (repo tarafi, plugin tarafi (scripts/ altindaki HEDEF AD), aciklama)
-# Not: hedef adi plugin'in scripts/ klasoru altindadir; plugin kokundeki
-# manifestler bu yuzden "scripts/" onekli ozel bir hedef kullanir.
-PAIRS = [
-    ("engine/gravity-validator.py", "scripts/gravity-validator.py", "Ana dogrulama motoru"),
-    ("engine/async_runner.py", "scripts/async_runner.py", "Arka plan statik analiz calistiricisi"),
-    ("plugin/hooks.json", "hooks.json", "Hook manifesti: hangi scripti cagiracagimizi yazar"),
-    ("plugin/plugin.json", "plugin.json", "Plugin kimlik dosyasi"),
-    ("plugin/rules/gravityguard_invariants.md", "rules/gravityguard_invariants.md", "Mekanik invariant kural dosyasi"),
-]
+
+def repo_root() -> str:
+    """Bu script'in bulundugu yerden repo kokunu bulur (tools/ -> repo)."""
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+
+def collect_sync_pairs(root: str) -> list[tuple[str, str, str]]:
+    pairs = [
+        ("engine/gravity-validator.py", "scripts/gravity-validator.py", "Ana dogrulama motoru"),
+        ("engine/async_runner.py", "scripts/async_runner.py", "Arka plan statik analiz calistiricisi"),
+        ("plugin/hooks.json", "hooks.json", "Hook manifesti: hangi scripti cagiracagimizi yazar"),
+        ("plugin/plugin.json", "plugin.json", "Plugin kimlik dosyasi"),
+        ("plugin/rules/gravityguard_invariants.md", "rules/gravityguard_invariants.md", "Mekanik invariant kural dosyasi"),
+    ]
+    pkg_dir = os.path.join(root, "engine", "gravityguard_engine")
+    if os.path.isdir(pkg_dir):
+        for fname in sorted(os.listdir(pkg_dir)):
+            if fname.endswith(".py"):
+                repo_rel = f"engine/gravityguard_engine/{fname}"
+                plug_rel = f"scripts/gravityguard_engine/{fname}"
+                pairs.append((repo_rel, plug_rel, f"Motor alt modulu ({fname})"))
+    return pairs
+
+PAIRS = collect_sync_pairs(repo_root())
+
+
 
 PLUGIN_DIR = os.path.join(
     os.path.expanduser("~"), ".gemini", "config", "plugins", "gravityguard"
@@ -59,12 +76,8 @@ def md5(path: str) -> str:
         return hashlib.md5(fh.read()).hexdigest()
 
 
-def repo_root() -> str:
-    """Bu script'in bulundugu yerden repo kokunu bulur (tools/ -> repo)."""
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-
 def syntax_ok(path: str) -> tuple[bool, str]:
+
     """Dosya gecerli Python mu? (ast.parse - hic dosya uretmez)."""
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:

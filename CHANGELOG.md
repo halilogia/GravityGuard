@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Motor Modülerizasyonu (`gravityguard_engine`)**: 2.635 satırlık tek parça `engine/gravity-validator.py` monolitik dosyası, SRP ve bakım kolaylığı ilkelerine uygun olarak `engine/gravityguard_engine/` alt modüllerine ayrıştırıldı (`project_context.py`, `audit.py`, `diffing.py`, `security_rules.py`, `architecture_rules.py`, `diagnostics.py`, `test_evidence.py`, `governance.py`, `dispatcher.py`). Ana giriş noktası `engine/gravity-validator.py` 118 satırlık ince bir ön yüz (facade) haline getirilerek geriye dönük tam uyumluluk sağlandı.
+- **Canlı Eklenti Senkronizasyonu (`tools/sync_plugin.py`)**: Tekil dosya kopyalama yerine `engine/gravityguard_engine/` paketini otomatik ve özyinelemeli olarak canlı eklenti dizinine (`scripts/gravityguard_engine/`) senkronize edecek şekilde genişletildi.
+- **Paketleme ve VSIX Kapsamı (`.vscodeignore`, `tools/verify_package.py`)**: `engine/tests/` dizini VSIX paketinden hariç tutulurken `engine/gravityguard_engine/` modülleri zorunlu ve byte-byte repo eşleşmeli paketleme denetimine dahil edildi.
+
+### Fixed
+- **Devre Kesici Doğruluğu (Defect A)**: Stop kancasındaki `or (isinstance(exec_num, int) and exec_num > 5)` koşulu kaldırıldı. Araç çağrı sıra numarası (`executionNum`), uzun konuşmalarda erken devre kesici tetikleyip denetimi devre dışı bırakamıyor; devre kesici yalnızca ajanın art arda 5 kez Stop hook'u atlatmaya çalıştığı `session_retries >= 5` durumunda devreye giriyor.
+- **Fiziksel Disk Mutabakatı & Gerçek İki Fazlı Taahhüt (Defect B)**: PreToolUse hook'u henüz diske yazılmamış dosyalar için yükümlülükleri erken silmek yerine, fiziksel dosya varlığı ve dosya değiştirilme zamanı (`mtime >= timestamp - 5`) üzerinden `reconcile_obligations_on_disk` mekanizmasıyla diski doğrulayarak yükümlülükleri kapatıyor.
+- **Çoklu Çalışma Alanı Çözümleme (Defect C)**: `resolve_project_root`, `payload.workspacePaths` listesinde hedef dosyanın (`target_file`) gerçek üst dizinini içeren çalışma alanını ilk sıraya alarak birden fazla projenin açık olduğu oturumlarda kök dizin sapmalarını önledi.
+
+### Added
+- **Etki Alanı (Domain) Test Paketi (`engine/tests/`)**: 3.739 satırlık test monolith'i etki alanlarına ayrılarak `engine/tests/` altında modüler testler oluşturuldu (`test_project_context.py`, `test_governance.py`, `test_security_rules.py`, `test_architecture_rules.py`, `test_test_evidence.py`).
+- **Test Kapsamı**: 143 motor testi + 23 etki alanı testi + 24 TypeScript testi = **Toplam 190 test**, %100 başarılı. Çekirdek mantık gecikmesi <0.05 ms (<10ms bütçesi korunuyor).
+
 ## [1.3.1] - 2026-10-02
+
 
 > **Doğruluk (Correctness) ve Mimari Olgunlaşma Sürümü.** İki fazlı commit modeliyle
 > erken yükümlülük düşmesi (premature resolution) giderildi, proje root izolasyonu sağlandı,
