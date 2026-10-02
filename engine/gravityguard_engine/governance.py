@@ -158,6 +158,29 @@ def save_governance_state(state: Dict[str, Any], project_root: Optional[Path] = 
         return
 
 
+def compute_file_digest(file_path: Path) -> Tuple[Optional[str], Optional[float], int]:
+    """
+    Computes (sha256_hex, mtime, size) for a file if it exists, or (None, None, 0) if absent.
+    Zero external dependencies.
+    """
+    if not file_path.is_file():
+        return None, None, 0
+    try:
+        stat = file_path.stat()
+        mtime = stat.st_mtime
+        size = stat.st_size
+        h = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            while True:
+                chunk = f.read(65536)
+                if not chunk:
+                    break
+                h.update(chunk)
+        return h.hexdigest(), mtime, size
+    except (IOError, OSError):
+        return None, None, 0
+
+
 def get_session_stop_retries(project_root: Optional[Path] = None, conversation_id: Optional[str] = None) -> int:
     state = load_governance_state(project_root)
     cid = conversation_id or "default"
@@ -204,9 +227,18 @@ def record_pending_test_evidence(
     conversation_id: Optional[str] = None
 ) -> None:
     norm = target_file.replace("\\", "/")
+    root = project_root or Path.cwd()
+    cand_h = None
+    if candidate_path:
+        cand_p = Path(candidate_path)
+        if not cand_p.is_absolute():
+            cand_p = root / cand_p
+        cand_h, _, _ = compute_file_digest(cand_p)
+
     state = load_governance_state(project_root)
     entry = {
         "candidate_path": candidate_path.replace("\\", "/") if candidate_path else None,
+        "baseline_hash": cand_h,
         "expected_name": expected_name,
         "timestamp": time.time(),
         "reason": reason
@@ -299,9 +331,19 @@ def record_pending_doc_obligation(
     if reason is None:
         reason = f"Motor/kod dosyası değiştirildi ({norm}); docs/KNOWLEDGE.md §6 uyarınca {', '.join(required_docs)} güncellenmelidir."
 
+    root = project_root or Path.cwd()
+    baseline_hashes = {}
+    for req in required_docs:
+        req_p = Path(req)
+        if not req_p.is_absolute():
+            req_p = root / req_p
+        h, _, _ = compute_file_digest(req_p)
+        baseline_hashes[req] = h
+
     state = load_governance_state(project_root)
     entry = {
         "required_docs": required_docs,
+        "baseline_hashes": baseline_hashes,
         "timestamp": time.time(),
         "reason": reason
     }
@@ -371,29 +413,6 @@ def clear_governance_state(project_root: Optional[Path] = None) -> None:
     }, project_root)
 
 
-def compute_file_digest(file_path: Path) -> Tuple[Optional[str], Optional[float], int]:
-    """
-    Computes (sha256_hex, mtime, size) for a file if it exists, or (None, None, 0) if absent.
-    Zero external dependencies.
-    """
-    if not file_path.is_file():
-        return None, None, 0
-    try:
-        stat = file_path.stat()
-        mtime = stat.st_mtime
-        size = stat.st_size
-        h = hashlib.sha256()
-        with open(file_path, "rb") as f:
-            while True:
-                chunk = f.read(65536)
-                if not chunk:
-                    break
-                h.update(chunk)
-        return h.hexdigest(), mtime, size
-    except (IOError, OSError):
-        return None, None, 0
-
-
 def record_resolution_intent(
     kind: str,
     target_file: str,
@@ -403,6 +422,7 @@ def record_resolution_intent(
     """
     Records an intent to resolve doc or test obligations once physical disk modification occurs.
     Two-Phase Commit Phase 1: Captures baseline pre-modification digest without resolving prematurely.
+    Scoped by conversation_id to avoid multi-conversation intent collisions.
     """
     root = project_root or Path.cwd()
     norm = target_file.replace("\\", "/")
@@ -413,9 +433,14 @@ def record_resolution_intent(
     state = load_governance_state(project_root)
     intents = state.setdefault("resolution_intents", [])
 
+    cid = conversation_id or "default"
     intents = [
         it for it in intents
-        if not (it.get("kind") == kind and it.get("target_path") == str(target_path))
+        if not (
+            it.get("conversation_id") == cid
+            and it.get("kind") == kind
+            and it.get("target_path") == str(target_path)
+        )
     ]
     intents.append({
         "kind": kind,
@@ -425,7 +450,7 @@ def record_resolution_intent(
         "pre_mtime": pre_mtime,
         "pre_size": pre_size,
         "timestamp": time.time(),
-        "conversation_id": conversation_id or "default"
+        "conversation_id": cid
     })
     state["resolution_intents"] = intents
     save_governance_state(state, project_root)
@@ -439,9 +464,10 @@ def reconcile_obligations_on_disk(
     """
     Physical disk verification for pending test and doc obligations.
     Two-Phase Commit:
-    1. Evaluates staged resolution_intents against disk snapshot (hash, mtime, size change).
+    1. Evaluates staged resolution_intents against cryptographic disk snapshot (SHA-256 change).
        Only if the file was physically created or modified on disk is the resolution committed.
-    2. Fallback disk verification: checks pending obligations where files were updated out-of-band.
+    2. Fallback disk verification: checks pending obligations where files were updated out-of-band,
+       using baseline cryptographic hashes.
     Returns (resolved_tests, resolved_docs).
     """
     cid = conversation_id or "default"
@@ -461,8 +487,6 @@ def reconcile_obligations_on_disk(
         p = Path(target_path_str)
         curr_hash, curr_mtime, curr_size = compute_file_digest(p)
         pre_hash = intent.get("pre_hash")
-        pre_mtime = intent.get("pre_mtime")
-        pre_size = intent.get("pre_size", 0)
 
         physically_modified = False
         if pre_hash is None:
@@ -470,10 +494,8 @@ def reconcile_obligations_on_disk(
             if curr_hash is not None:
                 physically_modified = True
         else:
-            # File existed; check if hash, size, or mtime changed
-            if curr_hash != pre_hash or curr_size != pre_size or (
-                curr_mtime is not None and pre_mtime is not None and curr_mtime > pre_mtime
-            ):
+            # File existed; modification strictly requires content/digest change (mtime alone does NOT qualify)
+            if curr_hash != pre_hash:
                 physically_modified = True
 
         if physically_modified:
@@ -502,10 +524,11 @@ def reconcile_obligations_on_disk(
         if intent.get("target_path")
     }
 
-    # 2. Existing fallback: check pending obligations directly against disk mtime
+    # 2. Cryptographic baseline & fallback disk verification
     pending_docs = get_unresolved_doc_obligations(root, cid)
     for prod_file, doc_info in list(pending_docs.items()):
         req_docs = doc_info.get("required_docs", ["CHANGELOG.md"])
+        baseline_hashes = doc_info.get("baseline_hashes", {})
         ts = doc_info.get("timestamp", 0)
         all_satisfied = True
         for req in req_docs:
@@ -516,13 +539,25 @@ def reconcile_obligations_on_disk(
             if not doc_path.is_file():
                 all_satisfied = False
                 break
-            try:
-                if doc_path.stat().st_mtime < (ts - 5):
+            curr_h, _, _ = compute_file_digest(doc_path)
+            if req in baseline_hashes:
+                base_h = baseline_hashes[req]
+                if base_h is None:
+                    if curr_h is None:
+                        all_satisfied = False
+                        break
+                else:
+                    if curr_h == base_h:
+                        all_satisfied = False
+                        break
+            else:
+                try:
+                    if doc_path.stat().st_mtime < (ts - 5):
+                        all_satisfied = False
+                        break
+                except OSError:
                     all_satisfied = False
                     break
-            except OSError:
-                all_satisfied = False
-                break
         if all_satisfied and req_docs:
             res = resolve_pending_doc_obligations(req_docs[0], root, cid)
             resolved_docs.extend(res)
@@ -544,13 +579,20 @@ def reconcile_obligations_on_disk(
         if cand_path_obj and cand_path_obj in active_intent_paths:
             continue
 
+        curr_h, _, _ = compute_file_digest(cand_path_obj) if cand_path_obj else (None, None, 0)
+        base_h = test_info.get("baseline_hash")
         ts = test_info.get("timestamp", 0)
-        if candidate and os.path.isfile(candidate):
-            try:
-                if os.path.getmtime(candidate) >= (ts - 5):
+        if cand_path_obj and cand_path_obj.is_file():
+            if base_h is not None:
+                if curr_h != base_h:
                     res = resolve_pending_test_evidence(candidate, root, cid)
                     resolved_tests.extend(res)
-            except OSError:
-                continue
+            else:
+                try:
+                    if os.path.getmtime(candidate) >= (ts - 5):
+                        res = resolve_pending_test_evidence(candidate, root, cid)
+                        resolved_tests.extend(res)
+                except OSError:
+                    continue
 
     return resolved_tests, resolved_docs

@@ -133,6 +133,59 @@ class TestGovernanceDomain(unittest.TestCase):
         self.assertIn("engine/api.py", res_docs)
         self.assertEqual(len(get_unresolved_doc_obligations(root, cid)), 0)
 
+    def test_same_content_touch_does_not_resolve_obligation(self):
+        """Saving or touching the file with identical content (changing mtime but not hash) must NOT resolve obligation."""
+        root = Path(self.temp_dir)
+        cid = "sess-touch"
+        changelog_file = root / "CHANGELOG.md"
+        changelog_file.write_text("# Static Changelog\n", encoding="utf-8")
+
+        record_pending_doc_obligation("engine/billing.py", ["CHANGELOG.md"], project_root=root, conversation_id=cid)
+        record_resolution_intent("doc", str(changelog_file), project_root=root, conversation_id=cid)
+
+        # Editor re-saves identical content after a delay (mtime advances, content and hash identical)
+        time.sleep(0.02)
+        changelog_file.write_text("# Static Changelog\n", encoding="utf-8")
+
+        # Reconcile: must NOT resolve because hash did not mutate!
+        res_tests, res_docs = reconcile_obligations_on_disk(root, cid)
+        self.assertEqual(res_docs, [])
+        self.assertIn("engine/billing.py", get_unresolved_doc_obligations(root, cid))
+
+        # Now physically mutate content (hash changes)
+        time.sleep(0.02)
+        changelog_file.write_text("# Static Changelog\n- Added billing.py\n", encoding="utf-8")
+        res_tests, res_docs = reconcile_obligations_on_disk(root, cid)
+        self.assertIn("engine/billing.py", res_docs)
+        self.assertEqual(len(get_unresolved_doc_obligations(root, cid)), 0)
+
+    def test_concurrent_sessions_intents_do_not_collide(self):
+        """Intents for the same file in different conversations must not overwrite each other."""
+        root = Path(self.temp_dir)
+        changelog_file = root / "CHANGELOG.md"
+        changelog_file.write_text("# Initial Changelog\n", encoding="utf-8")
+
+        record_pending_doc_obligation("engine/mod_a.py", ["CHANGELOG.md"], project_root=root, conversation_id="sess-A")
+        record_pending_doc_obligation("engine/mod_b.py", ["CHANGELOG.md"], project_root=root, conversation_id="sess-B")
+
+        record_resolution_intent("doc", str(changelog_file), project_root=root, conversation_id="sess-A")
+        record_resolution_intent("doc", str(changelog_file), project_root=root, conversation_id="sess-B")
+
+        state = load_governance_state(root)
+        intents = state.get("resolution_intents", [])
+        self.assertEqual(len(intents), 2, "Both conversation intents must be preserved in state")
+        conv_ids = {it.get("conversation_id") for it in intents}
+        self.assertEqual(conv_ids, {"sess-A", "sess-B"})
+
+        # Mutate CHANGELOG on disk
+        time.sleep(0.02)
+        changelog_file.write_text("# Initial Changelog\n- Updated by agent\n", encoding="utf-8")
+
+        # Reconciling sess-A resolves sess-A's obligation
+        res_tests_a, res_docs_a = reconcile_obligations_on_disk(root, "sess-A")
+        self.assertIn("engine/mod_a.py", res_docs_a)
+        self.assertEqual(len(get_unresolved_doc_obligations(root, "sess-A")), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
