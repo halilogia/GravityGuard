@@ -48,8 +48,9 @@ def _collect_engine_package_files() -> list[str]:
     pkg_dir = REPO / "engine" / "gravityguard_engine"
     files = []
     if pkg_dir.is_dir():
-        for p in sorted(pkg_dir.glob("*.py")):
-            files.append(f"extension/engine/gravityguard_engine/{p.name}")
+        for p in sorted(pkg_dir.rglob("*.py")):
+            rel_part = p.relative_to(pkg_dir).as_posix()
+            files.append(f"extension/engine/gravityguard_engine/{rel_part}")
     return files
 
 _pkg_files = _collect_engine_package_files()

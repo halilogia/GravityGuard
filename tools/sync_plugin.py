@@ -54,11 +54,14 @@ def collect_sync_pairs(root: str) -> list[tuple[str, str, str]]:
     ]
     pkg_dir = os.path.join(root, "engine", "gravityguard_engine")
     if os.path.isdir(pkg_dir):
-        for fname in sorted(os.listdir(pkg_dir)):
-            if fname.endswith(".py"):
-                repo_rel = f"engine/gravityguard_engine/{fname}"
-                plug_rel = f"scripts/gravityguard_engine/{fname}"
-                pairs.append((repo_rel, plug_rel, f"Motor alt modulu ({fname})"))
+        for dirpath, _, filenames in os.walk(pkg_dir):
+            for fname in sorted(filenames):
+                if fname.endswith(".py"):
+                    full_p = os.path.join(dirpath, fname)
+                    rel_p = os.path.relpath(full_p, root).replace("\\", "/")
+                    sub_p = os.path.relpath(full_p, pkg_dir).replace("\\", "/")
+                    plug_rel = f"scripts/gravityguard_engine/{sub_p}"
+                    pairs.append((rel_p, plug_rel, f"Motor alt modulu ({sub_p})"))
     return pairs
 
 PAIRS = collect_sync_pairs(repo_root())

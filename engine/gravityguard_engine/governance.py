@@ -8,6 +8,7 @@ Manages unified governance.json state:
 - physical disk reconciliation (Two-Phase Commit verification)
 Zero external dependencies.
 """
+import hashlib
 import json
 import os
 import time
@@ -86,6 +87,7 @@ def load_governance_state(
             "version": 2,
             "test_obligations": {"pending": {}},
             "doc_obligations": {"pending": {}},
+            "resolution_intents": [],
             "sessions": {}
         }
 
@@ -93,8 +95,17 @@ def load_governance_state(
     data.setdefault("sessions", {})
     data.setdefault("test_obligations", {"pending": {}})
     data.setdefault("doc_obligations", {"pending": {}})
+    data.setdefault("resolution_intents", [])
 
     now = time.time()
+    # Prune stale resolution intents (> 1 hour)
+    intents = data.get("resolution_intents", [])
+    if isinstance(intents, list):
+        data["resolution_intents"] = [
+            it for it in intents
+            if isinstance(it, dict) and (now - it.get("timestamp", now)) < 3600
+        ]
+
     # Prune stale global pending (> 1 hour)
     for cat in ("test_obligations", "doc_obligations"):
         pending = data.get(cat, {}).get("pending", {})
@@ -355,8 +366,69 @@ def clear_governance_state(project_root: Optional[Path] = None) -> None:
         "version": 2,
         "test_obligations": {"pending": {}},
         "doc_obligations": {"pending": {}},
+        "resolution_intents": [],
         "sessions": {}
     }, project_root)
+
+
+def compute_file_digest(file_path: Path) -> Tuple[Optional[str], Optional[float], int]:
+    """
+    Computes (sha256_hex, mtime, size) for a file if it exists, or (None, None, 0) if absent.
+    Zero external dependencies.
+    """
+    if not file_path.is_file():
+        return None, None, 0
+    try:
+        stat = file_path.stat()
+        mtime = stat.st_mtime
+        size = stat.st_size
+        h = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            while True:
+                chunk = f.read(65536)
+                if not chunk:
+                    break
+                h.update(chunk)
+        return h.hexdigest(), mtime, size
+    except (IOError, OSError):
+        return None, None, 0
+
+
+def record_resolution_intent(
+    kind: str,
+    target_file: str,
+    project_root: Optional[Path] = None,
+    conversation_id: Optional[str] = None
+) -> None:
+    """
+    Records an intent to resolve doc or test obligations once physical disk modification occurs.
+    Two-Phase Commit Phase 1: Captures baseline pre-modification digest without resolving prematurely.
+    """
+    root = project_root or Path.cwd()
+    norm = target_file.replace("\\", "/")
+    raw_path = Path(target_file)
+    target_path = raw_path if raw_path.is_absolute() else (root / raw_path)
+
+    pre_hash, pre_mtime, pre_size = compute_file_digest(target_path)
+    state = load_governance_state(project_root)
+    intents = state.setdefault("resolution_intents", [])
+
+    intents = [
+        it for it in intents
+        if not (it.get("kind") == kind and it.get("target_path") == str(target_path))
+    ]
+    intents.append({
+        "kind": kind,
+        "target_file": norm,
+        "target_path": str(target_path),
+        "pre_hash": pre_hash,
+        "pre_mtime": pre_mtime,
+        "pre_size": pre_size,
+        "timestamp": time.time(),
+        "conversation_id": conversation_id or "default"
+    })
+    state["resolution_intents"] = intents
+    save_governance_state(state, project_root)
 
 
 def reconcile_obligations_on_disk(
@@ -366,21 +438,81 @@ def reconcile_obligations_on_disk(
 ) -> Tuple[List[str], List[str]]:
     """
     Physical disk verification for pending test and doc obligations.
-    Two-Phase Commit: Pending obligations are only resolved when verified on disk
-    via existence and mtime (mtime >= obligation.timestamp - 5).
+    Two-Phase Commit:
+    1. Evaluates staged resolution_intents against disk snapshot (hash, mtime, size change).
+       Only if the file was physically created or modified on disk is the resolution committed.
+    2. Fallback disk verification: checks pending obligations where files were updated out-of-band.
     Returns (resolved_tests, resolved_docs).
     """
     cid = conversation_id or "default"
     root = project_root or Path.cwd()
 
+    state = load_governance_state(project_root)
+    intents = state.get("resolution_intents", [])
+    remaining_intents = []
+
     resolved_docs: List[str] = []
+    resolved_tests: List[str] = []
+
+    for intent in intents:
+        target_path_str = intent.get("target_path")
+        if not target_path_str:
+            continue
+        p = Path(target_path_str)
+        curr_hash, curr_mtime, curr_size = compute_file_digest(p)
+        pre_hash = intent.get("pre_hash")
+        pre_mtime = intent.get("pre_mtime")
+        pre_size = intent.get("pre_size", 0)
+
+        physically_modified = False
+        if pre_hash is None:
+            # File did not exist when intent was recorded; now exists on disk
+            if curr_hash is not None:
+                physically_modified = True
+        else:
+            # File existed; check if hash, size, or mtime changed
+            if curr_hash != pre_hash or curr_size != pre_size or (
+                curr_mtime is not None and pre_mtime is not None and curr_mtime > pre_mtime
+            ):
+                physically_modified = True
+
+        if physically_modified:
+            kind = intent.get("kind")
+            target_f = intent.get("target_file", str(p))
+            intent_cid = intent.get("conversation_id", cid)
+            if kind == "doc":
+                res = resolve_pending_doc_obligations(target_f, root, intent_cid)
+                resolved_docs.extend(res)
+            elif kind == "test":
+                res = resolve_pending_test_evidence(target_f, root, intent_cid)
+                resolved_tests.extend(res)
+        else:
+            # Keep intent if fresh (< 3600s)
+            if (time.time() - intent.get("timestamp", 0)) < 3600:
+                remaining_intents.append(intent)
+
+    if len(remaining_intents) != len(intents):
+        state = load_governance_state(project_root)
+        state["resolution_intents"] = remaining_intents
+        save_governance_state(state, project_root)
+
+    active_intent_paths = {
+        Path(intent["target_path"]).resolve()
+        for intent in remaining_intents
+        if intent.get("target_path")
+    }
+
+    # 2. Existing fallback: check pending obligations directly against disk mtime
     pending_docs = get_unresolved_doc_obligations(root, cid)
     for prod_file, doc_info in list(pending_docs.items()):
         req_docs = doc_info.get("required_docs", ["CHANGELOG.md"])
         ts = doc_info.get("timestamp", 0)
         all_satisfied = True
         for req in req_docs:
-            doc_path = root / req
+            doc_path = (root / req).resolve()
+            if doc_path in active_intent_paths:
+                all_satisfied = False
+                break
             if not doc_path.is_file():
                 all_satisfied = False
                 break
@@ -395,7 +527,6 @@ def reconcile_obligations_on_disk(
             res = resolve_pending_doc_obligations(req_docs[0], root, cid)
             resolved_docs.extend(res)
 
-    resolved_tests: List[str] = []
     pending_tests = get_unresolved_test_evidence(root, cid)
     for prod_file, test_info in list(pending_tests.items()):
         if is_exempt_from_test_evidence(prod_file, cfg):
@@ -408,6 +539,10 @@ def reconcile_obligations_on_disk(
             cand_res, _ = resolve_candidate_test_file(prod_file, cfg)
             if cand_res and os.path.isfile(cand_res):
                 candidate = cand_res
+
+        cand_path_obj = Path(candidate).resolve() if candidate else None
+        if cand_path_obj and cand_path_obj in active_intent_paths:
+            continue
 
         ts = test_info.get("timestamp", 0)
         if candidate and os.path.isfile(candidate):

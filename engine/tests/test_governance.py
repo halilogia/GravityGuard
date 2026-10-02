@@ -19,6 +19,7 @@ from gravityguard_engine.governance import (
     clear_doc_obligations,
     clear_governance_state,
     clear_test_evidence_state,
+    compute_file_digest,
     get_governance_file_path,
     get_session_stop_retries,
     get_unresolved_doc_obligations,
@@ -29,6 +30,7 @@ from gravityguard_engine.governance import (
     reconcile_obligations_on_disk,
     record_pending_doc_obligation,
     record_pending_test_evidence,
+    record_resolution_intent,
     reset_session_stop_retries,
     resolve_pending_doc_obligations,
     resolve_pending_test_evidence,
@@ -102,6 +104,33 @@ class TestGovernanceDomain(unittest.TestCase):
         changelog_file.write_text("# Changelog", encoding="utf-8")
         res_tests, res_docs = reconcile_obligations_on_disk(root, cid)
         self.assertIn("engine/sync.py", res_docs)
+        self.assertEqual(len(get_unresolved_doc_obligations(root, cid)), 0)
+
+    def test_resolution_intent_two_phase_commit(self):
+        root = Path(self.temp_dir)
+        cid = "sess-intent"
+        record_pending_doc_obligation("engine/api.py", ["CHANGELOG.md"], project_root=root, conversation_id=cid)
+        changelog_file = root / "CHANGELOG.md"
+        changelog_file.write_text("# Old Changelog", encoding="utf-8")
+
+        # Record resolution intent (PreTool phase)
+        record_resolution_intent("doc", str(changelog_file), project_root=root, conversation_id=cid)
+
+        # Obligation MUST remain unresolved before file is modified
+        self.assertIn("engine/api.py", get_unresolved_doc_obligations(root, cid))
+
+        # Reconcile without disk modification -> still unresolved
+        res_tests, res_docs = reconcile_obligations_on_disk(root, cid)
+        self.assertEqual(res_docs, [])
+        self.assertIn("engine/api.py", get_unresolved_doc_obligations(root, cid))
+
+        # Now physically modify CHANGELOG.md (Antigravity tool write phase)
+        time.sleep(0.02)
+        changelog_file.write_text("# New Changelog\n- Added api.py\n", encoding="utf-8")
+
+        # Reconcile with disk modification -> now committed and resolved!
+        res_tests, res_docs = reconcile_obligations_on_disk(root, cid)
+        self.assertIn("engine/api.py", res_docs)
         self.assertEqual(len(get_unresolved_doc_obligations(root, cid)), 0)
 
 

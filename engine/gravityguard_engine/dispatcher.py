@@ -32,6 +32,7 @@ from .governance import (
     reconcile_obligations_on_disk,
     record_pending_doc_obligation,
     record_pending_test_evidence,
+    record_resolution_intent,
     reset_session_stop_retries,
     resolve_pending_doc_obligations,
     resolve_pending_test_evidence,
@@ -220,7 +221,7 @@ def validate_gravityguard() -> None:
     # Fast-pass for vendor, cache, and non-code text assets (ONLY AFTER G0 IS CLEAN)
     if is_vendor_or_cache or (is_data_or_doc and not file_lower.endswith((".py", ".ts", ".tsx", ".js", ".jsx"))):
         if should_resolve_doc:
-            resolve_pending_doc_obligations(target_file, p_root, c_id)
+            record_resolution_intent("doc", target_file, p_root, c_id)
         if target_file:
             log_event(tool_name, "APPROVED", target_file, "Exempt file (Vendor/Cache/Asset)", rule_id="EXEMPT")
         if all_warnings:
@@ -391,15 +392,14 @@ def validate_gravityguard() -> None:
 
     # ========================================================================
     # PASS / APPROVED
-    # Two-phase commit: All guards passed. Commit pending governance transitions!
+    # Two-phase commit: All guards passed. Record resolution intents!
+    # Physical reconciliation commits resolutions once written to disk.
     # ========================================================================
     if should_resolve_doc:
-        resolve_pending_doc_obligations(target_file, p_root, c_id)
+        record_resolution_intent("doc", target_file, p_root, c_id)
 
     if test_actions.get("resolve_test"):
-        resolved = resolve_pending_test_evidence(target_file, p_root, c_id)
-        if resolved:
-            log_event(tool_name, "APPROVED", target_file, f"Resolved pending test evidence for: {', '.join(resolved)}", rule_id="T1_RESOLVED")
+        record_resolution_intent("test", target_file, p_root, c_id)
 
     if test_actions.get("record_test"):
         tf, cp, en, msg = test_actions["record_test"]

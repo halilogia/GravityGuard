@@ -3020,6 +3020,10 @@ class TestV127G0ZeroBypassAndStatefulEvidence(unittest.TestCase):
         res2, _ = run_validator(payload_test)
         self.assertEqual(res2.get("decision"), "allow")
 
+        # Simulate Antigravity writing the approved test file to disk
+        with open(test_file, "w", encoding="utf-8") as f:
+            f.write("import { processPayment } from '../src/payment';\ntest('pay', () => { expect(processPayment()).toBe(true); });\n")
+
         # 4. Stop hook now: should be completely CLEAN because test evidence was resolved!
         stop_res2, _ = run_validator({"terminationReason": "model_stop"})
         self.assertEqual(_warnings_from(stop_res2), "", "Pending test evidence was resolved; Stop hook must be clean")
@@ -3555,10 +3559,45 @@ class TestObligationGovernance(unittest.TestCase):
         res_doc, _ = run_validator(payload_doc)
         self.assertEqual(res_doc.get("decision"), "allow")
 
+        # Simulate Antigravity writing CHANGELOG.md to disk after tool call approval
+        with open(changelog_file, "w", encoding="utf-8") as f:
+            f.write("## [Unreleased]\n### Added\n- Added worker.py\n")
+
         stop_res, _ = run_validator({"terminationReason": "model_stop"})
         # No tests suite declared, and doc obligation is resolved -> allow!
         self.assertEqual(stop_res.get("decision"), "allow")
         self.assertEqual(stop_res.get("reason", ""), "")
+
+    def test_two_phase_commit_unwritten_file_keeps_obligation_open(self):
+        """PreTool approves write for CHANGELOG.md, but file is not written to disk; subsequent Stop hook returns continue."""
+        cfg_path = os.path.join(self.temp_dir, ".gravityguard.json")
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump({"governance": {"enforceDocObligations": True}}, f)
+
+        engine_file = os.path.join(self.temp_dir, "engine", "aborted.py")
+        os.makedirs(os.path.dirname(engine_file), exist_ok=True)
+        run_validator({
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {"TargetFile": engine_file, "CodeContent": "def aborted(): pass\n"}
+            }
+        })
+
+        # PreTool approves CHANGELOG.md write intent
+        changelog_file = os.path.join(self.temp_dir, "CHANGELOG.md")
+        res_doc, _ = run_validator({
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {"TargetFile": changelog_file, "CodeContent": "## [Unreleased]\n"}
+            }
+        })
+        self.assertEqual(res_doc.get("decision"), "allow")
+
+        # Antigravity does NOT write the file (e.g. tool aborted).
+        # Stop hook must NOT resolve the obligation!
+        stop_res, _ = run_validator({"terminationReason": "model_stop"})
+        self.assertEqual(stop_res.get("decision"), "continue")
+        self.assertIn("Dokümantasyon Yükümlülüğü", stop_res.get("reason", ""))
 
     def test_stop_hook_circuit_breaker_allows_on_excessive_attempts(self):
         cfg_path = os.path.join(self.temp_dir, ".gravityguard.json")
