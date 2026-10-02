@@ -17,7 +17,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .state_lock import StateLock
+from .state_lock import StateLock, StateLockTimeout
 from .test_evidence import is_exempt_from_test_evidence, resolve_candidate_test_file
 
 
@@ -88,9 +88,17 @@ def governance_transaction(
         yield active["state"]
         return
 
+    env_timeout = os.environ.get("GRAVITYGUARD_LOCK_TIMEOUT")
+    if env_timeout:
+        try:
+            timeout = float(env_timeout)
+        except (ValueError, TypeError) as err:
+            _err = err
+
     lock_path = get_governance_lock_path(project_root)
     lock = StateLock(lock_path, timeout=timeout)
-    acquired = lock.acquire()
+    if not lock.acquire():
+        raise StateLockTimeout(f"Governance state lock timeout ({timeout}s): {lock_path}")
 
     try:
         state = load_governance_state(project_root)
@@ -101,8 +109,7 @@ def governance_transaction(
         finally:
             _txn_context.reset(token)
     finally:
-        if acquired:
-            lock.release()
+        lock.release()
 
 
 def load_governance_state(

@@ -15,7 +15,8 @@ _ENGINE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ENGINE_DIR not in sys.path:
     sys.path.insert(0, _ENGINE_DIR)
 
-from gravityguard_engine.state_lock import StateLock
+from unittest.mock import patch
+from gravityguard_engine.state_lock import StateLock, StateLockTimeout
 
 
 class TestStateLock(unittest.TestCase):
@@ -86,6 +87,32 @@ if lock.acquire():
         after_exit_lock = StateLock(self.lock_path, timeout=1.0)
         self.assertTrue(after_exit_lock.acquire(), "Parent must acquire lock immediately after child terminates")
         after_exit_lock.release()
+
+    def test_lock_context_manager_raises_statelocktimeout_on_failure(self):
+        """__enter__ must raise StateLockTimeout when lock cannot be acquired within timeout."""
+        lock1 = StateLock(self.lock_path, timeout=1.0)
+        self.assertTrue(lock1.acquire())
+
+        with self.assertRaises(StateLockTimeout):
+            with StateLock(self.lock_path, timeout=0.05, poll_interval=0.01):
+                self.fail("Context manager body must never execute when lock acquisition fails")
+
+        lock1.release()
+
+    def test_state_lock_os_open_failure_times_out_without_infinite_loop(self):
+        """Continuous OSError on os.open must time out in ~timeout seconds instead of looping forever."""
+        def mock_open_err(*args, **kwargs):
+            raise OSError("Simulated disk permission error")
+
+        with patch("os.open", side_effect=mock_open_err):
+            start = time.monotonic()
+            lock = StateLock(self.lock_path, timeout=0.05, poll_interval=0.005)
+            acquired = lock.acquire()
+            elapsed = time.monotonic() - start
+
+            self.assertFalse(acquired, "Must return False when os.open consistently fails")
+            self.assertGreaterEqual(elapsed, 0.04, "Must wait for timeout before failing")
+            self.assertLess(elapsed, 0.4, "Must not hang in infinite loop on os.open error")
 
 
 if __name__ == "__main__":

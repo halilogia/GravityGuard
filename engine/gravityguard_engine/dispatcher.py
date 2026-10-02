@@ -22,6 +22,7 @@ from .architecture_rules import (
     record_and_check_cumulative_growth,
 )
 from .audit import log_event
+from .state_lock import StateLockTimeout
 from .diagnostics import read_recent_diagnostics, trigger_background_validation
 from .diffing import get_diff_analysis, get_projected_and_old_content
 from .governance import (
@@ -82,61 +83,69 @@ def validate_gravityguard() -> None:
             print(json.dumps({"decision": "allow"}))
             sys.exit(0)
 
-        project_root = resolve_project_root(payload)
-        conversation_id = payload.get("conversationId", "default")
-        cfg = load_gravityguard_config("", project_root)
+        try:
+            project_root = resolve_project_root(payload)
+            conversation_id = payload.get("conversationId", "default")
+            cfg = load_gravityguard_config("", project_root)
 
-        # Defect A fix: Circuit breaker strictly governed by session continuation retries
-        session_retries = get_session_stop_retries(project_root, conversation_id)
-        if session_retries >= 5:
-            log_event(
-                "stop", "WARNING", "workspace",
-                f"Circuit breaker triggered (retries={session_retries}): allowing stop despite obligations",
-                rule_id="STOP_CIRCUIT_BREAKER"
-            )
-            reset_session_stop_retries(project_root, conversation_id)
-            print(json.dumps({"decision": "allow"}))
+            # Defect A fix: Circuit breaker strictly governed by session continuation retries
+            session_retries = get_session_stop_retries(project_root, conversation_id)
+            if session_retries >= 5:
+                log_event(
+                    "stop", "WARNING", "workspace",
+                    f"Circuit breaker triggered (retries={session_retries}): allowing stop despite obligations",
+                    rule_id="STOP_CIRCUIT_BREAKER"
+                )
+                reset_session_stop_retries(project_root, conversation_id)
+                print(json.dumps({"decision": "allow"}))
+                sys.exit(0)
+
+            # Defect B fix: Reconcile obligations with physical filesystem verification
+            reconcile_obligations_on_disk(project_root, conversation_id, cfg)
+
+            unresolved_tests = get_unresolved_test_evidence(project_root, conversation_id)
+            unresolved_docs = get_unresolved_doc_obligations(project_root, conversation_id)
+
+            warn_reasons = []
+            if unresolved_tests:
+                missing_items = [
+                    f"'{p}' (beklenen test: {info.get('expected_name', 'test')})"
+                    for p, info in unresolved_tests.items()
+                ]
+                t1_warn = (
+                    f"Test Kanıtı Uyarısı (T1): Oturum tamamlandı ancak şu üretim kodları için "
+                    f"test kanıtı bulunamadı: {', '.join(missing_items)}"
+                )
+                log_event("stop", "WARNING", "workspace", t1_warn, rule_id="T1_FINAL_UNRESOLVED")
+                warn_reasons.append(t1_warn)
+
+            if unresolved_docs:
+                missing_docs = [
+                    f"'{p}' (gereken: {', '.join(info.get('required_docs', ['CHANGELOG.md']))})"
+                    for p, info in unresolved_docs.items()
+                ]
+                doc_warn = (
+                    f"Dokümantasyon Yükümlülüğü: Motor/kod dosyaları değiştirildi ancak "
+                    f"dokümantasyon güncellenmedi (docs/KNOWLEDGE.md §6 Same-commit rule): {', '.join(missing_docs)}"
+                )
+                log_event("stop", "WARNING", "workspace", doc_warn, rule_id="DOC_OBLIGATION_UNRESOLVED")
+                warn_reasons.append(doc_warn)
+
+            if warn_reasons:
+                increment_session_stop_retries(project_root, conversation_id)
+                full_reason = " | ".join(warn_reasons)
+                print(json.dumps({"decision": "continue", "reason": full_reason}))
+            else:
+                reset_session_stop_retries(project_root, conversation_id)
+                print(json.dumps({"decision": "allow"}))
             sys.exit(0)
-
-        # Defect B fix: Reconcile obligations with physical filesystem verification
-        reconcile_obligations_on_disk(project_root, conversation_id, cfg)
-
-        unresolved_tests = get_unresolved_test_evidence(project_root, conversation_id)
-        unresolved_docs = get_unresolved_doc_obligations(project_root, conversation_id)
-
-        warn_reasons = []
-        if unresolved_tests:
-            missing_items = [
-                f"'{p}' (beklenen test: {info.get('expected_name', 'test')})"
-                for p, info in unresolved_tests.items()
-            ]
-            t1_warn = (
-                f"Test Kanıtı Uyarısı (T1): Oturum tamamlandı ancak şu üretim kodları için "
-                f"test kanıtı bulunamadı: {', '.join(missing_items)}"
-            )
-            log_event("stop", "WARNING", "workspace", t1_warn, rule_id="T1_FINAL_UNRESOLVED")
-            warn_reasons.append(t1_warn)
-
-        if unresolved_docs:
-            missing_docs = [
-                f"'{p}' (gereken: {', '.join(info.get('required_docs', ['CHANGELOG.md']))})"
-                for p, info in unresolved_docs.items()
-            ]
-            doc_warn = (
-                f"Dokümantasyon Yükümlülüğü: Motor/kod dosyaları değiştirildi ancak "
-                f"dokümantasyon güncellenmedi (docs/KNOWLEDGE.md §6 Same-commit rule): {', '.join(missing_docs)}"
-            )
-            log_event("stop", "WARNING", "workspace", doc_warn, rule_id="DOC_OBLIGATION_UNRESOLVED")
-            warn_reasons.append(doc_warn)
-
-        if warn_reasons:
-            increment_session_stop_retries(project_root, conversation_id)
-            full_reason = " | ".join(warn_reasons)
-            print(json.dumps({"decision": "continue", "reason": full_reason}))
-        else:
-            reset_session_stop_retries(project_root, conversation_id)
-            print(json.dumps({"decision": "allow"}))
-        sys.exit(0)
+        except StateLockTimeout as lock_err:
+            log_event("stop", "WARNING", "workspace", f"State lock timeout during Stop hook: {lock_err}", rule_id="STATE_LOCK_TIMEOUT")
+            print(json.dumps({
+                "decision": "continue",
+                "reason": f"Durum kilidi zaman aşımı (StateLockTimeout): Oturum durumu güvenli şekilde doğrulanamadığı için henüz sonlandırılamaz ({lock_err})."
+            }))
+            sys.exit(0)
 
     # ========================================================================
     # PreToolUse Lifecycle Hook Dispatcher
@@ -186,7 +195,15 @@ def validate_gravityguard() -> None:
     p_root = resolve_project_root(payload, target_file)
     c_id = payload.get("conversationId", "default")
     cfg = load_gravityguard_config(target_file, p_root)
-    reconcile_obligations_on_disk(p_root, c_id, cfg)
+    try:
+        reconcile_obligations_on_disk(p_root, c_id, cfg)
+    except StateLockTimeout as lock_err:
+        log_event(tool_name, "BLOCKED", target_file, f"State lock timeout: {lock_err}", rule_id="STATE_LOCK_TIMEOUT")
+        print(json.dumps({
+            "decision": "deny",
+            "reason": f"🛑 [STATE_LOCK_TIMEOUT]: Durum dosyası kilit zaman aşımı ({lock_err}). Kayıp güncelleme riskini önlemek için işlem güvenli kilit alınana kadar reddedildi."
+        }))
+        sys.exit(0)
 
     # 2. Extract projected and old content, compute exact diff
     old_full_content, projected_content = get_projected_and_old_content(target_file, tool_name, args)
@@ -221,7 +238,15 @@ def validate_gravityguard() -> None:
     # Fast-pass for vendor, cache, and non-code text assets (ONLY AFTER G0 IS CLEAN)
     if is_vendor_or_cache or (is_data_or_doc and not file_lower.endswith((".py", ".ts", ".tsx", ".js", ".jsx"))):
         if should_resolve_doc:
-            record_resolution_intent("doc", target_file, p_root, c_id)
+            try:
+                record_resolution_intent("doc", target_file, p_root, c_id)
+            except StateLockTimeout as lock_err:
+                log_event(tool_name, "BLOCKED", target_file, f"State lock timeout: {lock_err}", rule_id="STATE_LOCK_TIMEOUT")
+                print(json.dumps({
+                    "decision": "deny",
+                    "reason": f"🛑 [STATE_LOCK_TIMEOUT]: Durum dosyası kilit zaman aşımı ({lock_err}). Kayıp güncelleme riskini önlemek için işlem güvenli kilit alınana kadar reddedildi."
+                }))
+                sys.exit(0)
         if target_file:
             log_event(tool_name, "APPROVED", target_file, "Exempt file (Vendor/Cache/Asset)", rule_id="EXEMPT")
         if all_warnings:
@@ -395,19 +420,27 @@ def validate_gravityguard() -> None:
     # Two-phase commit: All guards passed. Record resolution intents!
     # Physical reconciliation commits resolutions once written to disk.
     # ========================================================================
-    if should_resolve_doc:
-        record_resolution_intent("doc", target_file, p_root, c_id)
+    try:
+        if should_resolve_doc:
+            record_resolution_intent("doc", target_file, p_root, c_id)
 
-    if test_actions.get("resolve_test"):
-        record_resolution_intent("test", target_file, p_root, c_id)
+        if test_actions.get("resolve_test"):
+            record_resolution_intent("test", target_file, p_root, c_id)
 
-    if test_actions.get("record_test"):
-        tf, cp, en, msg = test_actions["record_test"]
-        record_pending_test_evidence(tf, cp, en, msg, p_root, c_id)
-        log_event(tool_name, "APPROVED", tf, f"Pending test evidence recorded ({en})", rule_id="T1_PENDING")
+        if test_actions.get("record_test"):
+            tf, cp, en, msg = test_actions["record_test"]
+            record_pending_test_evidence(tf, cp, en, msg, p_root, c_id)
+            log_event(tool_name, "APPROVED", tf, f"Pending test evidence recorded ({en})", rule_id="T1_PENDING")
 
-    if pending_doc_record:
-        record_pending_doc_obligation(pending_doc_record, project_root=p_root, conversation_id=c_id)
+        if pending_doc_record:
+            record_pending_doc_obligation(pending_doc_record, project_root=p_root, conversation_id=c_id)
+    except StateLockTimeout as lock_err:
+        log_event(tool_name, "BLOCKED", target_file, f"State lock timeout: {lock_err}", rule_id="STATE_LOCK_TIMEOUT")
+        print(json.dumps({
+            "decision": "deny",
+            "reason": f"🛑 [STATE_LOCK_TIMEOUT]: Durum dosyası kilit zaman aşımı ({lock_err}). Kayıp güncelleme riskini önlemek için işlem güvenli kilit alınana kadar reddedildi."
+        }))
+        sys.exit(0)
 
 
     elapsed_ms = (time.perf_counter() - start_time) * 1000

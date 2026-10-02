@@ -28,12 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Motor Modülerizasyonu (`gravityguard_engine`)**: 2.635 satırlık tek parça `engine/gravity-validator.py` monolitik dosyası, SRP ve bakım kolaylığı ilkelerine uygun olarak `engine/gravityguard_engine/` alt modüllerine ayrıştırıldı (`project_context.py`, `audit.py`, `diffing.py`, `security_rules.py`, `architecture_rules.py`, `diagnostics.py`, `test_evidence.py`, `governance.py`, `dispatcher.py`, `state_lock.py`). Ana giriş noktası `engine/gravity-validator.py` 118 satırlık ince bir ön yüz (facade) haline getirilerek geriye dönük tam uyumluluk sağlandı.
-- **Test Kapsamı**: 144 motor testi + 33 etki alanı testi + 24 TypeScript testi = **Toplam 201 test**, %100 başarılı. Çekirdek mantık gecikmesi ~0.030 ms (<10ms bütçesi korunuyor).
+- **Test Kapsamı**: 145 motor testi + 36 etki alanı testi + 24 TypeScript testi = **Toplam 205 test**, %100 başarılı. Çekirdek mantık gecikmesi ~0.030 ms (<10ms bütçesi korunuyor).
 
 ### Fixed
 - **Devre Kesici Doğruluğu (Defect A)**: Stop kancasındaki `or (isinstance(exec_num, int) and exec_num > 5)` koşulu kaldırıldı. Araç çağrı sıra numarası (`executionNum`), uzun konuşmalarda erken devre kesici tetikleyip denetimi devre dışı bırakamıyor; devre kesici yalnızca ajanın art arda 5 kez Stop hook'u atlatmaya çalıştığı `session_retries >= 5` durumunda devreye giriyor.
 - **Çoklu Çalışma Alanı Çözümleme (Defect C)**: `resolve_project_root`, `payload.workspacePaths` listesinde hedef dosyanın (`target_file`) gerçek üst dizinini içeren çalışma alanını ilk sıraya alarak birden fazla projenin açık olduğu oturumlarda kök dizin sapmalarını önledi.
 - **Eklenti Arayüzü Yükleme ve Sıfır Bağımlılık (Zero-Dependency i18n Fix)**: VSIX paketi derlenirken `node_modules` dışarıda kaldığı için Antigravity IDE tarafında `Cannot find module 'i18next'` hatasıyla Webview'ın siyah ekranda/mavi yükleme çizgisinde takılması giderildi. Dış `i18next` bağımlılığı kaldırılarak hafif, bellek içi ve sıfır bağımlılıklı (zero-dependency) saf TypeScript çeviri motoru (`src/i18n/index.ts`) entegre edildi.
+- **Kilit Zaman Aşımı ve Hata Durumunda Kapalı Kalma (StateLock Fail-Closed on Timeout)**:
+  - `StateLockTimeout` exception sınıfı tanımlandı. `StateLock.__enter__()` ve `governance_transaction()` kilit alınamadığında fail-open davranışı terk edilerek `StateLockTimeout` fırlatacak şekilde fail-closed hale getirildi. Yüksek kilit çekişmesi (contention) altında asla kilitsiz durum okunup yazılmaz.
+  - **Hook Sınır Güvenliği**: PreToolUse aşamasında kilit zaman aşımına uğrarsa `decision: deny` ve `STATE_LOCK_TIMEOUT` kuralıyla işlem engellenir; Stop hook aşamasında kilit zaman aşımına uğrarsa `decision: continue` dönülerek oturumun kontrolsüz/doğrulanmamış sonlanması engellenir.
+  - **Monotonik Zaman ve Sonsuz Döngü Koruması**: `StateLock.acquire()` döngüsü `time.monotonic()` ile sistem saati sıçramalarına karşı korundu; `os.open` aralıksız `OSError` üretse dahi `self.timeout` süresi sonunda sonsuz döngüye girmeden güvenle `False` dönmesi sağlandı.
 
 ## [1.3.1] - 2026-10-02
 

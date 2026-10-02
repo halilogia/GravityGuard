@@ -82,6 +82,10 @@ from gravityguard_engine.test_evidence import (  # noqa: F401
     project_has_test_infrastructure,
     resolve_candidate_test_file,
 )
+from gravityguard_engine.state_lock import (  # noqa: F401
+    StateLock,
+    StateLockTimeout,
+)
 from gravityguard_engine.governance import (  # noqa: F401
     clear_doc_obligations,
     clear_governance_state,
@@ -91,6 +95,7 @@ from gravityguard_engine.governance import (  # noqa: F401
     get_test_evidence_file_path,
     get_unresolved_doc_obligations,
     get_unresolved_test_evidence,
+    governance_transaction,
     increment_session_stop_retries,
     load_governance_state,
     load_test_evidence_state,

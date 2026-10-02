@@ -3771,6 +3771,45 @@ class TestObligationGovernance(unittest.TestCase):
         final_res, _ = run_validator({"terminationReason": "model_stop", "conversationId": "circ-test-sess"})
         self.assertEqual(final_res.get("decision"), "allow", "6th attempt must trigger circuit breaker")
 
+    def test_state_lock_timeout_fails_closed_in_pretool_and_stop(self):
+        """When lock cannot be acquired, PreToolUse must deny and Stop hook must continue (fail-closed)."""
+        _engine_dir = os.path.dirname(os.path.abspath(__file__))
+        if _engine_dir not in sys.path:
+            sys.path.insert(0, _engine_dir)
+        from gravityguard_engine.state_lock import StateLock
+        from gravityguard_engine.governance import get_governance_lock_path
+        from pathlib import Path
+
+        lock_path = get_governance_lock_path(Path(self.temp_dir))
+        external_lock = StateLock(lock_path, timeout=1.0)
+        self.assertTrue(external_lock.acquire(), "Must acquire external lock to induce contention")
+
+        os.environ["GRAVITYGUARD_LOCK_TIMEOUT"] = "0.06"
+        try:
+            # 1. PreToolUse under lock contention must return deny with STATE_LOCK_TIMEOUT
+            src_file = os.path.join(self.temp_dir, "engine", "contended.py")
+            pre_res, _ = run_validator({
+                "workspacePaths": [self.temp_dir],
+                "toolCall": {
+                    "name": "write_to_file",
+                    "args": {"TargetFile": src_file, "CodeContent": "def foo(): return 1\n"}
+                }
+            })
+            self.assertEqual(pre_res.get("decision"), "deny")
+            self.assertIn("STATE_LOCK_TIMEOUT", pre_res.get("reason", ""))
+
+            # 2. Stop hook under lock contention must return continue (refuses to terminate session unverified)
+            stop_res, _ = run_validator({
+                "workspacePaths": [self.temp_dir],
+                "terminationReason": "model_stop",
+                "conversationId": "contended-sess"
+            })
+            self.assertEqual(stop_res.get("decision"), "continue")
+            self.assertIn("StateLockTimeout", stop_res.get("reason", ""))
+        finally:
+            os.environ.pop("GRAVITYGUARD_LOCK_TIMEOUT", None)
+            external_lock.release()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -38,6 +38,7 @@ from gravityguard_engine.governance import (
     resolve_pending_test_evidence,
     save_governance_state,
 )
+from gravityguard_engine.state_lock import StateLock, StateLockTimeout
 
 
 class TestGovernanceDomain(unittest.TestCase):
@@ -285,6 +286,26 @@ record_pending_doc_obligation(prod_file, ['CHANGELOG.md'], 'Test obligation', co
         self.assertIn("proc-B", state.get("sessions", {}), "Session B must be present in state")
         self.assertIn("engine/mod_a.py", state.get("doc_obligations", {}).get("pending", {}))
         self.assertIn("engine/mod_b.py", state.get("doc_obligations", {}).get("pending", {}))
+
+    def test_governance_transaction_timeout_fails_closed_never_executes_body(self):
+        """When lock cannot be acquired, governance_transaction must raise StateLockTimeout and never execute body."""
+        root = Path(self.temp_dir)
+        lock_path = get_governance_lock_path(root)
+        external_lock = StateLock(lock_path, timeout=1.0)
+        self.assertTrue(external_lock.acquire(), "External lock must be acquired first")
+
+        body_executed = False
+        with self.assertRaises(StateLockTimeout):
+            with governance_transaction(root, timeout=0.05) as state:
+                body_executed = True
+                state.setdefault("corrupted", {})["leak"] = True
+
+        self.assertFalse(body_executed, "Transaction body must NEVER execute on lock acquisition failure")
+        external_lock.release()
+
+        # State must remain pristine
+        state_after = load_governance_state(root)
+        self.assertNotIn("corrupted", state_after, "State must not be modified when lock acquisition times out")
 
 
 if __name__ == "__main__":

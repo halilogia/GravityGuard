@@ -18,6 +18,11 @@ else:
     import fcntl
 
 
+class StateLockTimeout(TimeoutError):
+    """Raised when an exclusive state lock cannot be acquired within the timeout window."""
+    pass
+
+
 class StateLock:
     """
     Cross-platform exclusive lock on a lockfile descriptor.
@@ -36,17 +41,16 @@ class StateLock:
         """
         Attempts to acquire the exclusive lock within the timeout window.
         Returns True if acquired, False on timeout.
+        Uses time.monotonic() to be immune against system clock shifts.
         """
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
-        start = time.time()
+        start = time.monotonic()
         while True:
             if self._fd is None:
                 try:
                     self._fd = os.open(str(self.lock_path), os.O_RDWR | os.O_CREAT, 0o666)
                 except (OSError, IOError) as err:
                     _open_err = err
-                    time.sleep(self.poll_interval)
-                    continue
 
             if self._fd is not None:
                 try:
@@ -65,16 +69,18 @@ class StateLock:
                 except (OSError, IOError) as err:
                     _lock_err = err
 
-            if time.time() - start >= self.timeout:
-                if self._fd is not None:
-                    try:
-                        os.close(self._fd)
-                    except (OSError, IOError) as err:
-                        _close_err = err
-                    self._fd = None
-                return False
+            if time.monotonic() - start >= self.timeout:
+                break
 
             time.sleep(self.poll_interval)
+
+        if self._fd is not None:
+            try:
+                os.close(self._fd)
+            except (OSError, IOError) as err:
+                _close_err = err
+            self._fd = None
+        return False
 
     def release(self) -> None:
         """
@@ -97,8 +103,12 @@ class StateLock:
                 self._fd = None
 
     def __enter__(self) -> StateLock:
-        self.acquire()
+        if not self.acquire():
+            raise StateLockTimeout(
+                f"Could not acquire state lock within {self.timeout}s: {self.lock_path}"
+            )
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.release()
+
