@@ -1,4 +1,4 @@
-import i18next from 'i18next';
+// Zero-dependency pure TypeScript translation registry
 
 export const resources = {
   tr: {
@@ -107,41 +107,47 @@ export const resources = {
   }
 };
 
-let initialized = false;
+let currentLang: 'tr' | 'en' = 'tr';
 
-export function initI18n(initialLang: string = 'tr'): typeof i18next {
-  if (!initialized) {
-    i18next.init({
-      lng: initialLang.startsWith('tr') ? 'tr' : 'en',
-      fallbackLng: 'en',
-      resources,
-      interpolation: {
-        escapeValue: false
-      }
-    });
-    initialized = true;
-  }
-  return i18next;
+export function initI18n(initialLang: string = 'tr'): { language: string } {
+  currentLang = initialLang.toLowerCase().startsWith('tr') ? 'tr' : 'en';
+  return { language: currentLang };
 }
 
 export function setLanguage(lang: 'tr' | 'en'): void {
-  if (!initialized) {
-    initI18n(lang);
-  } else {
-    i18next.changeLanguage(lang);
-  }
-}
-
-export function t(key: string, options?: Record<string, unknown>): string {
-  if (!initialized) {
-    initI18n();
-  }
-  return i18next.t(key, options);
+  currentLang = lang;
 }
 
 export function getCurrentLanguage(): 'tr' | 'en' {
-  if (!initialized) {
-    initI18n();
+  return currentLang;
+}
+
+export function t(key: string, options?: Record<string, unknown>): string {
+  const parts = key.split('.');
+  let cur: any = resources[currentLang]?.translation;
+  for (const p of parts) {
+    if (cur && typeof cur === 'object' && p in cur) {
+      cur = cur[p];
+    } else {
+      cur = undefined;
+      break;
+    }
   }
-  return (i18next.language || 'tr').startsWith('tr') ? 'tr' : 'en';
+  if (typeof cur === 'string') {
+    return cur;
+  }
+  // Fallback to English
+  let fallback: any = resources.en.translation;
+  for (const p of parts) {
+    if (fallback && typeof fallback === 'object' && p in fallback) {
+      fallback = fallback[p];
+    } else {
+      fallback = undefined;
+      break;
+    }
+  }
+  if (typeof fallback === 'string') {
+    return fallback;
+  }
+  return key;
 }

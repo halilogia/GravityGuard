@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Devre Kesici Doğruluğu (Defect A)**: Stop kancasındaki `or (isinstance(exec_num, int) and exec_num > 5)` koşulu kaldırıldı. Araç çağrı sıra numarası (`executionNum`), uzun konuşmalarda erken devre kesici tetikleyip denetimi devre dışı bırakamıyor; devre kesici yalnızca ajanın art arda 5 kez Stop hook'u atlatmaya çalıştığı `session_retries >= 5` durumunda devreye giriyor.
 - **Çoklu Çalışma Alanı Çözümleme (Defect C)**: `resolve_project_root`, `payload.workspacePaths` listesinde hedef dosyanın (`target_file`) gerçek üst dizinini içeren çalışma alanını ilk sıraya alarak birden fazla projenin açık olduğu oturumlarda kök dizin sapmalarını önledi.
+- **Eklenti Arayüzü Yükleme ve Sıfır Bağımlılık (Zero-Dependency i18n Fix)**: VSIX paketi derlenirken `node_modules` dışarıda kaldığı için Antigravity IDE tarafında `Cannot find module 'i18next'` hatasıyla Webview'ın siyah ekranda/mavi yükleme çizgisinde takılması giderildi. Dış `i18next` bağımlılığı kaldırılarak hafif, bellek içi ve sıfır bağımlılıklı (zero-dependency) saf TypeScript çeviri motoru (`src/i18n/index.ts`) entegre edildi.
 
 ## [1.3.1] - 2026-10-02
 
