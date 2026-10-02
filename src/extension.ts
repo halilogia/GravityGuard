@@ -804,9 +804,53 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
     // --- TAB 4: INSIGHTS (TELEMETRY, AGENT RECOVERY, EFFECTIVENESS) ---
     const shortSess = sessionId.length > 10 ? sessionId.slice(0, 8) + '…' : sessionId;
     const eff = (data as any)?.effectiveness || {};
-    const finalRecRate = typeof eff.recoveryRate === 'number' ? eff.recoveryRate : recoveryRate;
-    const finalRecovered = typeof eff.totalRecovered === 'number' ? eff.totalRecovered : recoveredCount;
-    const finalBlocked = typeof eff.totalBlocked === 'number' ? eff.totalBlocked : (totalBlockedAnalyzed || 1);
+    const totalBlockedCount = typeof eff.totalBlocked === 'number' ? eff.totalBlocked : totalBlockedAnalyzed;
+    const totalRecoveredCount = typeof eff.totalRecovered === 'number' ? eff.totalRecovered : recoveredCount;
+    const finalRecRate = totalBlockedCount > 0 ? Math.round((totalRecoveredCount / totalBlockedCount) * 100) : 100;
+
+    let recoverySubtext = '';
+    if (totalBlockedCount === 0) {
+      recoverySubtext = 'Henüz engellenen işlem yok (Temiz Oturum)';
+    } else if (totalBlockedCount < 3) {
+      recoverySubtext = `${totalRecoveredCount} / ${totalBlockedCount} düzeltildi (Yetersiz Örneklem, n=${totalBlockedCount})`;
+    } else {
+      recoverySubtext = `${totalRecoveredCount} / ${totalBlockedCount} ihlal ajan tarafından düzeltildi (%${finalRecRate})`;
+    }
+
+    const ruleStats: Record<string, any> = eff.ruleStats || {};
+
+    function formatRuleStat(ruleKey: string, defaultName: string): { label: string; val: string; valClass: string } {
+      const stat = ruleStats[ruleKey];
+      if (!stat || stat.blocked === 0) {
+        return {
+          label: defaultName,
+          val: 'Temiz (0 İhlal)',
+          valClass: 'text-muted'
+        };
+      }
+      const n = stat.blocked;
+      if (n < 3) {
+        return {
+          label: defaultName,
+          val: `Yetersiz Veri (n=${n})`,
+          valClass: 'text-muted'
+        };
+      }
+      const rate = typeof stat.recoveryRate === 'number' ? stat.recoveryRate : 0;
+      const med = stat.medianAttempts || 1;
+      const valClass = rate >= 80 ? 'text-green' : rate >= 50 ? 'text-cyan' : 'text-amber';
+      return {
+        label: defaultName,
+        val: `%${rate} Düzeltme (n=${n}, medyan ${med})`,
+        valClass
+      };
+    }
+
+    const g0Stat = formatRuleStat('G0_SECRET_LEAK', 'G0 Secret Leak');
+    const g1Stat = formatRuleStat('G1_SILENT_EXCEPTION', 'G1 Silent Exception');
+    const g2Stat = formatRuleStat('G2_TEST_INTEGRITY', 'G2 Test Integrity');
+    const g4Stat = formatRuleStat('G4_IMPORT_MATRIX', 'G4 Import Matrix');
+    const srpStat = formatRuleStat('SRP_BOUNDARY', 'SRP & Cohesion');
 
     const insightsHtml = `
       <div class="insight-card">
@@ -815,36 +859,48 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
           <div class="recovery-bar-wrap">
             <div class="recovery-bar" style="width: ${finalRecRate}%;"></div>
           </div>
-          <div class="recovery-score">${finalRecRate}%</div>
+          <div class="recovery-score">${totalBlockedCount === 0 ? '100%' : `${finalRecRate}%`}</div>
         </div>
-        <div class="insight-sub">${finalRecovered} / ${finalBlocked || 1} ${t('insights.fixedNext')}</div>
+        <div class="insight-sub">${recoverySubtext}</div>
       </div>
 
       <div class="insight-card">
-        <div class="insight-title">🏆 ${t('insights.highValueTitle')}</div>
+        <div class="insight-title">🛡️ Güvenlik ve Mimari Gardiyanları (Ampirik Veri)</div>
         <div class="metric-row">
-          <span class="metric-lbl">G0 Secret Leak:</span>
-          <span class="metric-val text-green">%100 Önleme</span>
+          <span class="metric-lbl">${g0Stat.label}:</span>
+          <span class="metric-val ${g0Stat.valClass}">${g0Stat.val}</span>
         </div>
         <div class="metric-row">
-          <span class="metric-lbl">G1 Silent Exception:</span>
-          <span class="metric-val text-green">Yüksek İyileşme (1 deneme)</span>
+          <span class="metric-lbl">${g1Stat.label}:</span>
+          <span class="metric-val ${g1Stat.valClass}">${g1Stat.val}</span>
         </div>
         <div class="metric-row">
-          <span class="metric-lbl">G2 Test Integrity:</span>
-          <span class="metric-val text-green">Tamper Koruması</span>
+          <span class="metric-lbl">${g2Stat.label}:</span>
+          <span class="metric-val ${g2Stat.valClass}">${g2Stat.val}</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-lbl">${g4Stat.label}:</span>
+          <span class="metric-val ${g4Stat.valClass}">${g4Stat.val}</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-lbl">${srpStat.label}:</span>
+          <span class="metric-val ${srpStat.valClass}">${srpStat.val}</span>
         </div>
       </div>
 
       <div class="insight-card">
-        <div class="insight-title">⚠️ ${t('insights.tuningTitle')}</div>
+        <div class="insight-title">⚠️ Yaşam Döngüsü ve Tavsiye Kuralları</div>
         <div class="metric-row">
           <span class="metric-lbl">T1 Test Evidence:</span>
-          <span class="metric-val text-cyan">Stop Yükümlülüğü</span>
+          <span class="metric-val text-cyan">${testKeys.length > 0 ? `${testKeys.length} Bekleyen Test Kanıtı` : 'Kapanış Doğrulandı'}</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-lbl">Doc Governance (§6):</span>
+          <span class="metric-val ${docGovActive ? 'text-green' : 'text-muted'}">${docGovActive ? (docKeys.length > 0 ? `${docKeys.length} Bekleyen Dokümantasyon` : 'Aktif (Kapanış Şartı)') : 'Devre Dışı'}</span>
         </div>
         <div class="metric-row">
           <span class="metric-lbl">ARCH_FILE_GROWTH:</span>
-          <span class="metric-val text-amber">Tavsiye Uyarısı / Shadow</span>
+          <span class="metric-val text-amber">Tavsiye Uyarısı / Gölge Modu</span>
         </div>
         <div class="metric-row">
           <span class="metric-lbl">G3 Compiler Bypass:</span>

@@ -8,7 +8,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -31,8 +31,8 @@ class StateLock:
     the OS automatically releases the lock immediately, preventing stale lock file hangs.
     """
 
-    def __init__(self, lock_path: Path, timeout: float = 5.0, poll_interval: float = 0.005):
-        self.lock_path = lock_path
+    def __init__(self, lock_path: Union[Path, str], timeout: float = 5.0, poll_interval: float = 0.005):
+        self.lock_path = Path(lock_path)
         self.timeout = timeout
         self.poll_interval = poll_interval
         self._fd: Optional[int] = None

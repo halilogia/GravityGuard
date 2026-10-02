@@ -108,7 +108,8 @@ def validate_gravityguard() -> None:
                 log_event(
                     "stop", "WARNING", "workspace",
                     f"Circuit breaker triggered (retries={session_retries}): allowing stop despite obligations",
-                    rule_id="STOP_CIRCUIT_BREAKER"
+                    rule_id="STOP_CIRCUIT_BREAKER",
+                    conversation_id=conversation_id
                 )
                 reset_session_stop_retries(project_root, conversation_id)
                 print(json.dumps({"decision": "allow"}))
@@ -130,7 +131,7 @@ def validate_gravityguard() -> None:
                     f"Test Kanıtı Uyarısı (T1): Oturum tamamlandı ancak şu üretim kodları için "
                     f"test kanıtı bulunamadı: {', '.join(missing_items)}"
                 )
-                log_event("stop", "WARNING", "workspace", t1_warn, rule_id="T1_FINAL_UNRESOLVED")
+                log_event("stop", "WARNING", "workspace", t1_warn, rule_id="T1_FINAL_UNRESOLVED", conversation_id=conversation_id)
                 warn_reasons.append(t1_warn)
 
             if unresolved_docs:
@@ -142,7 +143,7 @@ def validate_gravityguard() -> None:
                     f"Dokümantasyon Yükümlülüğü: Motor/kod dosyaları değiştirildi ancak "
                     f"dokümantasyon güncellenmedi (docs/KNOWLEDGE.md §6 Same-commit rule): {', '.join(missing_docs)}"
                 )
-                log_event("stop", "WARNING", "workspace", doc_warn, rule_id="DOC_OBLIGATION_UNRESOLVED")
+                log_event("stop", "WARNING", "workspace", doc_warn, rule_id="DOC_OBLIGATION_UNRESOLVED", conversation_id=conversation_id)
                 warn_reasons.append(doc_warn)
 
             if warn_reasons:
@@ -154,7 +155,7 @@ def validate_gravityguard() -> None:
                 print(json.dumps({"decision": "allow"}))
             sys.exit(0)
         except StateLockTimeout as lock_err:
-            log_event("stop", "WARNING", "workspace", f"State lock timeout during Stop hook: {lock_err}", rule_id="STATE_LOCK_TIMEOUT")
+            log_event("stop", "WARNING", "workspace", f"State lock timeout during Stop hook: {lock_err}", rule_id="STATE_LOCK_TIMEOUT", conversation_id=conversation_id)
             print(json.dumps({
                 "decision": "continue",
                 "reason": f"Durum kilidi zaman aşımı (StateLockTimeout): Oturum durumu güvenli şekilde doğrulanamadığı için henüz sonlandırılamaz ({lock_err})."
@@ -168,6 +169,10 @@ def validate_gravityguard() -> None:
     args = tool_call.get("args", {})
     target_file = args.get("TargetFile") or args.get("target_file") or args.get("file_path") or ""
     tool_name = tool_call.get("name", "edit")
+    c_id = payload.get("conversationId", "default")
+
+    def _log(status: str, target: str, reason: str, rule_id: str = "") -> None:
+        log_event(tool_name, status, target, reason, rule_id=rule_id, conversation_id=c_id)
 
     # 1. Normalize path
     normalized_path = target_file.replace("\\\\", "/").replace("\\", "/")
@@ -201,18 +206,17 @@ def validate_gravityguard() -> None:
     # Fast-pass for pure binary assets
     if is_binary_asset:
         if target_file:
-            log_event(tool_name, "APPROVED", target_file, "Exempt file (Binary Asset)", rule_id="EXEMPT")
+            _log("APPROVED", target_file, "Exempt file (Binary Asset)", rule_id="EXEMPT")
         print(json.dumps({"decision": "allow"}))
         sys.exit(0)
 
     # Reconcile disk state for any obligations satisfied by prior tool writes
     p_root = resolve_project_root(payload, target_file)
-    c_id = payload.get("conversationId", "default")
     cfg = load_gravityguard_config(target_file, p_root)
     try:
         reconcile_obligations_on_disk(p_root, c_id, cfg)
     except StateLockTimeout as lock_err:
-        log_event(tool_name, "BLOCKED", target_file, f"State lock timeout: {lock_err}", rule_id="STATE_LOCK_TIMEOUT")
+        _log("BLOCKED", target_file, f"State lock timeout: {lock_err}", rule_id="STATE_LOCK_TIMEOUT")
         print(json.dumps({
             "decision": "deny",
             "reason": f"🛑 [STATE_LOCK_TIMEOUT]: Durum dosyası kilit zaman aşımı ({lock_err}). Kayıp güncelleme riskini önlemek için işlem güvenli kilit alınana kadar reddedildi."
@@ -240,15 +244,15 @@ def validate_gravityguard() -> None:
     g0_violated, g0_reason, g0_warn = check_g0_secret_leak(added_text)
     if g0_warn:
         if is_rule_shadow("G0_SECRET_LEAK", cfg):
-            log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {g0_warn}", rule_id="G0_SECRET_LEAK")
+            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {g0_warn}", rule_id="G0_SECRET_LEAK")
         else:
-            log_event(tool_name, "WARNING", target_file, g0_warn, rule_id="G0_SECRET_LEAK")
+            _log("WARNING", target_file, g0_warn, rule_id="G0_SECRET_LEAK")
             all_warnings.append(("G0_SECRET_LEAK", g0_warn))
     if g0_violated:
         if is_rule_shadow("G0_SECRET_LEAK", cfg):
-            log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {g0_reason}", rule_id="G0_SECRET_LEAK")
+            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {g0_reason}", rule_id="G0_SECRET_LEAK")
         else:
-            log_event(tool_name, "BLOCKED", target_file, g0_reason, rule_id="G0_SECRET_LEAK")
+            _log("BLOCKED", target_file, g0_reason, rule_id="G0_SECRET_LEAK")
             print(json.dumps({
                 "decision": "deny",
                 "reason": f"🛑 [G0_SECRET_LEAK]: '{target_file}' - {g0_reason}"
@@ -261,14 +265,14 @@ def validate_gravityguard() -> None:
             try:
                 record_resolution_intent("doc", target_file, p_root, c_id)
             except StateLockTimeout as lock_err:
-                log_event(tool_name, "BLOCKED", target_file, f"State lock timeout: {lock_err}", rule_id="STATE_LOCK_TIMEOUT")
+                _log("BLOCKED", target_file, f"State lock timeout: {lock_err}", rule_id="STATE_LOCK_TIMEOUT")
                 print(json.dumps({
                     "decision": "deny",
                     "reason": f"🛑 [STATE_LOCK_TIMEOUT]: Durum dosyası kilit zaman aşımı ({lock_err}). Kayıp güncelleme riskini önlemek için işlem güvenli kilit alınana kadar reddedildi."
                 }))
                 sys.exit(0)
         if target_file:
-            log_event(tool_name, "APPROVED", target_file, "Exempt file (Vendor/Cache/Asset)", rule_id="EXEMPT")
+            _log("APPROVED", target_file, "Exempt file (Vendor/Cache/Asset)", rule_id="EXEMPT")
         if all_warnings:
             warn_parts = [f"[{wid}] {wmsg}" for wid, wmsg in all_warnings]
             print(json.dumps({"decision": "allow", "reason": " ⚠ ".join(warn_parts)}))
@@ -289,9 +293,9 @@ def validate_gravityguard() -> None:
         )
         if g1_violated:
             if is_rule_shadow("G1_SILENT_EXCEPTION", cfg):
-                log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {g1_reason}", rule_id="G1_SILENT_EXCEPTION")
+                _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {g1_reason}", rule_id="G1_SILENT_EXCEPTION")
             else:
-                log_event(tool_name, "BLOCKED", target_file, g1_reason, rule_id="G1_SILENT_EXCEPTION")
+                _log("BLOCKED", target_file, g1_reason, rule_id="G1_SILENT_EXCEPTION")
                 print(json.dumps({
                     "decision": "deny",
                     "reason": f"🛑 [G1_SILENT_EXCEPTION]: '{target_file}' - {g1_reason}"
@@ -307,15 +311,15 @@ def validate_gravityguard() -> None:
         )
         if g2_warn:
             if is_rule_shadow("G2_TEST_INTEGRITY", cfg):
-                log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {g2_warn}", rule_id="G2_TEST_INTEGRITY")
+                _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {g2_warn}", rule_id="G2_TEST_INTEGRITY")
             else:
-                log_event(tool_name, "WARNING", target_file, g2_warn, rule_id="G2_TEST_INTEGRITY")
+                _log("WARNING", target_file, g2_warn, rule_id="G2_TEST_INTEGRITY")
                 all_warnings.append(("G2_TEST_INTEGRITY", g2_warn))
         if g2_violated:
             if is_rule_shadow("G2_TEST_INTEGRITY", cfg):
-                log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {g2_reason}", rule_id="G2_TEST_INTEGRITY")
+                _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {g2_reason}", rule_id="G2_TEST_INTEGRITY")
             else:
-                log_event(tool_name, "BLOCKED", target_file, g2_reason, rule_id="G2_TEST_INTEGRITY")
+                _log("BLOCKED", target_file, g2_reason, rule_id="G2_TEST_INTEGRITY")
                 print(json.dumps({
                     "decision": "deny",
                     "reason": f"🛑 [G2_TEST_INTEGRITY]: '{target_file}' - {g2_reason}"
@@ -328,9 +332,9 @@ def validate_gravityguard() -> None:
     tamper_violated, tamper_reason = check_escape_hatch_tampering(added_text, old_full_content)
     if tamper_violated:
         if is_rule_shadow("G2_SECURITY_TAMPERING", cfg):
-            log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {tamper_reason}", rule_id="G2_SECURITY_TAMPERING")
+            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {tamper_reason}", rule_id="G2_SECURITY_TAMPERING")
         else:
-            log_event(tool_name, "BLOCKED", target_file, tamper_reason, rule_id="G2_SECURITY_TAMPERING")
+            _log("BLOCKED", target_file, tamper_reason, rule_id="G2_SECURITY_TAMPERING")
             print(json.dumps({
                 "decision": "deny",
                 "reason": f"🛑 [G2_SECURITY_TAMPERING]: '{target_file}' - {tamper_reason}"
@@ -344,9 +348,9 @@ def validate_gravityguard() -> None:
     if g3_matches:
         warn_msg = f"Yeni linter/derleyici susturması eklendi ({', '.join(g3_matches)}). Hatanın kök nedenini çözmeyi değerlendirin."
         if is_rule_shadow("G3_COMPILER_BYPASS", cfg):
-            log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {warn_msg}", rule_id="G3_COMPILER_BYPASS")
+            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {warn_msg}", rule_id="G3_COMPILER_BYPASS")
         else:
-            log_event(tool_name, "WARNING", target_file, warn_msg, rule_id="G3_COMPILER_BYPASS")
+            _log("WARNING", target_file, warn_msg, rule_id="G3_COMPILER_BYPASS")
             all_warnings.append(("G3_COMPILER_BYPASS", warn_msg))
 
     # ========================================================================
@@ -355,9 +359,9 @@ def validate_gravityguard() -> None:
     g4_violated, g4_reason = check_g4_import_matrix(target_file, added_text)
     if g4_violated:
         if is_rule_shadow("G4_IMPORT_MATRIX", cfg):
-            log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {g4_reason}", rule_id="G4_IMPORT_MATRIX")
+            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {g4_reason}", rule_id="G4_IMPORT_MATRIX")
         else:
-            log_event(tool_name, "BLOCKED", target_file, g4_reason, rule_id="G4_IMPORT_MATRIX")
+            _log("BLOCKED", target_file, g4_reason, rule_id="G4_IMPORT_MATRIX")
             print(json.dumps({
                 "decision": "deny",
                 "reason": f"🛑 [G4_IMPORT_MATRIX]: '{target_file}' - {g4_reason}"
@@ -370,9 +374,9 @@ def validate_gravityguard() -> None:
     oe_triggered, oe_msg = check_oe_spike(added_text, complexity_thresholds)
     if oe_triggered:
         if is_rule_shadow("OE_SPIKE", cfg):
-            log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {oe_msg}", rule_id="OE_SPIKE")
+            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {oe_msg}", rule_id="OE_SPIKE")
         else:
-            log_event(tool_name, "WARNING", target_file, oe_msg, rule_id="OE_SPIKE")
+            _log("WARNING", target_file, oe_msg, rule_id="OE_SPIKE")
             all_warnings.append(("OE_SPIKE", oe_msg))
 
     # ========================================================================
@@ -393,9 +397,9 @@ def validate_gravityguard() -> None:
     )
     if arch_triggered:
         if is_rule_shadow("ARCH_FILE_GROWTH", cfg):
-            log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {arch_msg}", rule_id="ARCH_FILE_GROWTH")
+            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {arch_msg}", rule_id="ARCH_FILE_GROWTH")
         else:
-            log_event(tool_name, "WARNING", target_file, arch_msg, rule_id="ARCH_FILE_GROWTH")
+            _log("WARNING", target_file, arch_msg, rule_id="ARCH_FILE_GROWTH")
             all_warnings.append(("ARCH_FILE_GROWTH", arch_msg))
 
     # ========================================================================
@@ -406,9 +410,9 @@ def validate_gravityguard() -> None:
             is_violation, reason = analyze_python_srp(projected_content, file_path=target_file)
             if is_violation:
                 if is_rule_shadow("SRP_BOUNDARY", cfg):
-                    log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {reason}", rule_id="SRP_BOUNDARY")
+                    _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {reason}", rule_id="SRP_BOUNDARY")
                 else:
-                    log_event(tool_name, "BLOCKED", target_file, reason, rule_id="SRP_BOUNDARY")
+                    _log("BLOCKED", target_file, reason, rule_id="SRP_BOUNDARY")
                     print(json.dumps({
                         "decision": "deny",
                         "reason": f"🛑 [SRP_BOUNDARY]: '{target_file}' - {reason}"
@@ -425,9 +429,9 @@ def validate_gravityguard() -> None:
             if multi_job and not is_ts_cohesive_monolith(projected_content):
                 reason_msg = f"SRP İhlali: Dosya {tab_matches} sekme, {card_matches} kart ve {grid_blocks} grid bloğu içeriyor."
                 if is_rule_shadow("SRP_BOUNDARY", cfg):
-                    log_event(tool_name, "SHADOW_TRIGGER", target_file, f"[SHADOW] {reason_msg}", rule_id="SRP_BOUNDARY")
+                    _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {reason_msg}", rule_id="SRP_BOUNDARY")
                 else:
-                    log_event(tool_name, "BLOCKED", target_file, reason_msg, rule_id="SRP_BOUNDARY")
+                    _log("BLOCKED", target_file, reason_msg, rule_id="SRP_BOUNDARY")
                     print(json.dumps({
                         "decision": "deny",
                         "reason": f"🛑 [SRP_BOUNDARY]: '{target_file}' - {reason_msg}"
@@ -449,7 +453,7 @@ def validate_gravityguard() -> None:
         is_ts=is_ts
     )
     for rule_id, warn_msg in test_evidence_warnings:
-        log_event(tool_name, "WARNING", target_file, warn_msg, rule_id=rule_id)
+        _log("WARNING", target_file, warn_msg, rule_id=rule_id)
         all_warnings.append((rule_id, warn_msg))
 
     # Stage doc obligation if production/engine code is changed and doc governance is enabled
@@ -462,7 +466,7 @@ def validate_gravityguard() -> None:
     # ========================================================================
     diag_warnings = read_recent_diagnostics(target_file)
     for d_rule, d_msg in diag_warnings:
-        log_event(tool_name, "WARNING", target_file, d_msg, rule_id=d_rule)
+        _log("WARNING", target_file, d_msg, rule_id=d_rule)
         all_warnings.append((d_rule, d_msg))
 
     # ========================================================================
@@ -480,12 +484,12 @@ def validate_gravityguard() -> None:
         if test_actions.get("record_test"):
             tf, cp, en, msg = test_actions["record_test"]
             record_pending_test_evidence(tf, cp, en, msg, p_root, c_id)
-            log_event(tool_name, "APPROVED", tf, f"Pending test evidence recorded ({en})", rule_id="T1_PENDING")
+            _log("APPROVED", tf, f"Pending test evidence recorded ({en})", rule_id="T1_PENDING")
 
         if pending_doc_record:
             record_pending_doc_obligation(pending_doc_record, project_root=p_root, conversation_id=c_id)
     except StateLockTimeout as lock_err:
-        log_event(tool_name, "BLOCKED", target_file, f"State lock timeout: {lock_err}", rule_id="STATE_LOCK_TIMEOUT")
+        _log("BLOCKED", target_file, f"State lock timeout: {lock_err}", rule_id="STATE_LOCK_TIMEOUT")
         print(json.dumps({
             "decision": "deny",
             "reason": f"🛑 [STATE_LOCK_TIMEOUT]: Durum dosyası kilit zaman aşımı ({lock_err}). Kayıp güncelleme riskini önlemek için işlem güvenli kilit alınana kadar reddedildi."
@@ -494,7 +498,7 @@ def validate_gravityguard() -> None:
 
 
     elapsed_ms = (time.perf_counter() - start_time) * 1000
-    log_event(tool_name, "APPROVED", target_file, f"All Guards Passed ({elapsed_ms:.1f}ms)", rule_id="PASS")
+    _log("APPROVED", target_file, f"All Guards Passed ({elapsed_ms:.1f}ms)", rule_id="PASS")
     res_payload = {"decision": "allow"}
     if all_warnings:
         res_payload["reason"] = " ⚠ ".join(

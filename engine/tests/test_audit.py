@@ -103,6 +103,83 @@ class TestAuditSubsystem(unittest.TestCase):
         self.assertEqual(ev["status"], "SHADOW_TRIGGER")
         self.assertEqual(ev["outcome"], "SHADOW_OBSERVED")
 
+    def test_rule_specific_causal_isolation(self):
+        target = "src/app.py"
+        # 1. First block is G1
+        id1 = log_event("write", "BLOCKED", target, "violation G1", rule_id="G1_SILENT_EXCEPTION", conversation_id="conv-rule-iso")
+        
+        # 2. Second block on the same file is G2 (different rule)
+        id2 = log_event("write", "BLOCKED", target, "violation G2", rule_id="G2_TEST_INTEGRITY", conversation_id="conv-rule-iso")
+
+        live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
+        with open(live_path, "r", encoding="utf-8") as f:
+            live = json.load(f)
+
+        events = live["events"]
+        # id2 is the latest event (index 0)
+        self.assertEqual(events[0]["eventId"], id2)
+        # Crucial check: G2 must NOT be marked as a repeated violation of G1!
+        self.assertEqual(events[0]["outcome"], "BLOCKED")
+        self.assertIsNone(events[0]["parentViolationId"])
+        self.assertEqual(events[0]["recoveryAttempts"], 1)
+
+    def test_resolved_rule_id_and_rule_stats(self):
+        target = "src/payment.py"
+        conv = "conv-stats"
+        # 1. Trigger G1 block
+        b_id = log_event("write", "BLOCKED", target, "empty except block", rule_id="G1_SILENT_EXCEPTION", conversation_id=conv)
+
+        # 2. Agent provides clean code -> APPROVED with rule_id="PASS"
+        a_id = log_event("write", "APPROVED", target, "proper exception logged", rule_id="PASS", conversation_id=conv)
+
+        live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
+        with open(live_path, "r", encoding="utf-8") as f:
+            live = json.load(f)
+
+        rec_ev = live["events"][0]
+        self.assertEqual(rec_ev["eventId"], a_id)
+        self.assertEqual(rec_ev["outcome"], "RECOVERED")
+        self.assertEqual(rec_ev["resolvedRuleId"], "G1_SILENT_EXCEPTION")
+        self.assertEqual(rec_ev["parentViolationId"], b_id)
+
+        eff = live["effectiveness"]
+        self.assertEqual(eff["totalBlocked"], 1)
+        self.assertEqual(eff["totalRecovered"], 1)
+        self.assertEqual(eff["recoveryRate"], 100.0)
+        self.assertIn("G1_SILENT_EXCEPTION", eff["ruleStats"])
+        g1_stat = eff["ruleStats"]["G1_SILENT_EXCEPTION"]
+        self.assertEqual(g1_stat["blocked"], 1)
+        self.assertEqual(g1_stat["recovered"], 1)
+        self.assertEqual(g1_stat["recoveryRate"], 100.0)
+
+    def test_explicit_conversation_id_isolation(self):
+        target = "src/shared.py"
+        # Session A gets blocked on src/shared.py
+        id_a = log_event("write", "BLOCKED", target, "violation A", rule_id="G1_SILENT_EXCEPTION", conversation_id="sess-A")
+
+        # Session B makes an approved edit on the same src/shared.py
+        id_b = log_event("write", "APPROVED", target, "clean edit B", rule_id="PASS", conversation_id="sess-B")
+
+        live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
+        with open(live_path, "r", encoding="utf-8") as f:
+            live = json.load(f)
+
+        ev_b = live["events"][0]
+        self.assertEqual(ev_b["eventId"], id_b)
+        # Session B edit should NOT be marked as RECOVERED because Session A's violation belongs to sess-A!
+        self.assertNotEqual(ev_b.get("outcome"), "RECOVERED")
+        self.assertIsNone(ev_b.get("parentViolationId"))
+
+        # Now Session A makes an approved edit on src/shared.py
+        id_a_rec = log_event("write", "APPROVED", target, "fixed A", rule_id="PASS", conversation_id="sess-A")
+        with open(live_path, "r", encoding="utf-8") as f:
+            live = json.load(f)
+
+        ev_a = live["events"][0]
+        self.assertEqual(ev_a["eventId"], id_a_rec)
+        self.assertEqual(ev_a["outcome"], "RECOVERED")
+        self.assertEqual(ev_a["parentViolationId"], id_a)
+
 
 if __name__ == "__main__":
     unittest.main()

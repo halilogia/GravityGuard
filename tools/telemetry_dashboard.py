@@ -98,46 +98,73 @@ def render_effectiveness_analytics(events):
     if avg_duration_s > 0:
         print(f"  Ortalama Çözümleme Süresi (Time-to-Resolve)  : {avg_duration_s:.1f} saniye")
 
-    # Rule-by-rule classification
+    # Rule-by-rule classification with resolvedRuleId recovery counter
     rule_blocked = Counter(e.get("ruleId", "UNKNOWN") for e in blocked_events)
-    rule_recovered = Counter(e.get("ruleId", "UNKNOWN") for e in recovered_events)
+    rule_recovered = Counter((e.get("resolvedRuleId") or e.get("ruleId", "UNKNOWN")) for e in recovered_events)
 
     if rule_blocked:
         print("\n  🛡️  KURAL BAZLI ETKİNLİK VE DEĞER TABLOSU:")
-        print("  " + "-" * 76)
-        print(f"  {'Kural':<24} | {'Engelleme':<9} | {'Kurtarma':<8} | {'Oran':<6} | {'Sınıf':<16}")
-        print("  " + "-" * 76)
+        print("  " + "-" * 82)
+        print(f"  {'Kural':<24} | {'Engelleme':<9} | {'Kurtarma':<8} | {'Oran':<6} | {'Sınıf':<22}")
+        print("  " + "-" * 82)
 
         for rule, b_cnt in rule_blocked.most_common():
             r_cnt = rule_recovered.get(rule, 0)
             rate = (r_cnt / b_cnt * 100) if b_cnt > 0 else 0.0
-            if rate >= 85.0:
-                classification = "🏆 YÜKSEK DEĞER"
+            if b_cnt < 3:
+                classification = f"⚪ YETERSİZ VERİ (n={b_cnt})"
+            elif rate >= 85.0:
+                classification = "🏆 YÜKSEK DEĞER" if b_cnt >= 10 else f"🟡 ÖN SİNYAL (n={b_cnt})"
             elif rate < 50.0:
-                classification = "⚡ SÜRTÜNME"
+                classification = f"⚡ SÜRTÜNME (n={b_cnt})"
             else:
-                classification = "🟢 DENGELİ"
+                classification = f"🟢 DENGELİ (n={b_cnt})"
             print(f"  {rule:<24} | {b_cnt:>9} | {r_cnt:>8} | %{rate:>4.1f} | {classification}")
 
-    # Advisory & Noise Index
+    # Advisory & Causal Noise Index
+    approved_events = [e for e in events if e.get("status") == "APPROVED"]
     if warning_events:
         warn_rules = Counter(e.get("ruleId", "UNKNOWN") for e in warning_events)
-        print("\n  ⚠️  TAVSİYE KURALLARI VE GÜRÜLTÜ ANALİZİ (Advisory & Noise Index):")
-        print("  " + "-" * 76)
-        for w_rule, w_cnt in warn_rules.most_common(5):
-            if "T1" in w_rule or "DOC" in w_rule:
-                role_desc = "Stop Yükümlülüğü (Lifecycle)"
+        approved_map = defaultdict(list)
+        for ap in approved_events:
+            cid = ap.get("conversationId", "default")
+            tgt = (ap.get("target") or "").replace("\\", "/").lower()
+            ts = ap.get("timestamp", "")
+            if tgt:
+                approved_map[(cid, tgt)].append(ts)
+
+        print("\n  ⚠️  TAVSİYE KURALLARI VE NEDENSEL GÜRÜLTÜ ANALİZİ (Advisory Action & Noise Index):")
+        print("  " + "-" * 82)
+        print(f"  {'Kural':<24} | {'Uyarı':<6} | {'Takip Eden Onay':<15} | {'Eylem Oranı':<11} | {'Durum':<18}")
+        print("  " + "-" * 82)
+        for w_rule, w_cnt in warn_rules.most_common():
+            rule_warns = [w for w in warning_events if w.get("ruleId") == w_rule]
+            heeded = 0
+            for w in rule_warns:
+                cid = w.get("conversationId", "default")
+                tgt = (w.get("target") or "").replace("\\", "/").lower()
+                w_ts = w.get("timestamp", "")
+                subsequent = [ats for ats in approved_map.get((cid, tgt), []) if ats >= w_ts]
+                if subsequent:
+                    heeded += 1
+            action_rate = (heeded / w_cnt * 100) if w_cnt > 0 else 0.0
+            if w_cnt < 3:
+                status_desc = f"⚪ Yetersiz Veri (n={w_cnt})"
+            elif action_rate < 25.0:
+                status_desc = "⚠️ Gürültü Riski"
+            elif action_rate >= 75.0:
+                status_desc = "✅ Yüksek Uyum"
             else:
-                role_desc = "Tavsiye Uyarısı (Advisory)"
-            print(f"  • {w_rule:<22} : {w_cnt:>3} uyarı ({role_desc})")
+                status_desc = "🟢 Dengeli"
+            print(f"  {w_rule:<24} | {w_cnt:>6} | {heeded:>15} | %{action_rate:>9.1f} | {status_desc}")
 
     # Shadow Mode Observations
     if shadow_events:
-        print("\n  🧪 GÖLGE MODU GÖZLEMLERİ (Shadow Mode Observation):")
-        print("  " + "-" * 76)
+        print("\n  🧪 GÖLGE MODU GÖZLEMLERİ (Shadow Observation Mode):")
+        print("  " + "-" * 82)
         shadow_rules = Counter(e.get("ruleId", "UNKNOWN") for e in shadow_events)
         for s_rule, s_cnt in shadow_rules.most_common():
-            print(f"  • {s_rule:<22} : {s_cnt} sessiz gözlem (Ajan engellenmeden izlendi)")
+            print(f"  • {s_rule:<24} : {s_cnt} sessiz gözlem (Ajan akışı kesintiye uğramadan ölçüldü)")
 
 
 def render_dashboard(events):

@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Kural Bazlı Nedensel İzolasyon ve resolvedRuleId Takibi (Rule-Specific Causal Chaining & Resolution Attribution)**:
+  - `engine/gravityguard_engine/audit.py`: İhlal takip anahtarı `f"{conv_id}::{norm_target}"` yerine `f"{conv_id}::{norm_target}::{rule_id}"` olarak kural bazlı yalıtıldı. Aynı dosya üzerinde art arda tetiklenen farklı kural ihlallerinin (örn. G1 ardından gelen G2) yanlışlıkla `REPEATED_VIOLATION` olarak etiketlenmesi engellendi; her kural kendi bağımsız deneme sayacını korur.
+  - Çözümleme anında oluşturulan `APPROVED` etkinliğine çözülen kuralın gerçek kimliği (`resolvedRuleId: "G1_SILENT_EXCEPTION"`), `parentViolationId`, `recoveryAttempts` ve `resolutionMs` bağlandı. Böylece telemetri ve gösterge panellerinde onay kaydının `ruleId="PASS"` olması sebebiyle kural kurtarma oranlarının sıfır görünmesi bug'ı giderildi.
+  - `log_event()` fonksiyonuna doğrudan `conversation_id` parametresi eklendi ve `engine/gravityguard_engine/dispatcher.py` PreToolUse ve Stop kancalarındaki tüm olay kayıtları `_log(...)` yardımcısı aracılığıyla oturum kimliğini açıkça parametre olarak aktaracak şekilde refactor edildi; ortam değişkenlerine olan gevşek bağımlılık ortadan kaldırıldı.
+  - `srp_guardian_live.json` ve kalıcı audit akışının (`gravityguard_permanent_audit.jsonl`) eşzamanlı subprocess'lerden bozulmaması için `StateLock` ile atomic kilit koruması entegre edildi.
+  - `engine/gravityguard_engine/state_lock.py`: `StateLock` yapıcısı hem `Path` hem `str` kabul edecek şekilde esnetildi (`Union[Path, str]`).
+- **Veri Odaklı ve Dürüst İçgörü Arayüzü (Data-Driven Insights & Sample-Size Thresholds)**:
+  - `src/extension.ts`: Kenar çubuğu "Ajan İçgörüleri (Insights)" sekmesindeki statik/tahmini ifadeler (`%100 Önleme`, `Yüksek İyileşme (1 deneme)` vb.) tamamen kaldırılarak motorun `data.effectiveness.ruleStats` ampirik verilerini dinamik olarak render eden yapıya geçildi.
+  - **Örneklem Eşik Değeri ($n < 3$)**: Yeterli veri toplanmamış kurallar için iddialı oranlar yerine dürüstçe `Yetersiz Veri (n=X)` veya `Temiz (0 İhlal)` etiketi gösterilmesi sağlandı.
+- **Nedensel Tavsiye Eylem Oranı ve Gürültü Analizi (Advisory Action Rate & Noise Index)**:
+  - `tools/telemetry_dashboard.py`: Kural iyileşme sayacı `e.get("resolvedRuleId") or e.get("ruleId")` kullanacak şekilde düzeltildi. Tavsiye uyarılarının (Advisory warnings) ilgili oturumda aynı dosyaya yapılan sonraki onaylı düzenlemelerle korelasyonu kurularak gerçek eyleme dönüşme oranı (`action_rate`) hesaplandı; düşük etkili uyarılar için `Gürültü Riski` uyarısı eklendi.
+  - Gölge modu terimi bilimsel dürüstlük ilkesi gereği A/B deneyi yerine `Gölge Modu Sessiz Gözlem (Shadow Observation Mode)` olarak adlandırıldı.
+- **Test Kapsamı**: `engine/tests/test_audit.py` altına kural izolasyonu, `resolvedRuleId` doğrulaması ve oturum izolasyonu için 3 yeni test eklenerek Python test sayısı 188'e, toplam test sayısı 212'ye yükseltildi (%100 yeşil).
 - **Nedensel Etkinlik Telemetrisi ve Gölge Modu (Causal Effectiveness Telemetry & Shadow Mode)**:
   - `engine/gravityguard_engine/audit.py`: Her güvenlik olayına benzersiz bir `eventId` atanarak nedensel olay zincirleme (`parentViolationId`, `outcome`, `recoveryAttempts`, `resolutionMs`) altyapısı kuruldu.
   - Ajanın bir ihlal sonrası sonraki hamlesinde durumu düzeltip düzeltmediğini ölçen gerçek zamanlı iyileşme takibi (`BLOCKED` -> `RECOVERED` veya `REPEATED_VIOLATION`) eklendi.
