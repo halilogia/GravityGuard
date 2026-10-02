@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Canlı Durum Çökme Dayanıklılığı (Atomic Crash Consistency) ve Kendini Onarma (Self-Healing Rebuild)**:
+  - `engine/gravityguard_engine/audit.py`: `srp_guardian_live.json` dosyasının yazımı doğrudan üzerine yazma yerine `.tmp` geçici dosyasına yazılıp atomic rename (`tmp.replace(log_path)`) edilerek süreç çökmesi anında dosyanın bozulması riski tamamen ortadan kaldırıldı (`test_live_state_atomic_replace_no_temp_leftover`).
+  - **Kalıcı Kütükten Canlı Durum Yeniden Oluşturma (`_rebuild_live_state_from_permanent_audit`)**: `srp_guardian_live.json` dosyasının silinmesi veya bozulması durumunda, kalıcı veri kaynağı olan `gravityguard_permanent_audit.jsonl` otomatik taranarak tüm kümülatif etkinlik sayaçları, kural istatistikleri ve aktif ihlaller sıfır kayıpla canlı duruma geri yüklenir (`test_rebuild_live_state_from_permanent_audit_on_corruption`).
+  - **Değişmez (Invariant) Denetimleri**: `recovered > blocked` veri anomalisinin tespit edilmesi halinde `min(100)` görsel maskelemesinin arkasına gizlenmeden stderr'e `[GravityGuard Invariant Violation]` uyarısı kaydedilmesi sağlandı (`test_telemetry_invariant_warning_on_anomaly`).
+  - `tools/telemetry_dashboard.py`: Tavsiye Takip Oranı tablosunda $10 \le n < 30$ aralığı `🟡 Ön Sinyal` statüsüyle zenginleştirilerek kural tablosuyla tam eşik uyumu sağlandı.
+  - **Test Kapsamı**: `engine/tests/test_audit.py` altına 3 yeni test eklenerek Python test sayısı 193'e, toplam test sayısı **217'ye** yükseltildi (%100 yeşil).
 - **Çoklu Kural Kurtarma (Multi-Rule Recovery) ve Kümülatif İstatistikler**:
   - `engine/gravityguard_engine/audit.py`: Tek bir dosya üzerinde açık bulunan birden fazla kural ihlali (örn. hem `G1` hem `G2`) sonraki temiz onaylı düzenlemede (`APPROVED`) eksiksiz olarak çözülür. Her açık ihlal için ayrı bir `RECOVERED` telemetri kaydı (`resolvedRuleId`, `parentViolationId`, `recoveryAttempts`) üretilerek kalıcı denetim kütüğüne yazılır ve `ruleStats` sayaçları bağımsız artırılır; hiçbir kural kayıptan sessizce silinmez (`test_multi_rule_recovery_all_resolved`).
   - **Kümülatif Etkinlik Bütünlüğü**: `srp_guardian_live.json` içerisindeki `events` listesi UI performansı için son 50 olayla sınırlandırılırken, `effectiveness` ve `ruleStats` metrikleri kümülatif sayaçlarla yönetilir. Eski engelleme olaylarının 50 olaylık pencereden düşmesi sebebiyle iyileşme oranının %100'ü aşması veya istatistiksel sapma oluşması engellendi.

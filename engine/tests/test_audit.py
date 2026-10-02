@@ -240,6 +240,79 @@ class TestAuditSubsystem(unittest.TestCase):
             event_ids = [e["eventId"] for e in live.get("events", [])]
             self.assertNotIn(eid, event_ids)
 
+    def test_rebuild_live_state_from_permanent_audit_on_corruption(self):
+        target = "src/crash_recovery.py"
+        conv = "conv-rebuild"
+
+        # 1. Generate some audit history
+        log_event("write", "BLOCKED", target, "violation G1", rule_id="G1_SILENT_EXCEPTION", conversation_id=conv)
+        log_event("write", "APPROVED", target, "fixed G1", rule_id="PASS", conversation_id=conv)
+
+        live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
+        self.assertTrue(os.path.exists(live_path))
+
+        # 2. Simulate catastrophic corruption: write garbage to live JSON
+        with open(live_path, "w", encoding="utf-8") as f:
+            f.write("{ corrupt json truncated...")
+
+        # 3. Next event should detect corruption and auto-rebuild from permanent audit
+        new_target = "src/next_file.py"
+        log_event("write", "APPROVED", new_target, "clean write", rule_id="PASS", conversation_id=conv)
+
+        # 4. Verify live state was reconstructed with historical counts intact
+        with open(live_path, "r", encoding="utf-8") as f:
+            live = json.load(f)
+
+        eff = live["effectiveness"]
+        # History preserved: 1 block, 1 recovery from prior file
+        self.assertEqual(eff["totalBlocked"], 1)
+        self.assertEqual(eff["totalRecovered"], 1)
+        self.assertEqual(eff["recoveryRate"], 100.0)
+        self.assertIn("G1_SILENT_EXCEPTION", eff["ruleStats"])
+        self.assertEqual(eff["ruleStats"]["G1_SILENT_EXCEPTION"]["recovered"], 1)
+
+    def test_live_state_atomic_replace_no_temp_leftover(self):
+        target = "src/atomic_test.py"
+        log_event("write", "APPROVED", target, "atomic write test", rule_id="PASS")
+
+        live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
+        tmp_path = os.path.join(self.test_dir, "srp_guardian_live.tmp")
+
+        self.assertTrue(os.path.exists(live_path))
+        self.assertFalse(os.path.exists(tmp_path))
+
+    def test_telemetry_invariant_warning_on_anomaly(self):
+        import io
+        from unittest.mock import patch
+        target = "src/anomaly.py"
+
+        # Create a corrupted live state where recovered > blocked to simulate anomaly
+        live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
+        bad_data = {
+            "activeGuard": "GravityGuard",
+            "status": "ONLINE",
+            "events": [],
+            "activeViolations": {},
+            "effectiveness": {
+                "totalBlocked": 1,
+                "totalRecovered": 2,  # anomaly: recovered > blocked
+                "recoveryRate": 100.0,
+                "ruleStats": {
+                    "G1_SILENT_EXCEPTION": {"blocked": 1, "recovered": 2, "recoveryRate": 100.0, "attempts": [1]}
+                }
+            }
+        }
+        with open(live_path, "w", encoding="utf-8") as f:
+            json.dump(bad_data, f)
+
+        # Log event and capture stderr
+        stderr_buf = io.StringIO()
+        with patch("sys.stderr", stderr_buf):
+            log_event("write", "APPROVED", target, "clean edit", rule_id="PASS")
+
+        stderr_output = stderr_buf.getvalue()
+        self.assertIn("[GravityGuard Invariant Violation]", stderr_output)
+
 
 if __name__ == "__main__":
     unittest.main()

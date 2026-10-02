@@ -39,6 +39,102 @@ def _generate_event_id() -> str:
     return f"evt_{now_ms}_{suffix}"
 
 
+def _rebuild_live_state_from_permanent_audit(permanent_log_path: str) -> Dict[str, Any]:
+    """
+    Rebuilds live monitor state from the permanent audit log (JSONL)
+    if srp_guardian_live.json is missing or corrupted.
+    Treats the permanent append-only audit stream as the durable source of truth.
+    """
+    state: Dict[str, Any] = {
+        "activeGuard": "GravityGuard",
+        "status": "ONLINE",
+        "events": [],
+        "activeViolations": {},
+        "effectiveness": {
+            "totalBlocked": 0,
+            "totalRecovered": 0,
+            "recoveryRate": 100.0,
+            "ruleStats": {}
+        }
+    }
+    if not os.path.exists(permanent_log_path):
+        return state
+
+    raw_events: list = []
+    try:
+        with open(permanent_log_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        raw_events.append(json.loads(line))
+                    except Exception:
+                        continue
+    except Exception:
+        return state
+
+    eff = state["effectiveness"]
+    rule_stats = eff["ruleStats"]
+    active_violations = state["activeViolations"]
+
+    for ev in raw_events:
+        st = ev.get("status")
+        out = ev.get("outcome")
+        r_id = ev.get("ruleId") or "UNKNOWN"
+        res_id = ev.get("resolvedRuleId") or r_id
+        c_id = ev.get("conversationId", "default")
+        target = (ev.get("target") or "").replace("\\\\", "/").replace("\\", "/").lower()
+        t_key = f"{c_id}::{target}::{r_id}" if target else ""
+
+        if st == "BLOCKED" and out != "REPEATED_VIOLATION":
+            eff["totalBlocked"] += 1
+            rst = rule_stats.setdefault(r_id, {"blocked": 0, "recovered": 0, "recoveryRate": 0.0, "attempts": []})
+            rst["blocked"] += 1
+            if t_key:
+                active_violations[t_key] = {
+                    "eventId": ev.get("eventId"),
+                    "ruleId": r_id,
+                    "firstTimestamp": ev.get("timestamp"),
+                    "lastTimestamp": ev.get("timestamp"),
+                    "attempts": 1,
+                    "status": "BLOCKED"
+                }
+        elif out == "REPEATED_VIOLATION":
+            if t_key and t_key in active_violations:
+                active_violations[t_key]["attempts"] = ev.get("recoveryAttempts", active_violations[t_key].get("attempts", 1) + 1)
+        elif out == "RECOVERED":
+            eff["totalRecovered"] += 1
+            rst = rule_stats.setdefault(res_id, {"blocked": 0, "recovered": 0, "recoveryRate": 0.0, "attempts": []})
+            rst["recovered"] += 1
+            att = ev.get("recoveryAttempts")
+            if isinstance(att, (int, float)):
+                rst.setdefault("attempts", []).append(att)
+            # Clear matching active violation
+            matching = [k for k in list(active_violations.keys()) if k.startswith(f"{c_id}::{target}::")]
+            for mk in matching:
+                if active_violations[mk].get("ruleId") == res_id:
+                    active_violations.pop(mk, None)
+                    break
+
+    tb = eff["totalBlocked"]
+    tr = eff["totalRecovered"]
+    eff["recoveryRate"] = min(100.0, round((tr / tb * 100), 1)) if tb > 0 else 100.0
+
+    for r_id, rst in rule_stats.items():
+        b = rst.get("blocked", 0)
+        r = rst.get("recovered", 0)
+        rst["recoveryRate"] = min(100.0, round((r / b * 100), 1)) if b > 0 else 100.0
+        atts = rst.get("attempts", [])
+        rst["medianAttempts"] = sorted(atts)[len(atts) // 2] if atts else 1.0
+
+    # Live feed gets the last 50 events in reverse chronological order
+    recent = list(raw_events[-50:])
+    recent.reverse()
+    state["events"] = recent
+
+    return state
+
+
 def log_event(
     action: str,
     status: str,
@@ -109,6 +205,7 @@ def log_event(
             return event_id
 
         try:
+            current_data = None
             if os.path.exists(log_path):
                 try:
                     with open(log_path, "r", encoding="utf-8") as f:
@@ -116,18 +213,11 @@ def log_event(
                         if isinstance(loaded, dict):
                             current_data = loaded
                 except (json.JSONDecodeError, OSError) as read_err:
-                    current_data = {
-                        "activeGuard": "GravityGuard",
-                        "status": "ONLINE",
-                        "events": [],
-                        "activeViolations": {},
-                        "effectiveness": {
-                            "totalBlocked": 0,
-                            "totalRecovered": 0,
-                            "recoveryRate": 100.0,
-                            "ruleStats": {}
-                        }
-                    }
+                    sys.stderr.write(f"[GravityGuard State Corrupt Warning] {read_err}; attempting rebuild from permanent log\n")
+                    current_data = None
+
+            if current_data is None:
+                current_data = _rebuild_live_state_from_permanent_audit(permanent_log_path)
 
             active_violations = current_data.setdefault("activeViolations", {})
             if not isinstance(active_violations, dict):
@@ -278,14 +368,22 @@ def log_event(
             current_data["events"] = events[:50]  # keep last 50 for UI feed
             current_data["lastCheck"] = now_str
 
-            # Recompute cumulative effectiveness and rule rates
+            # Recompute cumulative effectiveness and rule rates with invariant checking
             tot_b = eff.get("totalBlocked", 0)
             tot_r = eff.get("totalRecovered", 0)
+            if tot_r > tot_b:
+                sys.stderr.write(
+                    f"[GravityGuard Invariant Violation] recovered ({tot_r}) > blocked ({tot_b}) - telemetry inconsistency detected\n"
+                )
             eff["recoveryRate"] = min(100.0, round((tot_r / tot_b * 100), 1)) if tot_b > 0 else 100.0
 
             for r_id, st in rule_stats.items():
                 b_cnt = st.get("blocked", 0)
                 r_cnt = st.get("recovered", 0)
+                if r_cnt > b_cnt:
+                    sys.stderr.write(
+                        f"[GravityGuard Invariant Violation] rule {r_id}: recovered ({r_cnt}) > blocked ({b_cnt})\n"
+                    )
                 st["recoveryRate"] = min(100.0, round((r_cnt / b_cnt * 100), 1)) if b_cnt > 0 else 100.0
                 atts = st.get("attempts", [])
                 if atts:
@@ -293,8 +391,11 @@ def log_event(
                 else:
                     st["medianAttempts"] = 1.0
 
-            with open(log_path, "w", encoding="utf-8") as f:
+            # Atomic crash-consistent replace: write to .tmp then atomic replace
+            tmp_log_path = Path(log_path).with_suffix(".tmp")
+            with open(tmp_log_path, "w", encoding="utf-8") as f:
                 json.dump(current_data, f, indent=2, ensure_ascii=False)
+            tmp_log_path.replace(Path(log_path))
 
             # Permanent Audit & Telemetry Archive (JSONL for product R&D and effectiveness analysis)
             proj_name, proj_root = extract_project_info(target_file)

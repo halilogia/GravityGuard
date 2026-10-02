@@ -156,6 +156,8 @@ def render_effectiveness_analytics(events):
             action_rate = (heeded / w_cnt * 100) if w_cnt > 0 else 0.0
             if w_cnt < 10:
                 status_desc = f"⚪ Yetersiz Veri (n={w_cnt})"
+            elif w_cnt < 30:
+                status_desc = f"🟡 Ön Sinyal (n={w_cnt})"
             elif action_rate < 25.0:
                 status_desc = "⚠️ Düşük Takip"
             elif action_rate >= 75.0:
