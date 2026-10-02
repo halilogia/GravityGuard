@@ -353,6 +353,23 @@ function postChatCompletion(model: string, systemPrompt: string, userPrompt: str
   });
 }
 
+function escapeHtml(str: string): string {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function escapeJs(str: string): string {
+  return String(str)
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '');
+}
+
 class GuardianViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
   private _pollInterval?: NodeJS.Timeout;
@@ -366,7 +383,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       localResourceRoots: [this._extensionUri]
     };
 
-    webviewView.webview.onDidReceiveMessage((message: { command: string }) => {
+    webviewView.webview.onDidReceiveMessage(async (message: { command: string; path?: string; text?: string }) => {
       if (message.command === 'clearLogs') {
         this.clearLogs();
       } else if (message.command === 'refresh') {
@@ -375,6 +392,41 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
         const next = getCurrentLanguage() === 'tr' ? 'en' : 'tr';
         setLanguage(next);
         this.updateHtml();
+      } else if (message.command === 'openFile' && message.path) {
+        try {
+          const doc = await vscode.workspace.openTextDocument(message.path);
+          await vscode.window.showTextDocument(doc);
+        } catch (e: any) {
+          vscode.window.showErrorMessage(`Dosya açılamadı: ${message.path}`);
+        }
+      } else if (message.command === 'openConfig') {
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (workspaceFolders && workspaceFolders.length > 0) {
+          const cfgFile = path.join(workspaceFolders[0].uri.fsPath, '.gravityguard.json');
+          try {
+            if (!fs.existsSync(cfgFile)) {
+              fs.writeFileSync(cfgFile, JSON.stringify({
+                "governance": { "enforceDocObligations": true },
+                "complexity": { "singleWriteLoc": 200, "totalLoc": 500 },
+                "guards": {
+                  "G0_SECRET_LEAK": "block",
+                  "G1_SILENT_EXCEPTION": "block",
+                  "G2_TEST_INTEGRITY": "block",
+                  "G3_COMPILER_BYPASS": "warn",
+                  "G4_IMPORT_MATRIX": "block",
+                  "T1_TEST_EVIDENCE": "warn"
+                }
+              }, null, 2), 'utf8');
+            }
+            const doc = await vscode.workspace.openTextDocument(cfgFile);
+            await vscode.window.showTextDocument(doc);
+          } catch (e: any) {
+            vscode.window.showErrorMessage(`Yapılandırma dosyası açılamadı: ${e.message}`);
+          }
+        }
+      } else if (message.command === 'copyReason' && message.text) {
+        await vscode.env.clipboard.writeText(message.text);
+        vscode.window.showInformationMessage('Kural engelleme nedeni panoya kopyalandı.');
       }
     });
 
@@ -436,14 +488,18 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
 
     // Resolve workspace folder and read governance / project config
     let workspaceRoot = '';
+    let projectName = 'Workspace';
     if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
       workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+      projectName = path.basename(workspaceRoot);
     }
 
     let govData: any = null;
     let pendingTests: Record<string, any> = {};
     let pendingDocs: Record<string, any> = {};
+    let resolutionIntents: any[] = [];
     let stopRetries = 0;
+    let sessionId = 'active';
 
     if (workspaceRoot) {
       const govPath = path.join(workspaceRoot, '.gravityguard', 'runtime', 'governance.json');
@@ -452,7 +508,11 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
           govData = JSON.parse(fs.readFileSync(govPath, 'utf8'));
           pendingTests = govData.test_obligations?.pending || {};
           pendingDocs = govData.doc_obligations?.pending || {};
+          resolutionIntents = govData.resolution_intents || [];
           stopRetries = govData.stop_retries || 0;
+          if (govData.sessions && Object.keys(govData.sessions).length > 0) {
+            sessionId = Object.keys(govData.sessions)[0];
+          }
         } catch (e) {
           console.warn('Failed to parse governance state:', e);
         }
@@ -476,230 +536,749 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
     const blockedCount = eventsList.filter(e => e.status === 'BLOCKED').length;
     const warningCount = eventsList.filter(e => e.status === 'WARNING').length;
     const approvedCount = eventsList.filter(e => e.status === 'APPROVED').length;
+    const totalEvents = eventsList.length;
 
-    // --- TAB 1: Events HTML ---
-    let eventsHtml = '';
-    for (const e of eventsList) {
-      const isBlocked = e.status === 'BLOCKED';
-      const isWarning = e.status === 'WARNING';
-      const color = isBlocked ? '#ef4444' : isWarning ? '#f59e0b' : '#10b981';
-      const badgeBg = isBlocked ? 'rgba(239, 68, 68, 0.15)' : isWarning ? 'rgba(245, 158, 11, 0.15)' : 'rgba(16, 185, 129, 0.15)';
-      
-      const lucideIcon = isBlocked
-        ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"></polygon><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>'
-        : isWarning
-        ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>'
-        : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>';
+    // Agent Recovery Calculation: Did agent fix a blocked event on next turn?
+    let recoveredCount = 0;
+    let totalBlockedAnalyzed = 0;
+    for (let i = 0; i < eventsList.length; i++) {
+      if (eventsList[i].status === 'BLOCKED') {
+        totalBlockedAnalyzed++;
+        const target = eventsList[i].target;
+        if (target) {
+          const subsequentApproval = eventsList.slice(0, i).some(e => e.target === target && e.status === 'APPROVED');
+          if (subsequentApproval) {
+            recoveredCount++;
+          }
+        }
+      }
+    }
+    const recoveryRate = totalBlockedAnalyzed > 0
+      ? Math.round((recoveredCount / totalBlockedAnalyzed) * 100)
+      : 100;
 
-      const rulePill = e.ruleId && e.ruleId !== 'PASS'
-        ? '<span style="font-size: 0.65rem; font-weight: 800; color: #94a3b8; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08); letter-spacing: 0.3px;">' + e.ruleId + '</span>'
-        : '';
+    // --- CURRENT ACTION CARD ---
+    const latestEvent = eventsList.length > 0 ? eventsList[0] : null;
+    let currentCardHtml = '';
+    if (latestEvent) {
+      const isBlk = latestEvent.status === 'BLOCKED';
+      const isWrn = latestEvent.status === 'WARNING';
+      const colorCls = isBlk ? 'border-blocked' : isWrn ? 'border-warning' : 'border-allowed';
+      const badgeCls = isBlk ? 'badge-blocked' : isWrn ? 'badge-warning' : 'badge-allowed';
+      const statusText = isBlk ? '🛑 BLOCKED' : isWrn ? '⚠ WARNING' : '✅ ALLOWED';
+      const actionName = latestEvent.action || 'write_file';
+      const targetName = latestEvent.target ? path.basename(latestEvent.target) : 'workspace';
+      const ruleText = latestEvent.ruleId && latestEvent.ruleId !== 'PASS' ? latestEvent.ruleId : 'G0 G1 G2 G4 ✓';
+      const timeStr = latestEvent.timestamp ? (latestEvent.timestamp.split(' ')[1] || latestEvent.timestamp) : '';
 
-      eventsHtml +=
-        '<div style="background: #1e293b; border-left: 4px solid ' + color + '; padding: 12px; border-radius: 8px; margin-bottom: 10px; font-family: sans-serif; box-shadow: 0 4px 10px rgba(0,0,0,0.2);">' +
-        '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">' +
-        '<div style="display: flex; align-items: center; gap: 6px;">' +
-        '<span style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; font-weight: 800; color: ' + color + '; background: ' + badgeBg + '; padding: 2px 8px; border-radius: 4px;">' +
-        lucideIcon + ' ' + (e.status || '') +
-        '</span>' +
-        rulePill +
-        '</div>' +
-        '<span style="font-size: 0.7rem; color: #94a3b8;">' + (e.timestamp || '') + '</span>' +
-        '</div>' +
-        '<div style="font-size: 0.8rem; font-weight: 700; color: #f8fafc; word-break: break-all; margin-bottom: 4px;">' +
-        (e.target || e.action || 'Unknown Target') +
-        '</div>' +
-        '<div style="font-size: 0.75rem; color: #cbd5e1; line-height: 1.4;">' +
-        (e.reason || '') +
-        '</div>' +
-        '</div>';
+      currentCardHtml = `
+        <div class="current-card ${colorCls}">
+          <div class="current-hdr">
+            <span class="current-tag">${t('current.title')}</span>
+            <span class="current-time">${timeStr}</span>
+          </div>
+          <div class="current-body">
+            <div class="current-action-line">
+              <span class="current-tool">${escapeHtml(actionName)}</span>
+              <span class="current-target" title="${escapeHtml(latestEvent.target || '')}">${escapeHtml(targetName)}</span>
+            </div>
+            <div class="current-badge-row">
+              <span class="status-badge ${badgeCls}">${statusText}</span>
+              <span class="current-rule-badge">${escapeHtml(ruleText)}</span>
+            </div>
+            ${latestEvent.reason ? `<div class="current-reason-text">${escapeHtml(latestEvent.reason)}</div>` : ''}
+          </div>
+        </div>
+      `;
+    } else {
+      currentCardHtml = `
+        <div class="current-card border-neutral">
+          <div class="current-hdr">
+            <span class="current-tag">${t('current.title')}</span>
+          </div>
+          <div class="current-idle">
+            <span>⚡ ${t('current.idle')}</span>
+          </div>
+        </div>
+      `;
     }
 
-    if (!eventsHtml) {
-      eventsHtml =
-        '<div style="color: #64748b; font-size: 0.8rem; text-align: center; padding: 30px 10px; border: 1px dashed rgba(255,255,255,0.1); border-radius: 10px; display: flex; flex-direction: column; align-items: center; gap: 8px;">' +
-        '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' +
-        '<span>' + t('events.noEvents') + '</span>' +
-        '</div>';
+    // --- TAB 1: LIVE STREAM (COMPACT ROWS WITH EXPANDABLE ACCORDION) ---
+    let liveHtml = '';
+    if (eventsList.length === 0) {
+      liveHtml = `<div class="empty-state">${t('events.noEvents')}</div>`;
+    } else {
+      eventsList.forEach((e, idx) => {
+        const isBlk = e.status === 'BLOCKED';
+        const isWrn = e.status === 'WARNING';
+        const badgeCls = isBlk ? 'badge-blocked' : isWrn ? 'badge-warning' : 'badge-allowed';
+        const statusLabel = isBlk ? 'BLOCK' : isWrn ? 'WARN' : 'ALLOW';
+        const fileName = e.target ? path.basename(e.target) : (e.action || 'system');
+        const timeStr = e.timestamp ? (e.timestamp.split(' ')[1] || e.timestamp) : '';
+        const ruleId = e.ruleId || 'PASS';
+        const fullTargetEsc = escapeHtml(e.target || '');
+        const reasonEsc = escapeHtml(e.reason || '');
+
+        liveHtml += `
+          <div class="stream-item">
+            <div class="stream-row" onclick="toggleDetail('evt-${idx}')">
+              <div class="stream-left">
+                <span class="status-badge ${badgeCls}">${statusLabel}</span>
+                <span class="stream-file" title="${fullTargetEsc}">${escapeHtml(fileName)}</span>
+              </div>
+              <div class="stream-right">
+                <span class="stream-rule">${escapeHtml(ruleId)}</span>
+                <span class="stream-time">${timeStr}</span>
+              </div>
+            </div>
+            <div id="evt-${idx}" class="stream-drawer" style="display: none;">
+              <div class="drawer-header">
+                <span class="drawer-rule">${escapeHtml(ruleId)}</span>
+                <span class="status-badge ${badgeCls}">${e.status}</span>
+              </div>
+              ${e.target ? `<div class="drawer-target" title="${fullTargetEsc}">📁 ${fullTargetEsc}</div>` : ''}
+              ${e.reason ? `<div class="drawer-reason">${reasonEsc}</div>` : ''}
+              <div class="drawer-buttons">
+                ${e.target ? `<button class="action-btn" onclick="openFile('${escapeJs(e.target)}')">📄 ${t('current.openFile')}</button>` : ''}
+                ${e.reason ? `<button class="action-btn" onclick="copyReason('${escapeJs(e.reason)}')">📋 ${t('current.copyReason')}</button>` : ''}
+              </div>
+            </div>
+          </div>
+        `;
+      });
     }
 
-    // --- TAB 2: Obligations HTML ---
+    // --- TAB 2: OBLIGATIONS (ACTIONABLE TASKS + 4-STEP STATE MACHINE TRACK) ---
     let obligationsHtml = '';
     const testKeys = Object.keys(pendingTests);
     const docKeys = Object.keys(pendingDocs);
 
     if (testKeys.length === 0 && docKeys.length === 0) {
-      obligationsHtml =
-        '<div style="color: #10b981; font-size: 0.8rem; text-align: center; padding: 25px 10px; border: 1px dashed rgba(16,185,129,0.25); border-radius: 10px; background: rgba(16,185,129,0.05);">' +
-        '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" style="margin-bottom: 8px;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>' +
-        '<div style="font-weight: 800; font-size: 0.85rem;">' + t('obligations.cleanState') + '</div>' +
-        '</div>';
+      obligationsHtml = `
+        <div class="clean-state-box">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+          <div class="clean-state-title">${t('obligations.cleanState')}</div>
+        </div>
+      `;
     } else {
       if (testKeys.length > 0) {
-        obligationsHtml += '<div style="font-size: 0.7rem; font-weight: 800; color: #38bdf8; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.5px;">🧪 ' + t('obligations.testTitle') + ' (' + testKeys.length + ')</div>';
+        obligationsHtml += `<div class="section-title text-cyan">🧪 ${t('obligations.testTitle')} (${testKeys.length})</div>`;
         for (const tk of testKeys) {
           const item = pendingTests[tk];
-          obligationsHtml +=
-            '<div style="background: #1e293b; border-left: 3px solid #38bdf8; padding: 10px; border-radius: 6px; margin-bottom: 8px; font-size: 0.75rem;">' +
-            '<div style="color: #f8fafc; font-weight: 700; word-break: break-all;">' + path.basename(tk) + '</div>' +
-            '<div style="color: #94a3b8; font-size: 0.7rem; margin-top: 2px;">' + t('obligations.expectedTest') + ': <span style="color: #38bdf8;">' + (item.expected_name || 'test') + '</span></div>' +
-            '</div>';
+          const hasIntent = resolutionIntents.some(intent => intent.target_path && intent.target_path.toLowerCase().includes(path.basename(tk).toLowerCase()));
+          const step1Class = !hasIntent ? 'step-active' : 'step-done';
+          const step2Class = hasIntent ? 'step-active' : 'step-todo';
+
+          obligationsHtml += `
+            <div class="task-card border-cyan">
+              <div class="task-header">
+                <span class="task-title" title="${escapeHtml(tk)}">${escapeHtml(path.basename(tk))}</span>
+                <button class="mini-icon-btn" onclick="openFile('${escapeJs(tk)}')" title="${t('current.openFile')}">📄</button>
+              </div>
+              <div class="task-meta">${t('obligations.expectedTest')}: <code class="text-cyan">${escapeHtml(item.expected_name || 'test')}</code></div>
+              <div class="state-track">
+                <div class="track-step ${step1Class}">PENDING</div>
+                <div class="track-arrow">→</div>
+                <div class="track-step ${step2Class}">INTENT</div>
+                <div class="track-arrow">→</div>
+                <div class="track-step step-todo">VERIFIED</div>
+                <div class="track-arrow">→</div>
+                <div class="track-step step-todo">RESOLVED</div>
+              </div>
+              <div class="track-status-hint">${hasIntent ? '⏳ İki fazlı taahhüt alındı; diske yazım doğrulanması bekleniyor' : '⏳ Ajanın test dosyasını oluşturması/düzenlemesi bekleniyor'}</div>
+            </div>
+          `;
         }
       }
+
       if (docKeys.length > 0) {
-        obligationsHtml += '<div style="font-size: 0.7rem; font-weight: 800; color: #f59e0b; text-transform: uppercase; margin: 12px 0 6px 0; letter-spacing: 0.5px;">📝 ' + t('obligations.docTitle') + ' (' + docKeys.length + ')</div>';
+        obligationsHtml += `<div class="section-title text-amber" style="margin-top: 14px;">📝 ${t('obligations.docTitle')} (${docKeys.length})</div>`;
         for (const dk of docKeys) {
           const item = pendingDocs[dk];
           const reqs = (item.required_docs || ['CHANGELOG.md']).join(', ');
-          obligationsHtml +=
-            '<div style="background: #1e293b; border-left: 3px solid #f59e0b; padding: 10px; border-radius: 6px; margin-bottom: 8px; font-size: 0.75rem;">' +
-            '<div style="color: #f8fafc; font-weight: 700; word-break: break-all;">' + path.basename(dk) + '</div>' +
-            '<div style="color: #94a3b8; font-size: 0.7rem; margin-top: 2px;">' + t('obligations.requiredDoc') + ': <span style="color: #f59e0b;">' + reqs + '</span> (§6 Same-Commit)</div>' +
-            '</div>';
+          const hasIntent = resolutionIntents.some(intent => intent.target_path && intent.target_path.toLowerCase().includes('changelog'));
+          const step1Class = !hasIntent ? 'step-active' : 'step-done';
+          const step2Class = hasIntent ? 'step-active' : 'step-todo';
+
+          obligationsHtml += `
+            <div class="task-card border-amber">
+              <div class="task-header">
+                <span class="task-title" title="${escapeHtml(dk)}">${escapeHtml(path.basename(dk))}</span>
+                <button class="mini-icon-btn" onclick="openFile('${escapeJs(dk)}')" title="${t('current.openFile')}">📄</button>
+              </div>
+              <div class="task-meta">${t('obligations.requiredDoc')}: <code class="text-amber">${escapeHtml(reqs)}</code></div>
+              <div class="state-track">
+                <div class="track-step ${step1Class}">PENDING</div>
+                <div class="track-arrow">→</div>
+                <div class="track-step ${step2Class}">INTENT</div>
+                <div class="track-arrow">→</div>
+                <div class="track-step step-todo">VERIFIED</div>
+                <div class="track-arrow">→</div>
+                <div class="track-step step-todo">RESOLVED</div>
+              </div>
+              <div class="track-status-hint">${hasIntent ? '⏳ Dokümantasyon taahhüdü alındı; diske yazım doğrulanması bekleniyor' : '⏳ docs/KNOWLEDGE.md §6 uyarınca CHANGELOG güncellenmeli'}</div>
+            </div>
+          `;
         }
       }
-      obligationsHtml +=
-        '<div style="margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.04); border-radius: 6px; font-size: 0.7rem; color: #94a3b8; display: flex; justify-content: space-between;">' +
-        '<span>' + t('obligations.circuitBreaker') + ':</span>' +
-        '<span style="font-weight: 800; color: ' + (stopRetries >= 4 ? '#ef4444' : '#38bdf8') + ';">' + stopRetries + ' / 5 ' + t('obligations.retries') + '</span>' +
-        '</div>';
+
+      obligationsHtml += `
+        <div class="circuit-box">
+          <span>${t('obligations.circuitBreaker')}:</span>
+          <span class="circuit-val ${stopRetries >= 4 ? 'text-red' : 'text-cyan'}">${stopRetries} / 5 ${t('obligations.retries')}</span>
+        </div>
+      `;
     }
 
-    // --- TAB 3: Rules & Context HTML ---
-    let rulesHtml = '';
+    // --- TAB 3: RULES (CATEGORIZED SECURITY / ARCHITECTURE / QUALITY) ---
     const docGovActive = projectCfg?.governance?.enforceDocObligations === true;
-    const layers = projectCfg?.layers || {};
-    const layerNames = Object.keys(layers);
+    const rulesHtml = `
+      <div class="rules-group">
+        <div class="group-title text-red">🔒 Security Guards (Sıfır Tolerans)</div>
+        <div class="rule-row">
+          <div class="rule-name">● G0 Secret Leak Shield</div>
+          <span class="mode-pill mode-block">BLOCK</span>
+        </div>
+        <div class="rule-desc">Tüm dosyalarda API key, JWT, özel anahtar sızıntılarını engeller.</div>
 
-    rulesHtml +=
-      '<div style="background: #1e293b; padding: 12px; border-radius: 8px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.06);">' +
-      '<div style="font-size: 0.75rem; font-weight: 800; color: #38bdf8; margin-bottom: 6px;">📐 ' + t('rules.title') + '</div>' +
-      '<div style="font-size: 0.7rem; color: #cbd5e1; line-height: 1.6;">' +
-      '<div>• <b>' + t('rules.docGovernance') + ':</b> ' + (docGovActive ? '<span style="color: #10b981; font-weight: bold;">' + t('rules.active') + ' (Opt-in)</span>' : '<span style="color: #94a3b8;">' + t('rules.inactive') + '</span>') + '</div>' +
-      '<div>• <b>' + t('rules.maxChunk') + ':</b> ' + (projectCfg?.complexity?.singleWriteLoc || 200) + ' (ARCH_FILE_GROWTH)</div>' +
-      '<div>• <b>' + t('rules.maxLoc') + ':</b> ' + (projectCfg?.complexity?.totalLoc || 500) + '</div>' +
-      '<div>• <b>' + t('rules.testEvidence') + ':</b> ' + (projectCfg?.testEvidence?.deferredMode !== false ? t('rules.deferred') : t('rules.active')) + '</div>' +
-      '</div>' +
-      '</div>';
+        <div class="rule-row">
+          <div class="rule-name">● G1 Silent Error Swallowing</div>
+          <span class="mode-pill mode-block">BLOCK</span>
+        </div>
+        <div class="rule-desc">Hataların 'except: pass' ile sessizce yutulmasını kesinlikle engeller.</div>
 
-    if (layerNames.length > 0) {
-      rulesHtml +=
-        '<div style="background: #1e293b; padding: 12px; border-radius: 8px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.06);">' +
-        '<div style="font-size: 0.75rem; font-weight: 800; color: #a78bfa; margin-bottom: 6px;">🧱 ' + t('rules.layers') + '</div>' +
-        '<div style="font-size: 0.7rem; color: #cbd5e1; line-height: 1.5;">';
-      for (const lyr of layerNames) {
-        const allowed = layers[lyr];
-        rulesHtml += '<div>• <code style="color: #38bdf8;">' + lyr + '</code> ➜ ' + (Array.isArray(allowed) && allowed.length ? allowed.join(', ') : '<i>isol</i>') + '</div>';
-      }
-      rulesHtml += '</div></div>';
-    }
+        <div class="rule-row">
+          <div class="rule-name">● G2 Test Integrity Protection</div>
+          <span class="mode-pill mode-block">BLOCK</span>
+        </div>
+        <div class="rule-desc">Testlerin sahte 'assert True' ile geçilmesini veya silinmesini engeller.</div>
+      </div>
 
-    rulesHtml +=
-      '<div style="background: #1e293b; padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">' +
-      '<div style="font-size: 0.75rem; font-weight: 800; color: #10b981; margin-bottom: 6px;">🛡️ ' + t('rules.invariantsTitle') + '</div>' +
-      '<div style="font-size: 0.7rem; color: #94a3b8; line-height: 1.5;">' +
-      '<div><b>G0:</b> Secret / Token leak shield (all text files)</div>' +
-      '<div><b>G1:</b> Silent error swallowing forbidden (except pass)</div>' +
-      '<div><b>G2:</b> Test integrity protection (no deletion/weakening)</div>' +
-      '<div><b>G4:</b> Forbidden cross-layer architectural imports</div>' +
-      '<div><b>T1/T2:</b> Test evidence and observable assertions required</div>' +
-      '</div>' +
-      '</div>';
+      <div class="rules-group">
+        <div class="group-title text-purple">🧱 Architectural Guards</div>
+        <div class="rule-row">
+          <div class="rule-name">● G4 Import Matrix & Layers</div>
+          <span class="mode-pill mode-block">BLOCK</span>
+        </div>
+        <div class="rule-desc">Katmanlar arası döngüsel veya ters yönde yasadışı importları engeller.</div>
 
-    const statBoxBlocked = '<div class="stat-box"><div class="stat-val" style="color: #ef4444;">' + blockedCount + '</div><div class="stat-lbl">' + t('stats.blocked') + '</div></div>';
-    const statBoxWarning = '<div class="stat-box"><div class="stat-val" style="color: #f59e0b;">' + warningCount + '</div><div class="stat-lbl">' + t('stats.warning') + '</div></div>';
-    const statBoxApproved = '<div class="stat-box"><div class="stat-val" style="color: #10b981;">' + approvedCount + '</div><div class="stat-lbl">' + t('stats.approved') + '</div></div>';
+        <div class="rule-row">
+          <div class="rule-name">● SRP & Cohesion Boundary</div>
+          <span class="mode-pill mode-block">BLOCK</span>
+        </div>
+        <div class="rule-desc">Tek dosyada çoklu iş yapılmasını önler; cohesive monolith istisnası korur.</div>
 
-    this._view.webview.html =
-      '<!DOCTYPE html>' +
-      '<html lang="en">' +
-      '<head>' +
-      '<meta charset="UTF-8">' +
-      '<style>' +
-      'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 12px; color: #f8fafc; background: #0f172a; margin: 0; }' +
-      '.header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 10px; }' +
-      '.title-box { display: flex; align-items: center; gap: 8px; }' +
-      '.title { font-size: 0.95rem; font-weight: 900; color: #38bdf8; letter-spacing: 0.5px; }' +
-      '.btn-group { display: flex; gap: 6px; }' +
-      '.action-btn { display: inline-flex; align-items: center; gap: 4px; background: rgba(255,255,255,0.08); color: #cbd5e1; border: 1px solid rgba(255,255,255,0.12); padding: 3px 8px; border-radius: 6px; font-size: 0.68rem; font-weight: 700; cursor: pointer; transition: all 0.2s; }' +
-      '.action-btn:hover { background: rgba(255,255,255,0.18); color: white; }' +
-      '.action-btn.danger:hover { background: rgba(239, 68, 68, 0.25); color: #ef4444; border-color: rgba(239, 68, 68, 0.4); }' +
-      '.stat-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 12px; }' +
-      '.stat-box { background: #1e293b; padding: 6px 4px; border-radius: 6px; text-align: center; border: 1px solid rgba(255,255,255,0.05); }' +
-      '.stat-val { font-size: 1.15rem; font-weight: 900; }' +
-      '.stat-lbl { font-size: 0.58rem; text-transform: uppercase; color: #94a3b8; margin-top: 1px; }' +
-      '.tabs { display: flex; gap: 4px; margin-bottom: 12px; background: rgba(0,0,0,0.25); padding: 3px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06); }' +
-      '.tab-btn { flex: 1; padding: 6px 2px; font-size: 0.65rem; font-weight: 700; background: transparent; border: none; color: #94a3b8; border-radius: 6px; cursor: pointer; transition: all 0.15s; text-align: center; }' +
-      '.tab-btn.active { background: #38bdf8; color: #0f172a; font-weight: 800; box-shadow: 0 2px 6px rgba(56,189,248,0.3); }' +
-      '.tab-content { display: none; }' +
-      '.tab-content.active { display: block; }' +
-      '.badge-pill { font-size: 0.6rem; padding: 1px 5px; border-radius: 10px; background: rgba(239,68,68,0.3); color: #f87171; margin-left: 3px; }' +
-      '.pulse-dot { width: 7px; height: 7px; border-radius: 50%; background: #10b981; display: inline-block; box-shadow: 0 0 6px #10b981; }' +
-      '</style>' +
-      '</head>' +
-      '<body>' +
-      '<div class="header">' +
-      '<div class="title-box">' +
-      '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' +
-      '<div class="title">GravityGuard</div>' +
-      '</div>' +
-      '<div class="btn-group">' +
-      '<button class="action-btn" onclick="toggleLanguage()" title="Switch Language">' +
-      '🌐 ' + (getCurrentLanguage() === 'tr' ? 'EN' : 'TR') +
-      '</button>' +
-      '<button class="action-btn" onclick="refresh()">' +
-      '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>' +
-      t('actions.refresh') +
-      '</button>' +
-      '<button class="action-btn danger" onclick="clearLogs()">' +
-      '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>' +
-      t('actions.clear') +
-      '</button>' +
-      '</div>' +
-      '</div>' +
-      '<div class="stat-grid">' +
-      statBoxBlocked +
-      statBoxWarning +
-      statBoxApproved +
-      '</div>' +
-      '<div class="tabs">' +
-      '<button class="tab-btn active" id="btn-events" onclick="setTab(\'events\')">' + t('tabs.events') + '</button>' +
-      '<button class="tab-btn" id="btn-obligations" onclick="setTab(\'obligations\')">' + t('tabs.obligations') + (totalObligations > 0 ? '<span class="badge-pill">' + totalObligations + '</span>' : '') + '</button>' +
-      '<button class="tab-btn" id="btn-rules" onclick="setTab(\'rules\')">' + t('tabs.rules') + '</button>' +
-      '</div>' +
-      '<div id="tab-events" class="tab-content active">' +
-      '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">' +
-      '<span style="font-size: 0.7rem; font-weight: 800; color: #94a3b8; text-transform: uppercase;">' + (getCurrentLanguage() === 'tr' ? 'Canlı Akış' : 'Live Stream') + '</span>' +
-      '<span style="display: flex; align-items: center; gap: 4px; font-size: 0.6rem; color: #10b981; font-weight: 800;"><span class="pulse-dot"></span> ' + t('statusOnline') + '</span>' +
-      '</div>' +
-      eventsHtml +
-      '</div>' +
-      '<div id="tab-obligations" class="tab-content">' +
-      obligationsHtml +
-      '</div>' +
-      '<div id="tab-rules" class="tab-content">' +
-      rulesHtml +
-      '</div>' +
-      '<script>' +
-      'const vscode = acquireVsCodeApi();' +
-      'let currentTab = window._lastTab || "events";' +
-      'function setTab(tabName) {' +
-      '  currentTab = tabName;' +
-      '  window._lastTab = tabName;' +
-      '  document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));' +
-      '  document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));' +
-      '  const btn = document.getElementById("btn-" + tabName);' +
-      '  const content = document.getElementById("tab-" + tabName);' +
-      '  if (btn) btn.classList.add("active");' +
-      '  if (content) content.classList.add("active");' +
-      '}' +
-      'if (window._lastTab) { setTab(window._lastTab); }' +
-      'function clearLogs() { vscode.postMessage({ command: "clearLogs" }); }' +
-      'function refresh() { vscode.postMessage({ command: "refresh" }); }' +
-      'function toggleLanguage() { vscode.postMessage({ command: "toggleLanguage" }); }' +
-      '</script>' +
-      '</body>' +
-      '</html>';
+        <div class="rule-row">
+          <div class="rule-name">● G3 Compiler/Linter Bypass</div>
+          <span class="mode-pill mode-warn">WARN</span>
+        </div>
+        <div class="rule-desc">@ts-ignore veya # type: ignore ile denetimlerin atlanmasını izler.</div>
+
+        <div class="rule-row">
+          <div class="rule-name">● ARCH_FILE_GROWTH</div>
+          <span class="mode-pill mode-warn">WARN</span>
+        </div>
+        <div class="rule-desc">Tek hamlede devasa kod yığılmasını (${projectCfg?.complexity?.singleWriteLoc || 200} satır) denetler.</div>
+      </div>
+
+      <div class="rules-group">
+        <div class="group-title text-cyan">🧪 Quality & Governance</div>
+        <div class="rule-row">
+          <div class="rule-name">● T1/T2 Test Evidence</div>
+          <span class="mode-pill ${projectCfg?.testEvidence?.deferredMode !== false ? 'mode-warn' : 'mode-block'}">${projectCfg?.testEvidence?.deferredMode !== false ? 'DEFERRED' : 'BLOCK'}</span>
+        </div>
+        <div class="rule-desc">Üretim kodu değiştiğinde eşlik eden test kanıtı talep eder.</div>
+
+        <div class="rule-row">
+          <div class="rule-name">● Doc Governance (§6 Same-Commit)</div>
+          <span class="mode-pill ${docGovActive ? 'mode-active' : 'mode-inactive'}">${docGovActive ? 'OPT-IN' : 'OFF'}</span>
+        </div>
+        <div class="rule-desc">Motor dosyası değiştiğinde aynı commit'te CHANGELOG güncellenmesini zorlar.</div>
+      </div>
+
+      <div style="margin-top: 14px; text-align: center;">
+        <button class="action-btn wide" onclick="openConfig()">⚙️ ${t('actions.openConfig')}</button>
+      </div>
+    `;
+
+    // --- TAB 4: INSIGHTS (TELEMETRY, AGENT RECOVERY, PERFORMANCE) ---
+    const shortSess = sessionId.length > 10 ? sessionId.slice(0, 8) + '…' : sessionId;
+    const insightsHtml = `
+      <div class="insight-card">
+        <div class="insight-title">🎯 ${t('insights.recoveryTitle')}</div>
+        <div class="recovery-meter">
+          <div class="recovery-bar-wrap">
+            <div class="recovery-bar" style="width: ${recoveryRate}%;"></div>
+          </div>
+          <div class="recovery-score">${recoveryRate}%</div>
+        </div>
+        <div class="insight-sub">${recoveredCount} / ${totalBlockedAnalyzed || 1} ${t('insights.fixedNext')}</div>
+      </div>
+
+      <div class="insight-card">
+        <div class="insight-title">⚡ Latency & Engine Performance</div>
+        <div class="metric-row">
+          <span class="metric-lbl">${t('insights.latencyFast')}:</span>
+          <span class="metric-val text-green">~0.03 ms (< 10 ms bütçe)</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-lbl">${t('insights.latencySpawn')}:</span>
+          <span class="metric-val text-muted">~220 ms (CLI Subprocess)</span>
+        </div>
+      </div>
+
+      <div class="insight-card">
+        <div class="insight-title">🛡️ Session & Concurrency Integrity</div>
+        <div class="metric-row">
+          <span class="metric-lbl">${t('insights.lockStatus')}:</span>
+          <span class="metric-val text-green">🟢 ${t('insights.lockHealthy')}</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-lbl">${t('insights.twoPhase')}:</span>
+          <span class="metric-val text-green">🟢 ${t('insights.twoPhaseActive')}</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-lbl">Oturum Kimliği:</span>
+          <span class="metric-val text-cyan">${shortSess}</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-lbl">Devre Kesici Sayacı:</span>
+          <span class="metric-val text-muted">${stopRetries} / 5 deneme</span>
+        </div>
+      </div>
+    `;
+
+    // --- RENDER MAIN WEBVIEW HTML ---
+    this._view.webview.html = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <style>
+          :root {
+            --bg-base: var(--vscode-editor-background, #0b1120);
+            --bg-card: rgba(255, 255, 255, 0.04);
+            --bg-hover: rgba(255, 255, 255, 0.08);
+            --border-dim: rgba(255, 255, 255, 0.08);
+            --text-main: var(--vscode-editor-foreground, #f8fafc);
+            --text-muted: #94a3b8;
+            --color-green: #10b981;
+            --color-red: #ef4444;
+            --color-amber: #f59e0b;
+            --color-cyan: #38bdf8;
+            --color-purple: #c084fc;
+          }
+          * { box-sizing: border-box; }
+          body {
+            font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+            font-size: 11px;
+            color: var(--text-main);
+            background: var(--bg-base);
+            margin: 0;
+            padding: 8px 10px;
+          }
+
+          /* Header */
+          .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border-dim);
+            margin-bottom: 8px;
+          }
+          .header-left {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+          }
+          .brand-title {
+            font-size: 12px;
+            font-weight: 800;
+            color: var(--color-cyan);
+            letter-spacing: 0.4px;
+          }
+          .project-pill {
+            font-size: 9px;
+            color: var(--text-muted);
+            background: rgba(255, 255, 255, 0.05);
+            padding: 2px 6px;
+            border-radius: 4px;
+          }
+          .header-right {
+            display: flex;
+            gap: 4px;
+          }
+          .mini-btn {
+            background: var(--bg-card);
+            border: 1px solid var(--border-dim);
+            color: var(--text-muted);
+            font-size: 9px;
+            font-weight: 700;
+            padding: 3px 6px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s;
+          }
+          .mini-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-main);
+          }
+
+          /* Current Action Card */
+          .current-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-dim);
+            border-radius: 6px;
+            padding: 8px;
+            margin-bottom: 8px;
+          }
+          .current-card.border-allowed { border-left: 3px solid var(--color-green); }
+          .current-card.border-blocked { border-left: 3px solid var(--color-red); }
+          .current-card.border-warning { border-left: 3px solid var(--color-amber); }
+          .current-card.border-neutral { border-left: 3px solid var(--text-muted); }
+          
+          .current-hdr {
+            display: flex;
+            justify-content: space-between;
+            font-size: 9px;
+            font-weight: 800;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+          }
+          .current-action-line {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 6px;
+            word-break: break-all;
+          }
+          .current-tool {
+            font-weight: 700;
+            color: var(--text-muted);
+            font-size: 10px;
+          }
+          .current-target {
+            font-weight: 700;
+            color: var(--text-main);
+            font-size: 11px;
+          }
+          .current-badge-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+          }
+          .status-badge {
+            font-size: 9px;
+            font-weight: 800;
+            padding: 2px 6px;
+            border-radius: 3px;
+            display: inline-block;
+          }
+          .badge-allowed { background: rgba(16, 185, 129, 0.15); color: var(--color-green); }
+          .badge-blocked { background: rgba(239, 68, 68, 0.15); color: var(--color-red); }
+          .badge-warning { background: rgba(245, 158, 11, 0.15); color: var(--color-amber); }
+          .current-rule-badge {
+            font-size: 9px;
+            font-weight: 700;
+            color: var(--text-muted);
+            background: rgba(255, 255, 255, 0.05);
+            padding: 2px 5px;
+            border-radius: 3px;
+          }
+          .current-reason-text {
+            font-size: 10px;
+            color: #cbd5e1;
+            margin-top: 5px;
+            line-height: 1.35;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 4px 6px;
+            border-radius: 4px;
+          }
+          .current-idle {
+            color: var(--text-muted);
+            font-size: 10px;
+            padding: 6px 0;
+            text-align: center;
+          }
+
+          /* Stat Row */
+          .stat-summary-bar {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 4px;
+            margin-bottom: 8px;
+          }
+          .stat-chip {
+            background: var(--bg-card);
+            border: 1px solid var(--border-dim);
+            padding: 4px 6px;
+            border-radius: 4px;
+            text-align: center;
+          }
+          .chip-val { font-size: 12px; font-weight: 800; }
+          .chip-lbl { font-size: 8px; color: var(--text-muted); text-transform: uppercase; margin-top: 1px; }
+
+          /* Tabs */
+          .tabs-bar {
+            display: flex;
+            background: rgba(0, 0, 0, 0.25);
+            padding: 2px;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            border: 1px solid var(--border-dim);
+          }
+          .tab-btn {
+            flex: 1;
+            padding: 5px 2px;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 10px;
+            font-weight: 700;
+            border-radius: 4px;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.15s;
+          }
+          .tab-btn.active {
+            background: var(--color-cyan);
+            color: #0b1120;
+            font-weight: 800;
+          }
+          .tab-pane { display: none; }
+          .tab-pane.active { display: block; }
+          .badge-counter {
+            background: rgba(239, 68, 68, 0.3);
+            color: #f87171;
+            font-size: 8px;
+            padding: 1px 4px;
+            border-radius: 6px;
+            margin-left: 2px;
+          }
+
+          /* Stream List */
+          .stream-item {
+            margin-bottom: 4px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-dim);
+            border-radius: 4px;
+            overflow: hidden;
+          }
+          .stream-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 8px;
+            cursor: pointer;
+            user-select: none;
+          }
+          .stream-row:hover { background: var(--bg-hover); }
+          .stream-left { display: flex; align-items: center; gap: 6px; overflow: hidden; }
+          .stream-file {
+            font-weight: 600;
+            font-size: 10px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 140px;
+          }
+          .stream-right { display: flex; align-items: center; gap: 6px; }
+          .stream-rule { font-size: 9px; color: var(--text-muted); }
+          .stream-time { font-size: 8px; color: var(--text-muted); }
+
+          /* Drawer Accordion */
+          .stream-drawer {
+            padding: 8px;
+            background: rgba(0, 0, 0, 0.3);
+            border-top: 1px solid var(--border-dim);
+          }
+          .drawer-header { display: flex; justify-content: space-between; margin-bottom: 4px; }
+          .drawer-rule { font-weight: 800; font-size: 10px; color: var(--color-cyan); }
+          .drawer-target { font-size: 9px; color: var(--text-muted); word-break: break-all; margin-bottom: 4px; }
+          .drawer-reason { font-size: 10px; color: #cbd5e1; line-height: 1.4; margin-bottom: 6px; }
+          .drawer-buttons { display: flex; gap: 4px; }
+          .action-btn {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--border-dim);
+            color: var(--text-main);
+            font-size: 9px;
+            font-weight: 600;
+            padding: 3px 6px;
+            border-radius: 3px;
+            cursor: pointer;
+          }
+          .action-btn:hover { background: rgba(255, 255, 255, 0.16); }
+          .action-btn.wide { width: 100%; padding: 6px; }
+
+          /* Task & State Machine Track */
+          .task-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-dim);
+            border-radius: 6px;
+            padding: 8px;
+            margin-bottom: 8px;
+          }
+          .task-card.border-cyan { border-left: 3px solid var(--color-cyan); }
+          .task-card.border-amber { border-left: 3px solid var(--color-amber); }
+          .task-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+          .task-title { font-weight: 700; font-size: 11px; word-break: break-all; }
+          .mini-icon-btn { background: none; border: none; cursor: pointer; font-size: 10px; padding: 2px; }
+          .task-meta { font-size: 9px; color: var(--text-muted); margin-bottom: 6px; }
+          .state-track {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 4px;
+            border-radius: 4px;
+            margin-bottom: 4px;
+          }
+          .track-step {
+            flex: 1;
+            font-size: 7px;
+            font-weight: 800;
+            text-align: center;
+            padding: 2px 1px;
+            border-radius: 2px;
+          }
+          .step-done { background: rgba(16, 185, 129, 0.2); color: var(--color-green); }
+          .step-active { background: var(--color-cyan); color: #0b1120; font-weight: 900; }
+          .step-todo { color: rgba(255, 255, 255, 0.25); }
+          .track-arrow { font-size: 7px; color: rgba(255, 255, 255, 0.3); }
+          .track-status-hint { font-size: 9px; color: var(--text-muted); }
+
+          /* Rules Group */
+          .rules-group {
+            background: var(--bg-card);
+            border: 1px solid var(--border-dim);
+            border-radius: 6px;
+            padding: 8px;
+            margin-bottom: 8px;
+          }
+          .group-title { font-weight: 800; font-size: 10px; margin-bottom: 6px; }
+          .rule-row { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+          .rule-name { font-weight: 700; font-size: 10px; }
+          .rule-desc { font-size: 9px; color: var(--text-muted); line-height: 1.3; margin-top: 2px; }
+          .mode-pill { font-size: 8px; font-weight: 800; padding: 1px 5px; border-radius: 3px; }
+          .mode-block { background: rgba(239, 68, 68, 0.15); color: var(--color-red); }
+          .mode-warn { background: rgba(245, 158, 11, 0.15); color: var(--color-amber); }
+          .mode-active { background: rgba(16, 185, 129, 0.15); color: var(--color-green); }
+          .mode-inactive { background: rgba(255, 255, 255, 0.05); color: var(--text-muted); }
+
+          /* Insights */
+          .insight-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-dim);
+            border-radius: 6px;
+            padding: 8px;
+            margin-bottom: 8px;
+          }
+          .insight-title { font-weight: 800; font-size: 10px; color: var(--color-cyan); margin-bottom: 6px; }
+          .recovery-meter { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+          .recovery-bar-wrap { flex: 1; height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; overflow: hidden; }
+          .recovery-bar { height: 100%; background: var(--color-green); border-radius: 3px; }
+          .recovery-score { font-size: 12px; font-weight: 900; color: var(--color-green); }
+          .insight-sub { font-size: 9px; color: var(--text-muted); }
+          .metric-row { display: flex; justify-content: space-between; font-size: 9px; padding: 2px 0; }
+          .metric-lbl { color: var(--text-muted); }
+          .metric-val { font-weight: 700; }
+
+          /* Helpers */
+          .text-green { color: var(--color-green); }
+          .text-red { color: var(--color-red); }
+          .text-amber { color: var(--color-amber); }
+          .text-cyan { color: var(--color-cyan); }
+          .text-purple { color: var(--color-purple); }
+          .text-muted { color: var(--text-muted); }
+          .section-title { font-size: 9px; font-weight: 800; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.4px; }
+          .circuit-box { margin-top: 8px; padding: 6px 8px; background: rgba(0,0,0,0.2); border-radius: 4px; display: flex; justify-content: space-between; font-size: 9px; color: var(--text-muted); }
+          .clean-state-box { text-align: center; padding: 20px 8px; border: 1px dashed rgba(16, 185, 129, 0.25); border-radius: 8px; background: rgba(16, 185, 129, 0.04); }
+          .clean-state-title { font-weight: 700; font-size: 10px; color: var(--color-green); margin-top: 6px; }
+          .empty-state { text-align: center; color: var(--text-muted); padding: 20px; font-size: 10px; }
+        </style>
+      </head>
+      <body>
+        <!-- Header -->
+        <div class="header">
+          <div class="header-left">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <span class="brand-title">GravityGuard</span>
+            <span class="project-pill">${escapeHtml(projectName)}</span>
+          </div>
+          <div class="header-right">
+            <button class="mini-btn" onclick="toggleLanguage()" title="Switch Language">🌐 ${getCurrentLanguage().toUpperCase()}</button>
+            <button class="mini-btn" onclick="openConfig()" title="Open Configuration">⚙️</button>
+            <button class="mini-btn" onclick="clearLogs()" title="Clear Live Logs">🧹</button>
+          </div>
+        </div>
+
+        <!-- Current Action Banner -->
+        ${currentCardHtml}
+
+        <!-- Quick Summary Bar -->
+        <div class="stat-summary-bar">
+          <div class="stat-chip"><div class="chip-val text-red">${blockedCount}</div><div class="chip-lbl">${t('stats.blocked')}</div></div>
+          <div class="stat-chip"><div class="chip-val text-amber">${warningCount}</div><div class="chip-lbl">${t('stats.warning')}</div></div>
+          <div class="stat-chip"><div class="chip-val text-cyan">${totalObligations}</div><div class="chip-lbl">${totalObligations > 0 ? 'Pending' : 'Clean'}</div></div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs-bar">
+          <button class="tab-btn active" id="btn-live" onclick="setTab('live')">${t('tabs.live')}</button>
+          <button class="tab-btn" id="btn-obligations" onclick="setTab('obligations')">${t('tabs.obligations')}${totalObligations > 0 ? `<span class="badge-counter">${totalObligations}</span>` : ''}</button>
+          <button class="tab-btn" id="btn-rules" onclick="setTab('rules')">${t('tabs.rules')}</button>
+          <button class="tab-btn" id="btn-insights" onclick="setTab('insights')">${t('tabs.insights')}</button>
+        </div>
+
+        <!-- Panes -->
+        <div id="tab-live" class="tab-pane active">
+          ${liveHtml}
+        </div>
+        <div id="tab-obligations" class="tab-pane">
+          ${obligationsHtml}
+        </div>
+        <div id="tab-rules" class="tab-pane">
+          ${rulesHtml}
+        </div>
+        <div id="tab-insights" class="tab-pane">
+          ${insightsHtml}
+        </div>
+
+        <script>
+          const vscode = acquireVsCodeApi();
+          let currentTab = window._lastTab || 'live';
+
+          function setTab(name) {
+            currentTab = name;
+            window._lastTab = name;
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+            const btn = document.getElementById('btn-' + name);
+            const pane = document.getElementById('tab-' + name);
+            if (btn) btn.classList.add('active');
+            if (pane) pane.classList.add('active');
+          }
+
+          if (window._lastTab) { setTab(window._lastTab); }
+
+          function toggleDetail(id) {
+            const el = document.getElementById(id);
+            if (el) {
+              el.style.display = el.style.display === 'none' ? 'block' : 'none';
+            }
+          }
+
+          function clearLogs() { vscode.postMessage({ command: 'clearLogs' }); }
+          function refresh() { vscode.postMessage({ command: 'refresh' }); }
+          function toggleLanguage() { vscode.postMessage({ command: 'toggleLanguage' }); }
+          function openFile(path) { vscode.postMessage({ command: 'openFile', path }); }
+          function openConfig() { vscode.postMessage({ command: 'openConfig' }); }
+          function copyReason(text) { vscode.postMessage({ command: 'copyReason', text }); }
+        </script>
+      </body>
+      </html>
+    `;
   }
 }
 

@@ -4,12 +4,34 @@ export const resources = {
   tr: {
     translation: {
       appName: 'GravityGuard',
-      tagline: 'Mimari Emniyet Kemeri & Yönetişim',
-      statusOnline: 'AKTİF',
+      tagline: 'Canlı Ajan Güvenlik Konsolu',
+      statusOnline: 'KORUNUYOR',
       tabs: {
         events: '🛡️ Olaylar',
+        live: '⚡ Canlı',
         obligations: '📋 Yükümlülükler',
-        rules: '📐 Kurallar & Context'
+        rules: '📐 Kurallar',
+        insights: '📊 Analiz'
+      },
+      current: {
+        title: 'SON İŞLEM',
+        idle: 'Ajan bekleniyor (Sistem aktif ve dinliyor)',
+        allPassed: 'Tüm güvenlik muhafızları geçti',
+        openFile: 'Dosyayı Aç',
+        copyReason: 'Nedeni Kopyala',
+        whyBlocked: 'Neden engellendi?'
+      },
+      insights: {
+        title: 'Ajan Davranış & Kurtarma Analizi',
+        recoveryTitle: 'Ajan Kurtarma Oranı (Recovery Rate)',
+        recoveryDesc: 'Engellenen eylemlerin ajanca düzeltilme başarısı',
+        fixedNext: 'sonraki denemede düzeltildi',
+        latencyFast: 'Hızlı yol mantığı',
+        latencySpawn: 'Alt süreç (Subprocess)',
+        lockStatus: 'Durum Kilidi (StateLock)',
+        lockHealthy: 'Sağlıklı (Çekirdek Kilit)',
+        twoPhase: 'İki Fazlı Taahhüt (2PC)',
+        twoPhaseActive: 'Fiziksel Disk Doğrulama Aktif'
       },
       stats: {
         blocked: 'Engellendi',
@@ -21,7 +43,8 @@ export const resources = {
         refresh: 'Yenile',
         clear: 'Temizle',
         enhancePrompt: 'Prompt Geliştir',
-        toggleLang: 'EN'
+        toggleLang: 'EN',
+        openConfig: 'Ayarlar'
       },
       obligations: {
         title: 'Aktif Yönetişim & Yükümlülük Durumu',
@@ -56,12 +79,34 @@ export const resources = {
   en: {
     translation: {
       appName: 'GravityGuard',
-      tagline: 'Architecture Airbag & Gatekeeper',
-      statusOnline: 'ONLINE',
+      tagline: 'Live Agent Security Console',
+      statusOnline: 'PROTECTED',
       tabs: {
         events: '🛡️ Events',
+        live: '⚡ Live',
         obligations: '📋 Obligations',
-        rules: '📐 Rules & Context'
+        rules: '📐 Rules',
+        insights: '📊 Insights'
+      },
+      current: {
+        title: 'CURRENT ACTION',
+        idle: 'Watching agent filesystem actions...',
+        allPassed: 'All active guards passed',
+        openFile: 'Open File',
+        copyReason: 'Copy Reason',
+        whyBlocked: 'Why was this blocked?'
+      },
+      insights: {
+        title: 'Agent Behavior & Recovery Analysis',
+        recoveryTitle: 'Agent Recovery Rate',
+        recoveryDesc: 'Agent self-correction success after guard blocks',
+        fixedNext: 'fixed on next attempt',
+        latencyFast: 'In-memory fast path',
+        latencySpawn: 'Subprocess spawn',
+        lockStatus: 'State Lock',
+        lockHealthy: 'Healthy (Kernel-level lock)',
+        twoPhase: 'Two-Phase Commit (2PC)',
+        twoPhaseActive: 'Physical Disk Verification Active'
       },
       stats: {
         blocked: 'Blocked',
@@ -73,7 +118,8 @@ export const resources = {
         refresh: 'Refresh',
         clear: 'Clear',
         enhancePrompt: 'Enhance Prompt',
-        toggleLang: 'TR'
+        toggleLang: 'TR',
+        openConfig: 'Settings'
       },
       obligations: {
         title: 'Active Governance & Obligations State',

@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Canlı Ajan Güvenlik Konsolu ve Yenilenen Kenar Çubuğu (Live Agent Security Console & Webview Overhaul)**:
+  - Kenar çubuğu webview'ı statik bir gösterge panelinden anlık çalışan bir **Canlı Ajan Güvenlik Konsolu**'na dönüştürüldü.
+  - **Canlı Eylem Kartı (Current Action Card)**: Ajanın en son tetiklediği dosya eylemini (`write_file`, `create_file` vb.), hedef dosya yolunu ve GravityGuard'ın güvenlik kararını (`ALLOWED` / `BLOCKED`, aktif kurallar G0-G4) tepe kartında anlık gösterir.
+  - **Hızlı Sayaçlar (Quick Counters Bar)**: `X Blocked`, `Y Warnings`, `Z Pending` durum sayaçları doğrudan başlık altına yerleştirildi.
+  - **Dört Özel Sekme**:
+    - **Canlı Akış (Live)**: Ajanın araç çağrılarını kompakt satırlar halinde sunar; tıklandığında genişleyen neden çekmecesi, `[Dosyayı Aç]` ve `[Nedeni Kopyala]` butonları sunar.
+    - **Yükümlülükler (Obligations)**: Açık dokümantasyon ve test yükümlülüklerini 4 adımlı görsel durum makinesi (`BEKLİYOR → NİYET KAYDEDİLDİ → DOĞRULANDI → ÇÖZÜLDÜ`) ile adım adım takip eder.
+    - **Kurallar (Rules)**: Güvenlik (G0, G1, G2), Mimari (G3, G4, SRP, Growth) ve Kalite (T1, T2, T3) kategorilerine ayrılarak durum, şiddet ve açıklamaları gösterir; tek tıkla `.gravityguard.json` dosyasını açma imkanı sunar.
+    - **Ajan İçgörüleri (Insights - Telemetry)**: Ajanın engelleme sonrası kendini düzeltme başarısını ölçen **Ajan İyileşme Oranı (Agent Recovery Rate %)**, motor gecikmesi ve oturum bütünlüğü (State Lock, 2PC, Circuit breaker) metrikleri sunar.
+  - **Çift Yönlü Webview Mesajlaşması**: Webview içerisinden Antigravity IDE editöründe dosya açma (`openFile`), yapılandırma dosyasını açma (`openConfig`) ve engelleme nedenini panoya kopyalama (`copyReason`) komutları eklendi.
+  - **Sıfır Bağımlılıklı Çeviri Motoru (Zero-Dependency i18n)**: Yeni konsol elemanları, sekmeler ve durum adımları hem Türkçe (`tr`) hem İngilizce (`en`) dillerine tam olarak yerelleştirildi.
 - **Çoklu Süreç Durum Dosyası Kilitlemesi ve İşlem Güvenliği (State File Locking & Atomic RMW Transactions)**:
   - `engine/gravityguard_engine/state_lock.py` modülü eklendi: Windows (`msvcrt.locking`) ve POSIX (`fcntl.flock`) çekirdek kilitlerini soyutlayan, işlem çökmesi durumunda işletim sistemi tarafından kilit askıda kalmadan (stale lock hang) derhal serbest bırakılan platformlar arası `StateLock` sınıfı uygulandı.
   - `governance_transaction()` bağlam yöneticisi (context manager): `governance.json` üzerindeki `load -> mutate -> save` döngüsünü baştan sona tek parça (atomic read-modify-write) özel dosya kilidi altına alarak bağımsız iki hook sürecinin aynı anda durum güncellemesi durumunda oluşabilecek kayıp güncelleme (lost-update) riski tamamen ortadan kaldırıldı.
