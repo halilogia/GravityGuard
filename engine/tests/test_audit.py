@@ -180,6 +180,66 @@ class TestAuditSubsystem(unittest.TestCase):
         self.assertEqual(ev_a["outcome"], "RECOVERED")
         self.assertEqual(ev_a["parentViolationId"], id_a)
 
+    def test_multi_rule_recovery_all_resolved(self):
+        target = "src/multi_rule.py"
+        conv = "conv-multi-rec"
+
+        # 1. First block is G1
+        id_g1 = log_event("write", "BLOCKED", target, "violation G1", rule_id="G1_SILENT_EXCEPTION", conversation_id=conv)
+        # 2. Second block on same file is G2
+        id_g2 = log_event("write", "BLOCKED", target, "violation G2", rule_id="G2_TEST_INTEGRITY", conversation_id=conv)
+
+        # 3. Approved clean edit fixes both
+        id_app = log_event("write", "APPROVED", target, "fixed both G1 and G2", rule_id="PASS", conversation_id=conv)
+
+        live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
+        with open(live_path, "r", encoding="utf-8") as f:
+            live = json.load(f)
+
+        # Verify active violations are completely cleared
+        self.assertEqual(len(live.get("activeViolations", {})), 0)
+
+        # Verify effectiveness stats accurately credit both rules
+        eff = live["effectiveness"]
+        self.assertEqual(eff["totalBlocked"], 2)
+        self.assertEqual(eff["totalRecovered"], 2)
+        self.assertEqual(eff["recoveryRate"], 100.0)
+
+        rule_stats = eff["ruleStats"]
+        self.assertIn("G1_SILENT_EXCEPTION", rule_stats)
+        self.assertIn("G2_TEST_INTEGRITY", rule_stats)
+        self.assertEqual(rule_stats["G1_SILENT_EXCEPTION"]["recovered"], 1)
+        self.assertEqual(rule_stats["G2_TEST_INTEGRITY"]["recovered"], 1)
+
+        # Verify permanent log contains RECOVERED entries for both rules
+        perm_path = os.path.join(self.test_dir, "gravityguard_permanent_audit.jsonl")
+        perm_events = []
+        with open(perm_path, "r", encoding="utf-8") as pf:
+            for line in pf:
+                perm_events.append(json.loads(line))
+
+        recovered_rules = [e.get("resolvedRuleId") for e in perm_events if e.get("outcome") == "RECOVERED"]
+        self.assertIn("G1_SILENT_EXCEPTION", recovered_rules)
+        self.assertIn("G2_TEST_INTEGRITY", recovered_rules)
+
+    def test_audit_lock_timeout_fails_closed(self):
+        from unittest.mock import patch
+        from gravityguard_engine.state_lock import StateLock
+        target = "src/timeout.py"
+
+        # Mock StateLock.acquire to return False (simulating lock contention timeout)
+        with patch.object(StateLock, "acquire", return_value=False):
+            eid = log_event("write", "BLOCKED", target, "lock timeout test", rule_id="G1_SILENT_EXCEPTION")
+            self.assertTrue(eid.startswith("evt_"))
+
+        # Live file should either not exist or not have recorded this event without a lock
+        live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
+        if os.path.exists(live_path):
+            with open(live_path, "r", encoding="utf-8") as f:
+                live = json.load(f)
+            event_ids = [e["eventId"] for e in live.get("events", [])]
+            self.assertNotIn(eid, event_ids)
+
 
 if __name__ == "__main__":
     unittest.main()

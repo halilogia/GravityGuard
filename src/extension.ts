@@ -811,7 +811,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
     let recoverySubtext = '';
     if (totalBlockedCount === 0) {
       recoverySubtext = 'Henüz engellenen işlem yok (Temiz Oturum)';
-    } else if (totalBlockedCount < 3) {
+    } else if (totalBlockedCount < 10) {
       recoverySubtext = `${totalRecoveredCount} / ${totalBlockedCount} düzeltildi (Yetersiz Örneklem, n=${totalBlockedCount})`;
     } else {
       recoverySubtext = `${totalRecoveredCount} / ${totalBlockedCount} ihlal ajan tarafından düzeltildi (%${finalRecRate})`;
@@ -829,7 +829,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
         };
       }
       const n = stat.blocked;
-      if (n < 3) {
+      if (n < 10) {
         return {
           label: defaultName,
           val: `Yetersiz Veri (n=${n})`,
@@ -839,9 +839,10 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       const rate = typeof stat.recoveryRate === 'number' ? stat.recoveryRate : 0;
       const med = stat.medianAttempts || 1;
       const valClass = rate >= 80 ? 'text-green' : rate >= 50 ? 'text-cyan' : 'text-amber';
+      const prefix = n < 30 ? 'Ön Sinyal: ' : '';
       return {
         label: defaultName,
-        val: `%${rate} Düzeltme (n=${n}, medyan ${med})`,
+        val: `${prefix}%${rate} Düzeltme (n=${n}, medyan ${med})`,
         valClass
       };
     }

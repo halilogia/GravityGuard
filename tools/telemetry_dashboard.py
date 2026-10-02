@@ -111,17 +111,19 @@ def render_effectiveness_analytics(events):
         for rule, b_cnt in rule_blocked.most_common():
             r_cnt = rule_recovered.get(rule, 0)
             rate = (r_cnt / b_cnt * 100) if b_cnt > 0 else 0.0
-            if b_cnt < 3:
+            if b_cnt < 10:
                 classification = f"⚪ YETERSİZ VERİ (n={b_cnt})"
+            elif b_cnt < 30:
+                classification = f"🟡 ÖN SİNYAL (n={b_cnt})"
             elif rate >= 85.0:
-                classification = "🏆 YÜKSEK DEĞER" if b_cnt >= 10 else f"🟡 ÖN SİNYAL (n={b_cnt})"
+                classification = f"🏆 YÜKSEK DEĞER (n={b_cnt})"
             elif rate < 50.0:
                 classification = f"⚡ SÜRTÜNME (n={b_cnt})"
             else:
                 classification = f"🟢 DENGELİ (n={b_cnt})"
             print(f"  {rule:<24} | {b_cnt:>9} | {r_cnt:>8} | %{rate:>4.1f} | {classification}")
 
-    # Advisory & Causal Noise Index
+    # Advisory Follow-up Rate (Temporal Action Proxy)
     approved_events = [e for e in events if e.get("status") == "APPROVED"]
     if warning_events:
         warn_rules = Counter(e.get("ruleId", "UNKNOWN") for e in warning_events)
@@ -133,9 +135,13 @@ def render_effectiveness_analytics(events):
             if tgt:
                 approved_map[(cid, tgt)].append(ts)
 
-        print("\n  ⚠️  TAVSİYE KURALLARI VE NEDENSEL GÜRÜLTÜ ANALİZİ (Advisory Action & Noise Index):")
+        print("\n  ⚠️  TAVSİYE KURALLARI VE DÜZENLEME TAKİP ORANI (Advisory Follow-up Rate):")
         print("  " + "-" * 82)
-        print(f"  {'Kural':<24} | {'Uyarı':<6} | {'Takip Eden Onay':<15} | {'Eylem Oranı':<11} | {'Durum':<18}")
+        print("  Not: Bu metrik doğrudan nedensellik kanıtı değil, zamansal bir vekildir")
+        print("       (temporal action proxy); uyarının ardından aynı oturumda dosyaya onaylı")
+        print("       bir düzenleme gelip gelmediğini ölçer.")
+        print("  " + "-" * 82)
+        print(f"  {'Kural':<24} | {'Uyarı':<6} | {'Takip Eden Onay':<15} | {'Takip Oranı':<11} | {'Durum':<18}")
         print("  " + "-" * 82)
         for w_rule, w_cnt in warn_rules.most_common():
             rule_warns = [w for w in warning_events if w.get("ruleId") == w_rule]
@@ -148,12 +154,12 @@ def render_effectiveness_analytics(events):
                 if subsequent:
                     heeded += 1
             action_rate = (heeded / w_cnt * 100) if w_cnt > 0 else 0.0
-            if w_cnt < 3:
+            if w_cnt < 10:
                 status_desc = f"⚪ Yetersiz Veri (n={w_cnt})"
             elif action_rate < 25.0:
-                status_desc = "⚠️ Gürültü Riski"
+                status_desc = "⚠️ Düşük Takip"
             elif action_rate >= 75.0:
-                status_desc = "✅ Yüksek Uyum"
+                status_desc = "✅ Yüksek Takip"
             else:
                 status_desc = "🟢 Dengeli"
             print(f"  {w_rule:<24} | {w_cnt:>6} | {heeded:>15} | %{action_rate:>9.1f} | {status_desc}")

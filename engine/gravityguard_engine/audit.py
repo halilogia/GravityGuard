@@ -100,10 +100,13 @@ def log_event(
         lock = StateLock(audit_lock_path, timeout=2.0)
         lock_acquired = False
         try:
-            lock.acquire()
-            lock_acquired = True
+            lock_acquired = lock.acquire()
         except Exception as lock_err:
             sys.stderr.write(f"[GravityGuard Audit Lock Warning] {lock_err}\n")
+
+        if not lock_acquired:
+            sys.stderr.write(f"[GravityGuard Audit Lock Timeout] Could not acquire audit lock for {log_path}\n")
+            return event_id
 
         try:
             if os.path.exists(log_path):
@@ -131,6 +134,26 @@ def log_event(
                 active_violations = {}
                 current_data["activeViolations"] = active_violations
 
+            eff = current_data.setdefault("effectiveness", {})
+            if not isinstance(eff, dict):
+                eff = {
+                    "totalBlocked": 0,
+                    "totalRecovered": 0,
+                    "recoveryRate": 100.0,
+                    "ruleStats": {}
+                }
+                current_data["effectiveness"] = eff
+
+            eff.setdefault("totalBlocked", 0)
+            eff.setdefault("totalRecovered", 0)
+            eff.setdefault("recoveryRate", 100.0)
+            rule_stats = eff.setdefault("ruleStats", {})
+            if not isinstance(rule_stats, dict):
+                rule_stats = {}
+                eff["ruleStats"] = rule_stats
+
+            extra_recovery_events: List[Dict[str, Any]] = []
+
             if outcome is None:
                 if status == "BLOCKED":
                     if tracking_key and tracking_key in active_violations:
@@ -145,6 +168,10 @@ def log_event(
                         outcome = "BLOCKED"
                         parent_violation_id = None
                         recovery_attempts = 1
+                        eff["totalBlocked"] = eff.get("totalBlocked", 0) + 1
+                        b_rule = rule_id or "UNKNOWN"
+                        st = rule_stats.setdefault(b_rule, {"blocked": 0, "recovered": 0, "recoveryRate": 0.0, "attempts": []})
+                        st["blocked"] = st.get("blocked", 0) + 1
                         if tracking_key:
                             active_violations[tracking_key] = {
                                 "eventId": event_id,
@@ -157,19 +184,64 @@ def log_event(
                 elif status == "APPROVED":
                     matching_keys = [k for k in list(active_violations.keys()) if k.startswith(target_prefix)] if norm_target else []
                     if matching_keys:
-                        prev = active_violations.pop(matching_keys[0])
-                        outcome = "RECOVERED"
-                        parent_violation_id = prev.get("eventId")
-                        resolved_rule_id = prev.get("ruleId")
-                        recovery_attempts = prev.get("attempts", 1)
-                        try:
-                            first_dt = datetime.fromisoformat(prev.get("firstTimestamp", now_iso))
-                            resolution_ms = round((now_dt - first_dt).total_seconds() * 1000, 1)
-                        except Exception as dt_err:
-                            resolution_ms = None
-                        # Remove any other open violations for this target
-                        for other_k in matching_keys[1:]:
-                            active_violations.pop(other_k, None)
+                        resolved_items = []
+                        for m_key in matching_keys:
+                            p_info = active_violations.pop(m_key, None)
+                            if p_info:
+                                resolved_items.append(p_info)
+
+                        if resolved_items:
+                            primary = resolved_items[0]
+                            outcome = "RECOVERED"
+                            parent_violation_id = primary.get("eventId")
+                            resolved_rule_id = primary.get("ruleId")
+                            recovery_attempts = primary.get("attempts", 1)
+                            try:
+                                first_dt = datetime.fromisoformat(primary.get("firstTimestamp", now_iso))
+                                resolution_ms = round((now_dt - first_dt).total_seconds() * 1000, 1)
+                            except Exception:
+                                resolution_ms = None
+
+                            eff["totalRecovered"] = eff.get("totalRecovered", 0) + 1
+                            p_rule = resolved_rule_id or "UNKNOWN"
+                            p_st = rule_stats.setdefault(p_rule, {"blocked": 0, "recovered": 0, "recoveryRate": 0.0, "attempts": []})
+                            p_st["recovered"] = p_st.get("recovered", 0) + 1
+                            if recovery_attempts is not None:
+                                p_st.setdefault("attempts", []).append(recovery_attempts)
+
+                            # Create linked recovery events and update ruleStats for each additional resolved rule
+                            for additional in resolved_items[1:]:
+                                add_r_id = additional.get("ruleId")
+                                add_e_id = _generate_event_id()
+                                add_attempts = additional.get("attempts", 1)
+                                try:
+                                    add_first_dt = datetime.fromisoformat(additional.get("firstTimestamp", now_iso))
+                                    add_res_ms = round((now_dt - add_first_dt).total_seconds() * 1000, 1)
+                                except Exception:
+                                    add_res_ms = None
+
+                                add_ev = {
+                                    "eventId": add_e_id,
+                                    "timestamp": now_str,
+                                    "action": action,
+                                    "status": "APPROVED",
+                                    "ruleId": rule_id,
+                                    "resolvedRuleId": add_r_id,
+                                    "target": target_file,
+                                    "reason": f"Multi-rule resolution: {add_r_id} cleared by approved edit",
+                                    "outcome": "RECOVERED",
+                                    "parentViolationId": additional.get("eventId"),
+                                    "recoveryAttempts": add_attempts,
+                                    "resolutionMs": add_res_ms
+                                }
+                                extra_recovery_events.append(add_ev)
+
+                                eff["totalRecovered"] = eff.get("totalRecovered", 0) + 1
+                                add_rule = add_r_id or "UNKNOWN"
+                                add_st = rule_stats.setdefault(add_rule, {"blocked": 0, "recovered": 0, "recoveryRate": 0.0, "attempts": []})
+                                add_st["recovered"] = add_st.get("recovered", 0) + 1
+                                if add_attempts is not None:
+                                    add_st.setdefault("attempts", []).append(add_attempts)
                     else:
                         outcome = "CLEAN"
                 elif status == "SHADOW_TRIGGER":
@@ -201,44 +273,25 @@ def log_event(
             if not isinstance(events, list):
                 events = []
             events.insert(0, event)
-            current_data["events"] = events[:50]  # keep last 50
+            for add_ev in extra_recovery_events:
+                events.insert(1, add_ev)
+            current_data["events"] = events[:50]  # keep last 50 for UI feed
             current_data["lastCheck"] = now_str
 
-            # Update live effectiveness summary & rule statistics
-            all_ev = current_data.get("events", [])
-            blocked_ev = [e for e in all_ev if e.get("status") == "BLOCKED" and e.get("outcome") != "REPEATED_VIOLATION"]
-            recovered_ev = [e for e in all_ev if e.get("outcome") == "RECOVERED"]
-            b_count = len(blocked_ev)
-            r_count = len(recovered_ev)
-            rec_rate = round((r_count / b_count * 100), 1) if b_count > 0 else 100.0
-
-            rule_stats: Dict[str, Dict[str, Any]] = {}
-            for b in blocked_ev:
-                r_id = b.get("ruleId", "UNKNOWN")
-                st = rule_stats.setdefault(r_id, {"blocked": 0, "recovered": 0, "recoveryRate": 0.0, "attempts": []})
-                st["blocked"] += 1
-            for r in recovered_ev:
-                res_id = r.get("resolvedRuleId") or r.get("ruleId", "UNKNOWN")
-                if res_id not in ("PASS", "CLEAN"):
-                    st = rule_stats.setdefault(res_id, {"blocked": 0, "recovered": 0, "recoveryRate": 0.0, "attempts": []})
-                    st["recovered"] += 1
-                    att = r.get("recoveryAttempts")
-                    if isinstance(att, (int, float)):
-                        st["attempts"].append(att)
+            # Recompute cumulative effectiveness and rule rates
+            tot_b = eff.get("totalBlocked", 0)
+            tot_r = eff.get("totalRecovered", 0)
+            eff["recoveryRate"] = min(100.0, round((tot_r / tot_b * 100), 1)) if tot_b > 0 else 100.0
 
             for r_id, st in rule_stats.items():
-                st["recoveryRate"] = round((st["recovered"] / st["blocked"] * 100), 1) if st["blocked"] > 0 else 0.0
-                if st["attempts"]:
-                    st["medianAttempts"] = sorted(st["attempts"])[len(st["attempts"]) // 2]
+                b_cnt = st.get("blocked", 0)
+                r_cnt = st.get("recovered", 0)
+                st["recoveryRate"] = min(100.0, round((r_cnt / b_cnt * 100), 1)) if b_cnt > 0 else 100.0
+                atts = st.get("attempts", [])
+                if atts:
+                    st["medianAttempts"] = sorted(atts)[len(atts) // 2]
                 else:
                     st["medianAttempts"] = 1.0
-
-            current_data["effectiveness"] = {
-                "totalBlocked": b_count,
-                "totalRecovered": r_count,
-                "recoveryRate": rec_rate,
-                "ruleStats": rule_stats
-            }
 
             with open(log_path, "w", encoding="utf-8") as f:
                 json.dump(current_data, f, indent=2, ensure_ascii=False)
@@ -270,6 +323,27 @@ def log_event(
 
             with open(permanent_log_path, "a", encoding="utf-8") as af:
                 af.write(json.dumps(telemetry_event, ensure_ascii=False) + "\n")
+                for add_ev in extra_recovery_events:
+                    add_telemetry = {
+                        "eventId": add_ev["eventId"],
+                        "timestamp": now_iso,
+                        "action": action,
+                        "status": "APPROVED",
+                        "ruleId": rule_id,
+                        "resolvedRuleId": add_ev["resolvedRuleId"],
+                        "target": target_file,
+                        "project": proj_name,
+                        "projectRoot": proj_root,
+                        "fileExt": ext,
+                        "conversationId": conv_id,
+                        "model": model_id,
+                        "reason": add_ev["reason"],
+                        "outcome": "RECOVERED",
+                        "parentViolationId": add_ev["parentViolationId"],
+                        "recoveryAttempts": add_ev["recoveryAttempts"],
+                        "resolutionMs": add_ev["resolutionMs"]
+                    }
+                    af.write(json.dumps(add_telemetry, ensure_ascii=False) + "\n")
         finally:
             if lock_acquired:
                 try:
