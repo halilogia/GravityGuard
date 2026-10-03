@@ -6,6 +6,7 @@ import * as http from 'http';
 import { buildOfflinePrompt, buildSystemPrompt, classifyIntent, modeLabel, shouldAskForMode, IntentClassification, IntentMode } from './intent';
 import { initI18n, t, setLanguage, getCurrentLanguage } from './i18n';
 import { lucide } from './icons';
+import { filterEventsAfterSeq, resolveClearedAfterSeq } from './view_filter';
 
 interface LogEvent {
   status?: string;
@@ -379,7 +380,7 @@ function escapeJs(str: string): string {
 class GuardianViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
   private _pollInterval?: NodeJS.Timeout;
-  private _clearedTimestamp: string | null = null;
+  private _clearedAfterSeq: number | null = null;
 
   constructor(private readonly _extensionUri: vscode.Uri) {}
 
@@ -461,7 +462,17 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
   }
 
   public clearView(): void {
-    this._clearedTimestamp = new Date().toISOString();
+    const logPath = path.join(os.homedir(), '.gemini', 'logs', 'srp_guardian_live.json');
+    try {
+      if (fs.existsSync(logPath)) {
+        const data = JSON.parse(fs.readFileSync(logPath, 'utf8'));
+        this._clearedAfterSeq = resolveClearedAfterSeq(data);
+      } else {
+        this._clearedAfterSeq = 0;
+      }
+    } catch {
+      this._clearedAfterSeq = 0;
+    }
     this.updateHtml();
     vscode.window.showInformationMessage(t('actions.clearedNotice'));
   }
@@ -532,10 +543,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
     }
 
     const totalObligations = Object.keys(pendingTests).length + Object.keys(pendingDocs).length;
-    let eventsList = data.events || [];
-    if (this._clearedTimestamp) {
-      eventsList = eventsList.filter((e: any) => e.timestamp && e.timestamp > this._clearedTimestamp!);
-    }
+    let eventsList = filterEventsAfterSeq(data.events || [], this._clearedAfterSeq);
     const blockedCount = eventsList.filter(e => e.status === 'BLOCKED').length;
     const warningCount = eventsList.filter(e => e.status === 'WARNING').length;
     const approvedCount = eventsList.filter(e => e.status === 'APPROVED').length;

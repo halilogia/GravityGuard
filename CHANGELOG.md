@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Canlı Akış Sıfırlama İmleci ve Sıra Numarası Tabanlı Filtreleme (Monotonic Sequence-Based View Filtering & i18n Truthfulness)**:
+  - `src/view_filter.ts`: ASCII karakter sıralaması (`' ' < 'T'`) sebebiyle aynı gün içindeki yeni olayları gizleyen kırılgan string timestamp karşılaştırması tamamen kaldırıldı. Yerine GravityGuard'ın değişmez (invariant) `auditSeq` sıra numarasını temel alan deterministik `filterEventsAfterSeq` ve filigran çıkarıcı `resolveClearedAfterSeq` yardımcıları geliştirildi.
+  - `src/extension.ts`: `GuardianViewProvider` içindeki `_clearedTimestamp` alanı `_clearedAfterSeq` ile değiştirildi. "Görünümü Temizle" tıklandığında diskteki son `lastAuditSeq` değeri yakalanarak sonraki olayların anında ve kesintisiz akması sağlandı; saat kayması ve format uyuşmazlıkları bertaraf edildi.
+  - `src/i18n/index.ts`: Kilit mekanizması gösteriminde doğruluğu artırmak için aktif bir liveness kontrolü yapılıyormuş izlenimi veren `Sağlıklı (Çekirdek Kilit)` / `Healthy (Kernel-level lock)` ifadesi, mekanizmanın varlığını doğru niteleyen `Çekirdek düzeyi kilit etkin` / `Kernel-level lock enabled` olarak güncellendi.
+  - `tests/view_filter.test.mjs`: `filterEventsAfterSeq` ve `resolveClearedAfterSeq` için 8 kapsamlı birim testi eklendi; TypeScript test sayısı 29'dan **37'ye**, toplam test sayısı ise **238'e** (201 Python + 37 TypeScript) yükseltildi (%100 yeşil).
+
 ### Added
 - **Causal State Koruma, Güvenli Clear View ve Başlatılmamış Projeksiyon Onarımı (Safe Clear View & Uninitialized Projection Healing)**:
   - `src/extension.ts`: `clearLogs()`'un diskteki `srp_guardian_live.json` dosyasını sıfırlayarak `activeViolations` ve causal analitiği silme riski tamamen ortadan kaldırıldı; yerine diske dokunmadan yalnızca arayüzdeki akışı filtreleyen güvenli `clearView()` motoru eklendi (`_clearedTimestamp`). Spekülatif `desyncAlertHtml` kaldırıldı; Tanılama özeti `WAL & Kilit Aktif` rozetine dönüştürüldü.
