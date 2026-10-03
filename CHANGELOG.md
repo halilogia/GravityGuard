@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Lucide-Style Premium SVG İkon Sistemi ve %100 i18next Dinamik Yerelleştirme (Premium Lucide SVG Icons & Full i18n Localization)**:
+  - `src/icons.ts`: Tüm standart emojiler yasaklanarak Lucide spesifikasyonuna (24x24 viewBox, stroke-width 2, rounded stroke) uygun 30 adet vektörel SVG ikonu (`shield`, `zap`, `lock`, `layers`, `flaskConical`, `checkCircle`, `octagonX`, `alertTriangle`, `eye`, `rotateCw`, `folder`, `fileText`, `copy`, `clipboardList`, `sliders`, `barChart`, `settings`, `trash2`, `globe`, `cpu`, `database`, `trophy`, `target`, `clock`, `sparkles`, `circleDot`, `arrowRight`) içeren sıfır bağımlılıklı tip-güvenli ikon motoru geliştirildi.
+  - `src/i18n/index.ts`: Statik metin kullanımı tamamen kaldırılarak; hem Türkçe (`tr`) hem İngilizce (`en`) sözlükleri %100 simetrik hale getirildi. Parametre interpolasyon desteği (`{{var}}` ve `{var}`) eklenerek bildirimler, mod seçimleri, durum kartları, ampirik metrikler ve hata mesajları dinamik yerelleştirildi.
+  - `src/extension.ts`: Header, hızlı sayaçlar, sekmeler, canlı eylem kartı, çekmece detayları, yükümlülük durum makinesi, kural kartları, içgörüler ve durum çubuğu butonları Lucide SVG ikonları ve `t()` yerelleştirme fonksiyonlarıyla donatıldı.
+  - `tests/icons.test.mjs`: Lucide ikon motoru için 4 yeni birim testi eklendi; `tests/i18n.test.mjs` interpolasyon ve simetri testleriyle zenginleştirildi. Toplam test sayısı **229'a** (200 Python + 29 TypeScript) yükseltildi (%100 yeşil).
 - **WAL Journal Kuyruk Satır Sonu Koruma ve Arayüz Zenginleştirmesi (Journal Tail Newline Restoration & UI Polish)**:
   - `engine/gravityguard_engine/audit.py`: Süreç kesintisi durumunda geçerli ve eksiksiz bir JSON nesnesi diske yazılmış ancak satır sonu ayracı (`\n`) henüz tamamlanmamışsa, `_repair_journal_tail()` artık olayı silmek yerine eksik `\n` ayırıcısını ekleyerek olayı sıfır kayıpla korur (`test_valid_journal_tail_without_newline_is_preserved`).
   - `src/extension.ts`: Canlı Akış çekmecesinde `SHADOW` ve `RECOVERED` (çözülen kural, deneme sayısı, süre) rozetleri; İçgörüler sekmesinde her kural için ampirik metrik kartları ($n$, düzeltme oranı %, medyan deneme, 3-kademeli eşik rozetleri) ve Canlı Telemetri & WAL Durumu kartı eklendi.

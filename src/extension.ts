@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as http from 'http';
 import { buildOfflinePrompt, buildSystemPrompt, classifyIntent, modeLabel, shouldAskForMode, IntentClassification, IntentMode } from './intent';
 import { initI18n, t, setLanguage, getCurrentLanguage } from './i18n';
+import { lucide } from './icons';
 
 interface LogEvent {
   status?: string;
@@ -75,8 +76,8 @@ export function activate(context: vscode.ExtensionContext): void {
     100
   );
   promptStatusBarItem.command = 'antigravityBridge.enhancePrompt';
-  promptStatusBarItem.text = '$(sparkle) Prompt Geliştir';
-  promptStatusBarItem.tooltip = 'GravityGuard: Yerel AI ağ geçidi ile Promptu Geliştir (Ctrl+Alt+E)';
+  promptStatusBarItem.text = `$(sparkle) ${t('actions.enhancePrompt')}`;
+  promptStatusBarItem.tooltip = t('actions.statusBarTooltip');
   promptStatusBarItem.show();
   context.subscriptions.push(promptStatusBarItem);
 
@@ -85,11 +86,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('antigravityBridge.ping', async () => {
       const health = await probeRouter();
       if (health.ok) {
-        vscode.window.showInformationMessage(`🚀 GravityGuard is Live — yerel AI geçidi: ${health.detail}`);
+        vscode.window.showInformationMessage(t('actions.pingLive', { detail: health.detail }));
       } else {
-        vscode.window.showWarningMessage(
-          `GravityGuard aktif, ancak yerel AI geçidine ulaşılamıyor: ${health.detail}. Prompt Geliştir yine de çalışır (çevrimdışı şablon modu).`
-        );
+        vscode.window.showWarningMessage(t('actions.pingWarning', { detail: health.detail }));
       }
     }),
     vscode.commands.registerCommand('antigravityBridge.refreshLogs', () => {
@@ -101,8 +100,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('antigravityBridge.toggleLanguage', () => {
       const next = getCurrentLanguage() === 'tr' ? 'en' : 'tr';
       setLanguage(next);
+      promptStatusBarItem.text = `$(sparkle) ${t('actions.enhancePrompt')}`;
+      promptStatusBarItem.tooltip = t('actions.statusBarTooltip');
       provider.updateHtml();
-      vscode.window.showInformationMessage(`GravityGuard dili: ${next.toUpperCase()}`);
+      vscode.window.showInformationMessage(t('actions.langSwitched', { lang: next.toUpperCase() }));
     }),
     vscode.commands.registerCommand('antigravityBridge.enhancePrompt', async () => {
       await handleEnhancePrompt();
@@ -119,8 +120,8 @@ async function handleEnhancePrompt(): Promise<void> {
   }
 
   const inputPrompt = await vscode.window.showInputBox({
-    prompt: 'Geliştirmek istediğiniz prompt veya talimatı girin (GravityGuard AI):',
-    placeHolder: 'Örn: SRP kuralına uygun websocket bağlantı yöneticisi oluştur...  |  Mod sabitlemek için: "#denetle: ..."',
+    prompt: t('actions.promptInputTitle'),
+    placeHolder: t('actions.promptInputPlaceholder'),
     value: initialText,
     ignoreFocusOut: true
   });
@@ -137,7 +138,7 @@ async function handleEnhancePrompt(): Promise<void> {
     await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
-        title: `GravityGuard: ${modeLabel(mode)} modunda prompt hazırlanıyor...`,
+        title: t('actions.promptPreparing', { mode: modeLabel(mode) }),
         cancellable: false
       },
       async () => {
@@ -146,7 +147,7 @@ async function handleEnhancePrompt(): Promise<void> {
     );
 
     if (!result || !result.text) {
-      vscode.window.showErrorMessage('Prompt geliştirilemedi.');
+      vscode.window.showErrorMessage(t('actions.promptFailed'));
       return;
     }
 
@@ -163,13 +164,13 @@ async function handleEnhancePrompt(): Promise<void> {
     }
 
     // 3. Inform user with action button
-    const originNote = result.offline ? ' — çevrimdışı şablon modu' : '';
+    const originNote = result.offline ? t('actions.promptOfflineNote') : '';
     const action = await vscode.window.showInformationMessage(
-      `✨ Prompt geliştirildi ve panoya kopyalandı (${modeLabel(result.mode)}${originNote})`,
-      'Yeni Belgede Aç'
+      t('actions.promptSuccess', { mode: modeLabel(result.mode), note: originNote }),
+      t('actions.openInNewDoc')
     );
 
-    if (action === 'Yeni Belgede Aç') {
+    if (action === t('actions.openInNewDoc')) {
       const doc = await vscode.workspace.openTextDocument({
         content: enhancedResult,
         language: 'markdown'
@@ -179,7 +180,7 @@ async function handleEnhancePrompt(): Promise<void> {
   } catch (error: any) {
     console.error('[Prompt Enhancer Error]:', error);
     vscode.window.showErrorMessage(
-      `Prompt geliştirme hatası: ${error?.message || error}`
+      t('actions.promptError', { error: error?.message || error })
     );
   }
 }
@@ -193,21 +194,21 @@ async function resolveMode(classification: IntentClassification): Promise<Intent
   const pick = await vscode.window.showQuickPick(
     [
       {
-        label: `$(sparkle) Otomatik — ${modeLabel(classification.mode)}`,
-        description: 'Sınıflandırıcının tahmini (düşük güven)',
+        label: t('actions.modeAuto', { mode: modeLabel(classification.mode) }),
+        description: t('actions.modeAutoDesc'),
         mode: classification.mode
       },
       ...MODES.filter(mode => mode !== classification.mode).map(mode => ({
         label: modeLabel(mode),
         description: mode === 'consult'
-          ? 'Fikir, seçenek ve trade-off iste'
+          ? t('actions.modeConsultDesc')
           : mode === 'implement'
-            ? 'Savunmacı teknik şartname üret'
-            : 'Kod değiştirmeden, kanıtlı bulgu listesi üret',
+            ? t('actions.modeImplementDesc')
+            : t('actions.modeAuditDesc'),
         mode
       }))
     ],
-    { placeHolder: 'Niyet belirsiz — modu seçin (varsayılan: Otomatik)' }
+    { placeHolder: t('actions.modePlaceholder') }
   );
 
   return pick ? pick.mode : classification.mode;
@@ -402,7 +403,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
           const doc = await vscode.workspace.openTextDocument(message.path);
           await vscode.window.showTextDocument(doc);
         } catch (e: any) {
-          vscode.window.showErrorMessage(`Dosya açılamadı: ${message.path}`);
+          vscode.window.showErrorMessage(t('actions.fileOpenError', { path: message.path }));
         }
       } else if (message.command === 'openConfig') {
         const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -426,12 +427,12 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
             const doc = await vscode.workspace.openTextDocument(cfgFile);
             await vscode.window.showTextDocument(doc);
           } catch (e: any) {
-            vscode.window.showErrorMessage(`Yapılandırma dosyası açılamadı: ${e.message}`);
+            vscode.window.showErrorMessage(t('actions.configOpenError', { error: e.message }));
           }
         }
       } else if (message.command === 'copyReason' && message.text) {
         await vscode.env.clipboard.writeText(message.text);
-        vscode.window.showInformationMessage('Kural engelleme nedeni panoya kopyalandı.');
+        vscode.window.showInformationMessage(t('actions.reasonCopied'));
       }
     });
 
@@ -469,7 +470,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
     try {
       fs.writeFileSync(logPath, JSON.stringify(emptyState, null, 2), 'utf8');
       this.updateHtml();
-      vscode.window.showInformationMessage('🧹 GravityGuard günlükleri temizlendi!');
+      vscode.window.showInformationMessage(t('actions.clearedNotice'));
     } catch (e) {
       console.error('Clear log error:', e);
     }
@@ -570,10 +571,19 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       const isWrn = latestEvent.status === 'WARNING';
       const colorCls = isBlk ? 'border-blocked' : isWrn ? 'border-warning' : 'border-allowed';
       const badgeCls = isBlk ? 'badge-blocked' : isWrn ? 'badge-warning' : 'badge-allowed';
-      const statusText = isBlk ? '🛑 BLOCKED' : isWrn ? '⚠ WARNING' : '✅ ALLOWED';
+      const statusIcon = isBlk
+        ? lucide('octagonX', { size: 10, color: 'var(--color-red)' })
+        : isWrn
+        ? lucide('alertTriangle', { size: 10, color: 'var(--color-amber)' })
+        : lucide('checkCircle', { size: 10, color: 'var(--color-green)' });
+      const statusText = isBlk
+        ? t('current.statusBlocked')
+        : isWrn
+        ? t('current.statusWarning')
+        : t('current.statusAllowed');
       const actionName = latestEvent.action || 'write_file';
       const targetName = latestEvent.target ? path.basename(latestEvent.target) : 'workspace';
-      const ruleText = latestEvent.ruleId && latestEvent.ruleId !== 'PASS' ? latestEvent.ruleId : 'G0 G1 G2 G4 ✓';
+      const ruleText = latestEvent.ruleId && latestEvent.ruleId !== 'PASS' ? latestEvent.ruleId : t('current.allGuardsPassed');
       const timeStr = latestEvent.timestamp ? (latestEvent.timestamp.split(' ')[1] || latestEvent.timestamp) : '';
 
       currentCardHtml = `
@@ -588,7 +598,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
               <span class="current-target" title="${escapeHtml(latestEvent.target || '')}">${escapeHtml(targetName)}</span>
             </div>
             <div class="current-badge-row">
-              <span class="status-badge ${badgeCls}">${statusText}</span>
+              <span class="status-badge ${badgeCls}">${statusIcon} ${statusText}</span>
               <span class="current-rule-badge">${escapeHtml(ruleText)}</span>
             </div>
             ${latestEvent.reason ? `<div class="current-reason-text">${escapeHtml(latestEvent.reason)}</div>` : ''}
@@ -602,7 +612,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
             <span class="current-tag">${t('current.title')}</span>
           </div>
           <div class="current-idle">
-            <span>⚡ ${t('current.idle')}</span>
+            <span class="idle-inline">${lucide('zap', { size: 12, color: 'var(--text-muted)' })} ${t('current.idle')}</span>
           </div>
         </div>
       `;
@@ -611,7 +621,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
     // --- TAB 1: LIVE STREAM (COMPACT ROWS WITH EXPANDABLE ACCORDION) ---
     let liveHtml = '';
     if (eventsList.length === 0) {
-      liveHtml = `<div class="empty-state">${t('events.noEvents')}</div>`;
+      liveHtml = `<div class="empty-state">${t('live.empty')}</div>`;
     } else {
       eventsList.forEach((e, idx) => {
         const isBlk = e.status === 'BLOCKED';
@@ -620,19 +630,24 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
         const isRec = e.outcome === 'RECOVERED';
 
         let badgeCls = 'badge-allowed';
-        let statusLabel = 'ALLOW';
+        let statusLabel = t('current.statusAllowed');
+        let statusIcon = lucide('checkCircle', { size: 10, color: 'var(--color-green)' });
         if (isShd) {
           badgeCls = 'badge-purple';
-          statusLabel = 'SHADOW';
+          statusLabel = t('current.statusShadow');
+          statusIcon = lucide('eye', { size: 10, color: 'var(--color-purple)' });
         } else if (isRec) {
           badgeCls = 'badge-cyan';
-          statusLabel = 'RECOVERED';
+          statusLabel = t('current.statusRecovered');
+          statusIcon = lucide('rotateCw', { size: 10, color: 'var(--color-cyan)' });
         } else if (isBlk) {
           badgeCls = 'badge-blocked';
-          statusLabel = 'BLOCK';
+          statusLabel = t('current.statusBlocked');
+          statusIcon = lucide('octagonX', { size: 10, color: 'var(--color-red)' });
         } else if (isWrn) {
           badgeCls = 'badge-warning';
-          statusLabel = 'WARN';
+          statusLabel = t('current.statusWarning');
+          statusIcon = lucide('alertTriangle', { size: 10, color: 'var(--color-amber)' });
         }
 
         const fileName = e.target ? path.basename(e.target) : (e.action || 'system');
@@ -645,7 +660,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
           <div class="stream-item">
             <div class="stream-row" onclick="toggleDetail('evt-${idx}')">
               <div class="stream-left">
-                <span class="status-badge ${badgeCls}">${statusLabel}</span>
+                <span class="status-badge ${badgeCls}">${statusIcon} ${statusLabel}</span>
                 <span class="stream-file" title="${fullTargetEsc}">${escapeHtml(fileName)}</span>
               </div>
               <div class="stream-right">
@@ -656,25 +671,25 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
             <div id="evt-${idx}" class="stream-drawer" style="display: none;">
               <div class="drawer-header">
                 <span class="drawer-rule">${escapeHtml(ruleId)}</span>
-                <span class="status-badge ${badgeCls}">${statusLabel}</span>
+                <span class="status-badge ${badgeCls}">${statusIcon} ${statusLabel}</span>
               </div>
               ${isRec ? `
                 <div class="drawer-meta-pill bg-cyan">
-                  <span>✅ İyileşme (Recovery): <strong>${escapeHtml(e.resolvedRuleId || e.ruleId || 'Rule')}</strong></span>
-                  <span>• ${e.recoveryAttempts || 1}. denemede çözüldü</span>
-                  ${e.resolutionMs ? `<span>• Süre: ${(e.resolutionMs / 1000).toFixed(1)}s</span>` : ''}
+                  <span class="pill-row">${lucide('rotateCw', { size: 11 })} <span>${t('live.recoveryHeader', { rule: escapeHtml(e.resolvedRuleId || e.ruleId || 'Rule') })}</span></span>
+                  <span>• ${t('live.recoveryAttempts', { attempts: e.recoveryAttempts || 1 })}</span>
+                  ${e.resolutionMs ? `<span>• ${t('live.recoveryDuration', { duration: (e.resolutionMs / 1000).toFixed(1) })}</span>` : ''}
                 </div>
               ` : ''}
               ${isShd ? `
                 <div class="drawer-meta-pill bg-purple">
-                  <span>👁️ Gölge Modu (Shadow): Ajan engellenmedi; gölge telemetrisi kaydedildi.</span>
+                  <span class="pill-row">${lucide('eye', { size: 11 })} <span>${t('live.shadowDesc')}</span></span>
                 </div>
               ` : ''}
-              ${e.target ? `<div class="drawer-target" title="${fullTargetEsc}">📁 ${fullTargetEsc}</div>` : ''}
+              ${e.target ? `<div class="drawer-target" title="${fullTargetEsc}"><span class="icon-inline">${lucide('folder', { size: 11, color: 'var(--text-muted)' })}</span> ${fullTargetEsc}</div>` : ''}
               ${e.reason ? `<div class="drawer-reason">${reasonEsc}</div>` : ''}
               <div class="drawer-buttons">
-                ${e.target ? `<button class="action-btn" onclick="openFile('${escapeJs(e.target)}')">📄 ${t('current.openFile')}</button>` : ''}
-                ${e.reason ? `<button class="action-btn" onclick="copyReason('${escapeJs(e.reason)}')">📋 ${t('current.copyReason')}</button>` : ''}
+                ${e.target ? `<button class="action-btn" onclick="openFile('${escapeJs(e.target)}')">${lucide('fileText', { size: 11 })} ${t('current.openFile')}</button>` : ''}
+                ${e.reason ? `<button class="action-btn" onclick="copyReason('${escapeJs(e.reason)}')">${lucide('copy', { size: 11 })} ${t('current.copyReason')}</button>` : ''}
               </div>
             </div>
           </div>
@@ -690,13 +705,13 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
     if (testKeys.length === 0 && docKeys.length === 0) {
       obligationsHtml = `
         <div class="clean-state-box">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+          ${lucide('sparkles', { size: 28, color: '#10b981', strokeWidth: 1.75 })}
           <div class="clean-state-title">${t('obligations.cleanState')}</div>
         </div>
       `;
     } else {
       if (testKeys.length > 0) {
-        obligationsHtml += `<div class="section-title text-cyan">🧪 ${t('obligations.testTitle')} (${testKeys.length})</div>`;
+        obligationsHtml += `<div class="section-title text-cyan"><span class="icon-inline">${lucide('flaskConical', { size: 12 })}</span> ${t('obligations.testTitle')} (${testKeys.length})</div>`;
         for (const tk of testKeys) {
           const item = pendingTests[tk];
           const hasIntent = resolutionIntents.some(intent => intent.target_path && intent.target_path.toLowerCase().includes(path.basename(tk).toLowerCase()));
@@ -707,26 +722,26 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
             <div class="task-card border-cyan">
               <div class="task-header">
                 <span class="task-title" title="${escapeHtml(tk)}">${escapeHtml(path.basename(tk))}</span>
-                <button class="mini-icon-btn" onclick="openFile('${escapeJs(tk)}')" title="${t('current.openFile')}">📄</button>
+                <button class="mini-icon-btn" onclick="openFile('${escapeJs(tk)}')" title="${t('current.openFile')}">${lucide('fileText', { size: 12 })}</button>
               </div>
               <div class="task-meta">${t('obligations.expectedTest')}: <code class="text-cyan">${escapeHtml(item.expected_name || 'test')}</code></div>
               <div class="state-track">
-                <div class="track-step ${step1Class}">PENDING</div>
-                <div class="track-arrow">→</div>
-                <div class="track-step ${step2Class}">INTENT</div>
-                <div class="track-arrow">→</div>
-                <div class="track-step step-todo">VERIFIED</div>
-                <div class="track-arrow">→</div>
-                <div class="track-step step-todo">RESOLVED</div>
+                <div class="track-step ${step1Class}">${t('obligations.stepPending')}</div>
+                <div class="track-arrow">${lucide('arrowRight', { size: 9 })}</div>
+                <div class="track-step ${step2Class}">${t('obligations.stepIntent')}</div>
+                <div class="track-arrow">${lucide('arrowRight', { size: 9 })}</div>
+                <div class="track-step step-todo">${t('obligations.stepVerified')}</div>
+                <div class="track-arrow">${lucide('arrowRight', { size: 9 })}</div>
+                <div class="track-step step-todo">${t('obligations.stepResolved')}</div>
               </div>
-              <div class="track-status-hint">${hasIntent ? '⏳ İki fazlı taahhüt alındı; diske yazım doğrulanması bekleniyor' : '⏳ Ajanın test dosyasını oluşturması/düzenlemesi bekleniyor'}</div>
+              <div class="track-status-hint"><span class="icon-inline">${lucide('clock', { size: 10 })}</span> ${hasIntent ? t('obligations.hintTestIntent') : t('obligations.hintTestPending')}</div>
             </div>
           `;
         }
       }
 
       if (docKeys.length > 0) {
-        obligationsHtml += `<div class="section-title text-amber" style="margin-top: 14px;">📝 ${t('obligations.docTitle')} (${docKeys.length})</div>`;
+        obligationsHtml += `<div class="section-title text-amber" style="margin-top: 14px;"><span class="icon-inline">${lucide('fileText', { size: 12 })}</span> ${t('obligations.docTitle')} (${docKeys.length})</div>`;
         for (const dk of docKeys) {
           const item = pendingDocs[dk];
           const reqs = (item.required_docs || ['CHANGELOG.md']).join(', ');
@@ -738,19 +753,19 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
             <div class="task-card border-amber">
               <div class="task-header">
                 <span class="task-title" title="${escapeHtml(dk)}">${escapeHtml(path.basename(dk))}</span>
-                <button class="mini-icon-btn" onclick="openFile('${escapeJs(dk)}')" title="${t('current.openFile')}">📄</button>
+                <button class="mini-icon-btn" onclick="openFile('${escapeJs(dk)}')" title="${t('current.openFile')}">${lucide('fileText', { size: 12 })}</button>
               </div>
               <div class="task-meta">${t('obligations.requiredDoc')}: <code class="text-amber">${escapeHtml(reqs)}</code></div>
               <div class="state-track">
-                <div class="track-step ${step1Class}">PENDING</div>
-                <div class="track-arrow">→</div>
-                <div class="track-step ${step2Class}">INTENT</div>
-                <div class="track-arrow">→</div>
-                <div class="track-step step-todo">VERIFIED</div>
-                <div class="track-arrow">→</div>
-                <div class="track-step step-todo">RESOLVED</div>
+                <div class="track-step ${step1Class}">${t('obligations.stepPending')}</div>
+                <div class="track-arrow">${lucide('arrowRight', { size: 9 })}</div>
+                <div class="track-step ${step2Class}">${t('obligations.stepIntent')}</div>
+                <div class="track-arrow">${lucide('arrowRight', { size: 9 })}</div>
+                <div class="track-step step-todo">${t('obligations.stepVerified')}</div>
+                <div class="track-arrow">${lucide('arrowRight', { size: 9 })}</div>
+                <div class="track-step step-todo">${t('obligations.stepResolved')}</div>
               </div>
-              <div class="track-status-hint">${hasIntent ? '⏳ Dokümantasyon taahhüdü alındı; diske yazım doğrulanması bekleniyor' : '⏳ docs/KNOWLEDGE.md §6 uyarınca CHANGELOG güncellenmeli'}</div>
+              <div class="track-status-hint"><span class="icon-inline">${lucide('clock', { size: 10 })}</span> ${hasIntent ? t('obligations.hintDocIntent') : t('obligations.hintDocPending')}</div>
             </div>
           `;
         }
@@ -758,7 +773,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
 
       obligationsHtml += `
         <div class="circuit-box">
-          <span>${t('obligations.circuitBreaker')}:</span>
+          <span><span class="icon-inline">${lucide('zap', { size: 11 })}</span> ${t('obligations.circuitBreaker')}:</span>
           <span class="circuit-val ${stopRetries >= 4 ? 'text-red' : 'text-cyan'}">${stopRetries} / 5 ${t('obligations.retries')}</span>
         </div>
       `;
@@ -768,70 +783,70 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
     const docGovActive = projectCfg?.governance?.enforceDocObligations === true;
     const rulesHtml = `
       <div class="rules-group">
-        <div class="group-title text-red">🔒 Security Guards (Sıfır Tolerans)</div>
+        <div class="group-title text-red"><span class="icon-inline">${lucide('lock', { size: 12 })}</span> ${t('rules.secTitle')}</div>
         <div class="rule-row">
-          <div class="rule-name">● G0 Secret Leak Shield</div>
-          <span class="mode-pill mode-block">BLOCK</span>
+          <div class="rule-name">${t('rules.g0Title')}</div>
+          <span class="mode-pill mode-block">${t('rules.badgeBlock')}</span>
         </div>
-        <div class="rule-desc">Tüm dosyalarda API key, JWT, özel anahtar sızıntılarını engeller.</div>
+        <div class="rule-desc">${t('rules.g0Desc')}</div>
 
         <div class="rule-row">
-          <div class="rule-name">● G1 Silent Error Swallowing</div>
-          <span class="mode-pill mode-block">BLOCK</span>
+          <div class="rule-name">${t('rules.g1Title')}</div>
+          <span class="mode-pill mode-block">${t('rules.badgeBlock')}</span>
         </div>
-        <div class="rule-desc">Hataların 'except: pass' ile sessizce yutulmasını kesinlikle engeller.</div>
+        <div class="rule-desc">${t('rules.g1Desc')}</div>
 
         <div class="rule-row">
-          <div class="rule-name">● G2 Test Integrity Protection</div>
-          <span class="mode-pill mode-block">BLOCK</span>
+          <div class="rule-name">${t('rules.g2Title')}</div>
+          <span class="mode-pill mode-block">${t('rules.badgeBlock')}</span>
         </div>
-        <div class="rule-desc">Testlerin sahte 'assert True' ile geçilmesini veya silinmesini engeller.</div>
+        <div class="rule-desc">${t('rules.g2Desc')}</div>
       </div>
 
       <div class="rules-group">
-        <div class="group-title text-purple">🧱 Architectural Guards</div>
+        <div class="group-title text-purple"><span class="icon-inline">${lucide('layers', { size: 12 })}</span> ${t('rules.archTitle')}</div>
         <div class="rule-row">
-          <div class="rule-name">● G4 Import Matrix & Layers</div>
-          <span class="mode-pill mode-block">BLOCK</span>
+          <div class="rule-name">${t('rules.g4Title')}</div>
+          <span class="mode-pill mode-block">${t('rules.badgeBlock')}</span>
         </div>
-        <div class="rule-desc">Katmanlar arası döngüsel veya ters yönde yasadışı importları engeller.</div>
+        <div class="rule-desc">${t('rules.g4Desc')}</div>
 
         <div class="rule-row">
-          <div class="rule-name">● SRP & Cohesion Boundary</div>
-          <span class="mode-pill mode-block">BLOCK</span>
+          <div class="rule-name">${t('rules.srpTitle')}</div>
+          <span class="mode-pill mode-block">${t('rules.badgeBlock')}</span>
         </div>
-        <div class="rule-desc">Tek dosyada çoklu iş yapılmasını önler; cohesive monolith istisnası korur.</div>
+        <div class="rule-desc">${t('rules.srpDesc')}</div>
 
         <div class="rule-row">
-          <div class="rule-name">● G3 Compiler/Linter Bypass</div>
-          <span class="mode-pill mode-warn">WARN (ADVISORY)</span>
+          <div class="rule-name">${t('rules.g3Title')}</div>
+          <span class="mode-pill mode-warn">${t('rules.badgeWarnAdvisory')}</span>
         </div>
-        <div class="rule-desc">@ts-ignore veya # type: ignore tespitinde tavsiye uyarısı verir; engellemez.</div>
+        <div class="rule-desc">${t('rules.g3Desc')}</div>
 
         <div class="rule-row">
-          <div class="rule-name">● ARCH_FILE_GROWTH</div>
-          <span class="mode-pill mode-warn">WARN (ADVISORY)</span>
+          <div class="rule-name">${t('rules.growthTitle')}</div>
+          <span class="mode-pill mode-warn">${t('rules.badgeWarnAdvisory')}</span>
         </div>
-        <div class="rule-desc">Tek hamlede devasa kod yığılmasında tavsiye uyarısı verir; shadow mode destekler.</div>
+        <div class="rule-desc">${t('rules.growthDesc')}</div>
       </div>
 
       <div class="rules-group">
-        <div class="group-title text-cyan">🧪 Quality & Governance</div>
+        <div class="group-title text-cyan"><span class="icon-inline">${lucide('flaskConical', { size: 12 })}</span> ${t('rules.govTitle')}</div>
         <div class="rule-row">
-          <div class="rule-name">● T1/T2 Test Evidence</div>
-          <span class="mode-pill mode-warn">WARN (STOP OBLIGATION)</span>
+          <div class="rule-name">${t('rules.t1Title')}</div>
+          <span class="mode-pill mode-warn">${t('rules.badgeWarnStop')}</span>
         </div>
-        <div class="rule-desc">PreTool: Tavsiye Uyarısı • Stop Hook: Kapanış Yükümlülüğü (Fiziksel Disk Doğrulama).</div>
+        <div class="rule-desc">${t('rules.t1Desc')}</div>
 
         <div class="rule-row">
-          <div class="rule-name">● Doc Governance (§6 Same-Commit)</div>
-          <span class="mode-pill ${docGovActive ? 'mode-active' : 'mode-inactive'}">${docGovActive ? 'OPT-IN (STOP)' : 'OFF'}</span>
+          <div class="rule-name">${t('rules.docGovTitle')}</div>
+          <span class="mode-pill ${docGovActive ? 'mode-active' : 'mode-inactive'}">${docGovActive ? t('rules.badgeOptInStop') : t('rules.badgeOff')}</span>
         </div>
-        <div class="rule-desc">Motor dosyası değiştiğinde oturum kapanışında CHANGELOG güncellenmesini zorlar.</div>
+        <div class="rule-desc">${t('rules.docGovDesc')}</div>
       </div>
 
       <div style="margin-top: 14px; text-align: center;">
-        <button class="action-btn wide" onclick="openConfig()">⚙️ ${t('actions.openConfig')}</button>
+        <button class="action-btn wide" onclick="openConfig()">${lucide('settings', { size: 12 })} ${t('actions.openConfig')}</button>
       </div>
     `;
 
@@ -844,11 +859,11 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
 
     let recoverySubtext = '';
     if (totalBlockedCount === 0) {
-      recoverySubtext = 'Henüz engellenen işlem yok (Temiz Oturum)';
+      recoverySubtext = t('insights.subClean');
     } else if (totalBlockedCount < 10) {
-      recoverySubtext = `${totalRecoveredCount} / ${totalBlockedCount} düzeltildi (Yetersiz Örneklem, n=${totalBlockedCount})`;
+      recoverySubtext = t('insights.subSample', { recovered: totalRecoveredCount, blocked: totalBlockedCount });
     } else {
-      recoverySubtext = `${totalRecoveredCount} / ${totalBlockedCount} ihlal ajan tarafından düzeltildi (%${finalRecRate})`;
+      recoverySubtext = t('insights.subRate', { recovered: totalRecoveredCount, blocked: totalBlockedCount, rate: finalRecRate });
     }
 
     const ruleStats: Record<string, any> = eff.ruleStats || {};
@@ -859,27 +874,34 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       const r = stat?.recovered || 0;
       const rate = typeof stat?.recoveryRate === 'number' ? stat.recoveryRate : (b > 0 ? Math.round((r / b) * 100) : 100);
       const med = stat?.medianAttempts || 1;
-      let badgeText = '⚪ Yetersiz Veri';
+      let badgeText = t('insights.badgeInsufficient', { n: b });
       let badgeClass = 'badge-neutral';
+      let badgeIcon = lucide('circleDot', { size: 9 });
 
       if (b === 0) {
-        badgeText = '✅ 0 İhlal';
+        badgeText = t('insights.badgeNoViolations');
         badgeClass = 'badge-allowed';
+        badgeIcon = lucide('checkCircle', { size: 9 });
       } else if (b < 10) {
-        badgeText = `⚪ Yetersiz Veri (n=${b})`;
+        badgeText = t('insights.badgeInsufficient', { n: b });
         badgeClass = 'badge-neutral';
+        badgeIcon = lucide('circleDot', { size: 9 });
       } else if (b < 30) {
-        badgeText = `🟡 Ön Sinyal (n=${b})`;
+        badgeText = t('insights.badgeEarlySignal', { n: b });
         badgeClass = 'badge-warning';
+        badgeIcon = lucide('alertTriangle', { size: 9 });
       } else if (rate >= 80) {
-        badgeText = `🏆 Yüksek Değer (n=${b})`;
+        badgeText = t('insights.badgeHighValue', { n: b });
         badgeClass = 'badge-allowed';
+        badgeIcon = lucide('trophy', { size: 9 });
       } else if (rate < 50) {
-        badgeText = `⚡ Sürtünme (n=${b})`;
+        badgeText = t('insights.badgeFriction', { n: b });
         badgeClass = 'badge-blocked';
+        badgeIcon = lucide('zap', { size: 9 });
       } else {
-        badgeText = `🟢 Dengeli (n=${b})`;
+        badgeText = t('insights.badgeBalanced', { n: b });
         badgeClass = 'badge-cyan';
+        badgeIcon = lucide('checkCircle', { size: 9 });
       }
 
       return {
@@ -889,7 +911,8 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
         rate,
         med,
         badgeText,
-        badgeClass
+        badgeClass,
+        badgeIcon
       };
     }
 
@@ -905,7 +928,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
 
     const insightsHtml = `
       <div class="insight-card">
-        <div class="insight-title">🎯 ${t('insights.recoveryTitle')}</div>
+        <div class="insight-title"><span class="icon-inline">${lucide('target', { size: 12 })}</span> ${t('insights.recoveryTitle')}</div>
         <div class="recovery-meter">
           <div class="recovery-bar-wrap">
             <div class="recovery-bar" style="width: ${finalRecRate}%;"></div>
@@ -916,84 +939,84 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       </div>
 
       <div class="insight-card">
-        <div class="insight-title">🛡️ Gardiyan Etkinlik Karnesi (Ampirik Veri)</div>
+        <div class="insight-title"><span class="icon-inline">${lucide('shieldCheck', { size: 12 })}</span> ${t('insights.reportCardTitle')}</div>
         ${rulesToDisplay.map(st => `
           <div class="rule-stat-item">
             <div class="rule-stat-header">
               <span class="rule-stat-name">${escapeHtml(st.label)}</span>
-              <span class="status-badge ${st.badgeClass}">${st.badgeText}</span>
+              <span class="status-badge ${st.badgeClass}">${st.badgeIcon} ${st.badgeText}</span>
             </div>
             ${st.b > 0 ? `
               <div class="rule-stat-sub">
-                <span>${st.b} müdahale • ${st.r} düzeltildi (%${st.rate})</span>
-                <span>Medyan: ${st.med} deneme</span>
+                <span>${t('insights.ruleInterventions', { blocked: st.b, recovered: st.r, rate: st.rate })}</span>
+                <span>${t('insights.medianAttempts', { attempts: st.med })}</span>
               </div>
-            ` : `<div class="rule-stat-sub text-muted">Aktif oturumda temiz (0 İhlal)</div>`}
+            ` : `<div class="rule-stat-sub text-muted">${t('insights.ruleClean')}</div>`}
           </div>
         `).join('')}
       </div>
 
       <div class="insight-card">
-        <div class="insight-title">⚠️ Yaşam Döngüsü ve Tavsiye Kuralları</div>
+        <div class="insight-title"><span class="icon-inline">${lucide('alertTriangle', { size: 12 })}</span> ${t('insights.lifecycleTitle')}</div>
         <div class="metric-row">
-          <span class="metric-lbl">T1 Test Evidence:</span>
-          <span class="metric-val text-cyan">${testKeys.length > 0 ? `${testKeys.length} Bekleyen Test Kanıtı` : 'Kapanış Doğrulandı'}</span>
+          <span class="metric-lbl">${t('insights.t1Label')}</span>
+          <span class="metric-val text-cyan">${testKeys.length > 0 ? t('insights.t1Pending', { count: testKeys.length }) : t('insights.t1Verified')}</span>
         </div>
         <div class="metric-row">
-          <span class="metric-lbl">Doc Governance (§6):</span>
-          <span class="metric-val ${docGovActive ? 'text-green' : 'text-muted'}">${docGovActive ? (docKeys.length > 0 ? `${docKeys.length} Bekleyen Dokümantasyon` : 'Aktif (Kapanış Şartı)') : 'Devre Dışı'}</span>
+          <span class="metric-lbl">${t('insights.docLabel')}</span>
+          <span class="metric-val ${docGovActive ? 'text-green' : 'text-muted'}">${docGovActive ? (docKeys.length > 0 ? t('insights.docPending', { count: docKeys.length }) : t('insights.docActive')) : t('insights.docDisabled')}</span>
         </div>
         <div class="metric-row">
-          <span class="metric-lbl">ARCH_FILE_GROWTH:</span>
-          <span class="metric-val text-purple">Tavsiye • Gölge Modu (SHADOW)</span>
+          <span class="metric-lbl">${t('insights.growthLabel')}</span>
+          <span class="metric-val text-purple">${t('insights.growthValue')}</span>
         </div>
         <div class="metric-row">
-          <span class="metric-lbl">G3 Compiler Bypass:</span>
-          <span class="metric-val text-amber">Tavsiye Uyarısı (WARN)</span>
-        </div>
-      </div>
-
-      <div class="insight-card">
-        <div class="insight-title">⚡ Telemetri & WAL Durumu</div>
-        <div class="metric-row">
-          <span class="metric-lbl">Audit Journal:</span>
-          <span class="metric-val text-green">● Canonical Online (Write-Ahead)</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-lbl">Live Checkpoint:</span>
-          <span class="metric-val text-cyan">● Senkronize (Seq #${lastSeq})</span>
+          <span class="metric-lbl">${t('insights.g3Label')}</span>
+          <span class="metric-val text-amber">${t('insights.g3Value')}</span>
         </div>
       </div>
 
       <div class="insight-card">
-        <div class="insight-title">⚡ Latency & Engine Performance</div>
+        <div class="insight-title"><span class="icon-inline">${lucide('database', { size: 12 })}</span> ${t('insights.walTitle')}</div>
+        <div class="metric-row">
+          <span class="metric-lbl">${t('insights.walJournalLabel')}</span>
+          <span class="metric-val text-green"><span class="icon-inline">${lucide('circleDot', { size: 9, color: 'var(--color-green)' })}</span> ${t('insights.walJournalValue')}</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-lbl">${t('insights.walLiveLabel')}</span>
+          <span class="metric-val text-cyan"><span class="icon-inline">${lucide('circleDot', { size: 9, color: 'var(--color-cyan)' })}</span> ${t('insights.walLiveValue', { seq: lastSeq })}</span>
+        </div>
+      </div>
+
+      <div class="insight-card">
+        <div class="insight-title"><span class="icon-inline">${lucide('cpu', { size: 12 })}</span> ${t('insights.perfTitle')}</div>
         <div class="metric-row">
           <span class="metric-lbl">${t('insights.latencyFast')}:</span>
-          <span class="metric-val text-green">~0.03 ms (< 10 ms bütçe)</span>
+          <span class="metric-val text-green">${t('insights.fastBudget')}</span>
         </div>
         <div class="metric-row">
           <span class="metric-lbl">${t('insights.latencySpawn')}:</span>
-          <span class="metric-val text-muted">~220 ms (CLI Subprocess)</span>
+          <span class="metric-val text-muted">${t('insights.spawnBudget')}</span>
         </div>
       </div>
 
       <div class="insight-card">
-        <div class="insight-title">🛡️ Session & Concurrency Integrity</div>
+        <div class="insight-title"><span class="icon-inline">${lucide('lock', { size: 12 })}</span> ${t('insights.integrityTitle')}</div>
         <div class="metric-row">
           <span class="metric-lbl">${t('insights.lockStatus')}:</span>
-          <span class="metric-val text-green">🟢 ${t('insights.lockHealthy')}</span>
+          <span class="metric-val text-green"><span class="icon-inline">${lucide('checkCircle', { size: 10, color: 'var(--color-green)' })}</span> ${t('insights.lockHealthy')}</span>
         </div>
         <div class="metric-row">
           <span class="metric-lbl">${t('insights.twoPhase')}:</span>
-          <span class="metric-val text-green">🟢 ${t('insights.twoPhaseActive')}</span>
+          <span class="metric-val text-green"><span class="icon-inline">${lucide('checkCircle', { size: 10, color: 'var(--color-green)' })}</span> ${t('insights.twoPhaseActive')}</span>
         </div>
         <div class="metric-row">
-          <span class="metric-lbl">Oturum Kimliği:</span>
+          <span class="metric-lbl">${t('insights.sessionLabel')}</span>
           <span class="metric-val text-cyan">${shortSess}</span>
         </div>
         <div class="metric-row">
-          <span class="metric-lbl">Devre Kesici Sayacı:</span>
-          <span class="metric-val text-muted">${stopRetries} / 5 deneme</span>
+          <span class="metric-lbl">${t('insights.circuitLabel')}</span>
+          <span class="metric-val text-muted">${t('insights.circuitValue', { retries: stopRetries })}</span>
         </div>
       </div>
     `;
@@ -1069,6 +1092,10 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
             border-radius: 4px;
             cursor: pointer;
             transition: all 0.15s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
           }
           .mini-btn:hover {
             background: var(--bg-hover);
@@ -1123,7 +1150,9 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
             font-weight: 800;
             padding: 2px 6px;
             border-radius: 3px;
-            display: inline-block;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
           }
           .badge-allowed { background: rgba(16, 185, 129, 0.15); color: var(--color-green); }
           .badge-blocked { background: rgba(239, 68, 68, 0.15); color: var(--color-red); }
@@ -1193,6 +1222,10 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
             cursor: pointer;
             text-align: center;
             transition: all 0.15s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
           }
           .tab-btn.active {
             background: var(--color-cyan);
@@ -1279,6 +1312,10 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
             padding: 3px 6px;
             border-radius: 3px;
             cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
           }
           .action-btn:hover { background: rgba(255, 255, 255, 0.16); }
           .action-btn.wide { width: 100%; padding: 6px; }
@@ -1392,20 +1429,37 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
           .clean-state-box { text-align: center; padding: 20px 8px; border: 1px dashed rgba(16, 185, 129, 0.25); border-radius: 8px; background: rgba(16, 185, 129, 0.04); }
           .clean-state-title { font-weight: 700; font-size: 10px; color: var(--color-green); margin-top: 6px; }
           .empty-state { text-align: center; color: var(--text-muted); padding: 20px; font-size: 10px; }
+          .icon-inline {
+            display: inline-flex;
+            align-items: center;
+            vertical-align: middle;
+            margin-right: 3px;
+          }
+          .pill-row {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+          }
+          .idle-inline {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            justify-content: center;
+          }
         </style>
       </head>
       <body>
         <!-- Header -->
         <div class="header">
           <div class="header-left">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            <span class="brand-title">GravityGuard</span>
+            ${lucide('shield', { size: 15, color: 'var(--color-cyan)', strokeWidth: 2.2 })}
+            <span class="brand-title">${t('appName')}</span>
             <span class="project-pill">${escapeHtml(projectName)}</span>
           </div>
           <div class="header-right">
-            <button class="mini-btn" onclick="toggleLanguage()" title="Switch Language">🌐 ${getCurrentLanguage().toUpperCase()}</button>
-            <button class="mini-btn" onclick="openConfig()" title="Open Configuration">⚙️</button>
-            <button class="mini-btn" onclick="clearLogs()" title="Clear Live Logs">🧹</button>
+            <button class="mini-btn" onclick="toggleLanguage()" title="${t('actions.switchLang')}">${lucide('globe', { size: 11 })} <span>${getCurrentLanguage().toUpperCase()}</span></button>
+            <button class="mini-btn" onclick="openConfig()" title="${t('actions.openConfig')}">${lucide('settings', { size: 11 })}</button>
+            <button class="mini-btn" onclick="clearLogs()" title="${t('actions.clearLogs')}">${lucide('trash2', { size: 11 })}</button>
           </div>
         </div>
 
@@ -1416,15 +1470,15 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
         <div class="stat-summary-bar">
           <div class="stat-chip"><div class="chip-val text-red">${blockedCount}</div><div class="chip-lbl">${t('stats.blocked')}</div></div>
           <div class="stat-chip"><div class="chip-val text-amber">${warningCount}</div><div class="chip-lbl">${t('stats.warning')}</div></div>
-          <div class="stat-chip"><div class="chip-val text-cyan">${totalObligations}</div><div class="chip-lbl">${totalObligations > 0 ? 'Pending' : 'Clean'}</div></div>
+          <div class="stat-chip"><div class="chip-val text-cyan">${totalObligations}</div><div class="chip-lbl">${totalObligations > 0 ? t('stats.pending') : t('stats.clean')}</div></div>
         </div>
 
         <!-- Tabs -->
         <div class="tabs-bar">
-          <button class="tab-btn active" id="btn-live" onclick="setTab('live')">${t('tabs.live')}</button>
-          <button class="tab-btn" id="btn-obligations" onclick="setTab('obligations')">${t('tabs.obligations')}${totalObligations > 0 ? `<span class="badge-counter">${totalObligations}</span>` : ''}</button>
-          <button class="tab-btn" id="btn-rules" onclick="setTab('rules')">${t('tabs.rules')}</button>
-          <button class="tab-btn" id="btn-insights" onclick="setTab('insights')">${t('tabs.insights')}</button>
+          <button class="tab-btn active" id="btn-live" onclick="setTab('live')">${lucide('zap', { size: 11 })} ${t('tabs.live')}</button>
+          <button class="tab-btn" id="btn-obligations" onclick="setTab('obligations')">${lucide('clipboardList', { size: 11 })} ${t('tabs.obligations')}${totalObligations > 0 ? `<span class="badge-counter">${totalObligations}</span>` : ''}</button>
+          <button class="tab-btn" id="btn-rules" onclick="setTab('rules')">${lucide('sliders', { size: 11 })} ${t('tabs.rules')}</button>
+          <button class="tab-btn" id="btn-insights" onclick="setTab('insights')">${lucide('barChart', { size: 11 })} ${t('tabs.insights')}</button>
         </div>
 
         <!-- Panes -->
