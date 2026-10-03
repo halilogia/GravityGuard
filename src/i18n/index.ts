@@ -92,9 +92,8 @@ export const resources = {
         sessionLabel: 'Oturum Kimliği:',
         circuitLabel: 'Devre Kesici Sayacı:',
         circuitValue: '{{retries}} / 5 deneme',
-        diagnosticsTitle: 'Sistem Sağlığı & Tanılama (Diagnostics)',
-        diagnosticsHealthy: 'Sağlıklı (Kilit & Projeksiyon)',
-        telemetryIssueDetected: 'Telemetri Uyarısı / Senkronizasyon Sorunu Tespit Edildi'
+        diagnosticsTitle: 'Sistem Bilgisi & Tanılama',
+        diagnosticsBadge: 'WAL & Kilit Aktif'
       },
       stats: {
         blocked: 'Engellendi',
@@ -110,9 +109,9 @@ export const resources = {
         enhancePrompt: 'Prompt Geliştir',
         toggleLang: 'EN',
         openConfig: 'Ayarlar',
-        clearedNotice: 'GravityGuard günlükleri temizlendi!',
+        clearedNotice: 'Olay akışı görünümü temizlendi (Kalıcı veriler korundu).',
         switchLang: 'Dili Değiştir',
-        clearLogs: 'Canlı Günlükleri Temizle',
+        clearLogs: 'Görünümü Temizle',
         statusBarTooltip: 'GravityGuard: Yerel AI ağ geçidi ile Promptu Geliştir (Ctrl+Alt+E)',
         pingLive: 'GravityGuard devrede — yerel AI geçidi: {{detail}}',
         pingWarning: 'GravityGuard aktif, ancak yerel AI geçidine ulaşılamıyor: {{detail}}. Prompt Geliştir yine de çalışır (çevrimdışı şablon modu).',
@@ -290,9 +289,8 @@ export const resources = {
         sessionLabel: 'Session ID:',
         circuitLabel: 'Circuit Breaker Counter:',
         circuitValue: '{{retries}} / 5 attempts',
-        diagnosticsTitle: 'System Health & Diagnostics',
-        diagnosticsHealthy: 'Healthy (Lock & Projection)',
-        telemetryIssueDetected: 'Telemetry Warning / Desynchronization Detected'
+        diagnosticsTitle: 'System Info & Diagnostics',
+        diagnosticsBadge: 'WAL & Lock Active'
       },
       stats: {
         blocked: 'Blocked',
@@ -308,9 +306,9 @@ export const resources = {
         enhancePrompt: 'Enhance Prompt',
         toggleLang: 'TR',
         openConfig: 'Settings',
-        clearedNotice: 'GravityGuard logs cleared!',
+        clearedNotice: 'Event stream view cleared (Persistent data preserved).',
         switchLang: 'Switch Language',
-        clearLogs: 'Clear Live Logs',
+        clearLogs: 'Clear View',
         statusBarTooltip: 'GravityGuard: Enhance Prompt with local AI gateway (Ctrl+Alt+E)',
         pingLive: 'GravityGuard is Live — local AI gateway: {{detail}}',
         pingWarning: 'GravityGuard active, but local AI gateway unreachable: {{detail}}. Enhance Prompt still works (offline template mode).',

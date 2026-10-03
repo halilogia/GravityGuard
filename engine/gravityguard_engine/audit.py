@@ -503,7 +503,13 @@ def log_event(
                 live_seq = current_data.get("lastAuditSeq")
                 journal_last_seq = _get_journal_last_seq(permanent_log_path)
                 if live_seq is None:
-                    current_data["lastAuditSeq"] = journal_last_seq
+                    if journal_last_seq > 0:
+                        sys.stderr.write(
+                            f"[GravityGuard Uninitialized Projection] Missing lastAuditSeq with non-empty journal ({journal_last_seq}); rebuilding projection from canonical journal\n"
+                        )
+                        current_data = _rebuild_live_state_from_permanent_audit(permanent_log_path)
+                    else:
+                        current_data["lastAuditSeq"] = 0
                 elif live_seq < journal_last_seq:
                     _replay_missing_journal_events(current_data, permanent_log_path, from_seq=live_seq)
                 elif live_seq > journal_last_seq:

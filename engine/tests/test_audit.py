@@ -552,6 +552,46 @@ class TestAuditSubsystem(unittest.TestCase):
             live = json.load(lf)
         self.assertEqual(live["lastAuditSeq"], 3)
 
+    def test_uninitialized_or_cleared_live_state_triggers_rebuild_from_journal(self):
+        import io
+        from unittest.mock import patch
+
+        # 1. Produce a BLOCKED event (seq 1, creates active violation)
+        target = "src/cleared_test.py"
+        log_event("write", "BLOCKED", target, "silent pass block", rule_id="G1_SILENT_EXCEPTION")
+
+        live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
+        with open(live_path, "r", encoding="utf-8") as lf:
+            live = json.load(lf)
+        expected_key = f"test-conv-1::{target}::G1_SILENT_EXCEPTION"
+        self.assertIn(expected_key, live["activeViolations"])
+        self.assertEqual(live["lastAuditSeq"], 1)
+
+        # 2. Simulate legacy clearLogs() or external wipe:
+        # Overwrite live JSON with empty dict lacking lastAuditSeq and activeViolations
+        with open(live_path, "w", encoding="utf-8") as lf:
+            json.dump({
+                "activeGuard": "GravityGuard",
+                "status": "ONLINE",
+                "events": []
+            }, lf)
+
+        # 3. Next event should detect missing lastAuditSeq with non-empty journal,
+        # warn, and trigger full rebuild from canonical permanent log
+        stderr_buf = io.StringIO()
+        with patch("sys.stderr", stderr_buf):
+            log_event("write", "APPROVED", "src/other.py", "clean write", rule_id="PASS")
+
+        self.assertIn("[GravityGuard Uninitialized Projection]", stderr_buf.getvalue())
+
+        with open(live_path, "r", encoding="utf-8") as lf:
+            live_rebuilt = json.load(lf)
+
+        # Sequence must be 2, and previously active G1 violation must be cleanly restored!
+        self.assertEqual(live_rebuilt["lastAuditSeq"], 2)
+        self.assertIn(expected_key, live_rebuilt["activeViolations"])
+        self.assertEqual(live_rebuilt["effectiveness"]["totalBlocked"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

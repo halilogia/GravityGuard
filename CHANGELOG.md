@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Causal State Koruma, Güvenli Clear View ve Başlatılmamış Projeksiyon Onarımı (Safe Clear View & Uninitialized Projection Healing)**:
+  - `src/extension.ts`: `clearLogs()`'un diskteki `srp_guardian_live.json` dosyasını sıfırlayarak `activeViolations` ve causal analitiği silme riski tamamen ortadan kaldırıldı; yerine diske dokunmadan yalnızca arayüzdeki akışı filtreleyen güvenli `clearView()` motoru eklendi (`_clearedTimestamp`). Spekülatif `desyncAlertHtml` kaldırıldı; Tanılama özeti `WAL & Kilit Aktif` rozetine dönüştürüldü.
+  - `engine/gravityguard_engine/audit.py`: `live_seq is None and journal_last_seq > 0` durumunda (dış kaynaklı sıfırlama veya başlatılmamış durum) kanonik kalıcı journal'dan otomatik tam rebuild (`_rebuild_live_state_from_permanent_audit`) mekanizması eklendi.
+  - `engine/tests/test_audit.py`: `test_uninitialized_or_cleared_live_state_triggers_rebuild_from_journal` regresyon testi eklendi; toplam test sayısı **230'a** (201 Python + 29 TypeScript) yükseltildi (%100 yeşil).
+  - `src/i18n/index.ts`: `actions.clearLogs` ("Görünümü Temizle"), `clearedNotice` ve `insights.diagnosticsBadge` simetrik olarak güncellendi.
 - **Arayüz Kararlılık & Tanılama İyileştirmesi ve Gölge Modu Rozeti (UI Polish & Code Freeze)**:
   - `src/extension.ts`:
     - **İçgörüler Sekmesinde Kural Başına Ampirik Veriler**: `rulesToDisplay` listesine `ARCH_FILE_GROWTH` ve `G3_COMPILER_BYPASS` dahil edilerek her kural için müdahale/uyarı sayısı ($n$), iyileşme oranı (%), medyan deneme ve nitelik rozetleri (`Yetersiz Veri`, `Ön Sinyal`, `Yüksek Değer`, `Sürtünme`) bağlandı.

@@ -379,6 +379,7 @@ function escapeJs(str: string): string {
 class GuardianViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
   private _pollInterval?: NodeJS.Timeout;
+  private _clearedTimestamp: string | null = null;
 
   constructor(private readonly _extensionUri: vscode.Uri) {}
 
@@ -390,8 +391,8 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
     };
 
     webviewView.webview.onDidReceiveMessage(async (message: { command: string; path?: string; text?: string }) => {
-      if (message.command === 'clearLogs') {
-        this.clearLogs();
+      if (message.command === 'clearLogs' || message.command === 'clearView') {
+        this.clearView();
       } else if (message.command === 'refresh') {
         this.updateHtml();
       } else if (message.command === 'toggleLanguage') {
@@ -459,21 +460,14 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
     }, 1500);
   }
 
+  public clearView(): void {
+    this._clearedTimestamp = new Date().toISOString();
+    this.updateHtml();
+    vscode.window.showInformationMessage(t('actions.clearedNotice'));
+  }
+
   public clearLogs(): void {
-    const logPath = path.join(os.homedir(), '.gemini', 'logs', 'srp_guardian_live.json');
-    const emptyState: GuardianData = {
-      activeGuard: 'GravityGuard',
-      status: 'ONLINE',
-      lastCheck: new Date().toISOString(),
-      events: []
-    };
-    try {
-      fs.writeFileSync(logPath, JSON.stringify(emptyState, null, 2), 'utf8');
-      this.updateHtml();
-      vscode.window.showInformationMessage(t('actions.clearedNotice'));
-    } catch (e) {
-      console.error('Clear log error:', e);
-    }
+    this.clearView();
   }
 
   public updateHtml(): void {
@@ -538,20 +532,14 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
     }
 
     const totalObligations = Object.keys(pendingTests).length + Object.keys(pendingDocs).length;
-    const eventsList = data.events || [];
+    let eventsList = data.events || [];
+    if (this._clearedTimestamp) {
+      eventsList = eventsList.filter((e: any) => e.timestamp && e.timestamp > this._clearedTimestamp!);
+    }
     const blockedCount = eventsList.filter(e => e.status === 'BLOCKED').length;
     const warningCount = eventsList.filter(e => e.status === 'WARNING').length;
     const approvedCount = eventsList.filter(e => e.status === 'APPROVED').length;
     const totalEvents = eventsList.length;
-
-    const desyncWarning = (data as any)?.hasDesyncWarning || (data as any)?.rebuiltFromLog;
-    const desyncMsg = (data as any)?.desyncMessage || t('insights.telemetryIssueDetected');
-    const desyncAlertHtml = desyncWarning ? `
-      <div class="telemetry-alert-banner">
-        <span class="icon-inline">${lucide('alertTriangle', { size: 12, color: 'var(--color-amber)' })}</span>
-        <span>${escapeHtml(desyncMsg)}</span>
-      </div>
-    ` : '';
 
     // Agent Recovery Calculation: Did agent fix a blocked event on next turn?
     let recoveredCount = 0;
@@ -1014,8 +1002,8 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
             <span class="icon-inline">${lucide('settings', { size: 11, color: 'var(--text-muted)' })}</span>
             <span class="diagnostics-title">${t('insights.diagnosticsTitle')}</span>
           </span>
-          <span class="status-badge badge-allowed" style="font-size: 8px; padding: 1px 5px;">
-            ${lucide('checkCircle', { size: 8 })} ${t('insights.diagnosticsHealthy')}
+          <span class="status-badge badge-neutral" style="font-size: 8px; padding: 1px 5px;">
+            ${lucide('database', { size: 8 })} ${t('insights.diagnosticsBadge')}
           </span>
         </summary>
         <div class="diagnostics-body">
@@ -1559,8 +1547,6 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
             <button class="mini-btn" onclick="clearLogs()" title="${t('actions.clearLogs')}">${lucide('trash2', { size: 11 })}</button>
           </div>
         </div>
-
-        ${desyncAlertHtml}
 
         <!-- Current Action Banner -->
         ${currentCardHtml}
