@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Arayüz Kararlılık & Tanılama İyileştirmesi ve Gölge Modu Rozeti (UI Polish & Code Freeze)**:
+  - `src/extension.ts`:
+    - **İçgörüler Sekmesinde Kural Başına Ampirik Veriler**: `rulesToDisplay` listesine `ARCH_FILE_GROWTH` ve `G3_COMPILER_BYPASS` dahil edilerek her kural için müdahale/uyarı sayısı ($n$), iyileşme oranı (%), medyan deneme ve nitelik rozetleri (`Yetersiz Veri`, `Ön Sinyal`, `Yüksek Değer`, `Sürtünme`) bağlandı.
+    - **Canlı Akış Çekmecesinde Akış Göstergesi**: `RECOVERED` olaylarında `BLOCKED → RECOVERED` akış rozeti, çözülen kural (`resolvedRuleId`), deneme sayısı ve çözüm süresi ($s$) görsel akış kartıyla donatıldı.
+    - **Sessiz Tanılama (Diagnostics Accordion)**: `WAL`, `auditSeq`, `StateLock`, gecikme bütçeleri ve oturum bilgileri ana ekrandan kaldırılarak katlanabilir `<details class="diagnostics-details">` alanına taşındı; ana ekranda yalnızca bir tutarsızlık/hata olduğunda uyarı banner'ı belirmesi sağlandı.
+    - **Dinamik Gölge Modu Rozeti (Dynamic Shadow Badge)**: Kurallar sekmesinde `.gravityguard.json` veya motor konfigürasyonunda `mode: "shadow"` olan kurallara mor renkli `SHADOW` rozeti (`lucide('eye')`) eklendi.
+  - `src/i18n/index.ts`: Yeni akış ve tanılama metinleri hem Türkçe (`tr`) hem İngilizce (`en`) sözlüklerine %100 simetrik olarak eklendi.
 - **Lucide-Style Premium SVG İkon Sistemi ve %100 i18next Dinamik Yerelleştirme (Premium Lucide SVG Icons & Full i18n Localization)**:
   - `src/icons.ts`: Tüm standart emojiler yasaklanarak Lucide spesifikasyonuna (24x24 viewBox, stroke-width 2, rounded stroke) uygun 30 adet vektörel SVG ikonu (`shield`, `zap`, `lock`, `layers`, `flaskConical`, `checkCircle`, `octagonX`, `alertTriangle`, `eye`, `rotateCw`, `folder`, `fileText`, `copy`, `clipboardList`, `sliders`, `barChart`, `settings`, `trash2`, `globe`, `cpu`, `database`, `trophy`, `target`, `clock`, `sparkles`, `circleDot`, `arrowRight`) içeren sıfır bağımlılıklı tip-güvenli ikon motoru geliştirildi.
   - `src/i18n/index.ts`: Statik metin kullanımı tamamen kaldırılarak; hem Türkçe (`tr`) hem İngilizce (`en`) sözlükleri %100 simetrik hale getirildi. Parametre interpolasyon desteği (`{{var}}` ve `{var}`) eklenerek bildirimler, mod seçimleri, durum kartları, ampirik metrikler ve hata mesajları dinamik yerelleştirildi.

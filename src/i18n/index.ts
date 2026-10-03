@@ -31,6 +31,8 @@ export const resources = {
       live: {
         empty: 'Henüz kaydedilmiş güvenlik olayı yok.',
         recoveryHeader: 'İyileşme (Recovery): {{rule}}',
+        recoveryFlowBlocked: 'BLOCKED',
+        recoveryFlowRecovered: 'RECOVERED',
         recoveryAttempts: '{{attempts}}. denemede çözüldü',
         recoveryDuration: 'Süre: {{duration}}s',
         shadowDesc: 'Gölge Modu (Shadow): Ajan engellenmedi; gölge telemetrisi kaydedildi.',
@@ -58,6 +60,7 @@ export const resources = {
         reportCardTitle: 'Gardiyan Etkinlik Karnesi (Ampirik Veri)',
         ruleClean: 'Aktif oturumda temiz (0 İhlal)',
         ruleInterventions: '{{blocked}} müdahale • {{recovered}} düzeltildi (%{{rate}})',
+        ruleWarnings: '{{count}} uyarı • %{{rate}} takip / düzeltme',
         medianAttempts: 'Medyan: {{attempts}} deneme',
         badgeNoViolations: '0 İhlal',
         badgeInsufficient: 'Yetersiz Veri (n={{n}})',
@@ -88,7 +91,10 @@ export const resources = {
         integrityTitle: 'Oturum & Eşzamanlılık Bütünlüğü',
         sessionLabel: 'Oturum Kimliği:',
         circuitLabel: 'Devre Kesici Sayacı:',
-        circuitValue: '{{retries}} / 5 deneme'
+        circuitValue: '{{retries}} / 5 deneme',
+        diagnosticsTitle: 'Sistem Sağlığı & Tanılama (Diagnostics)',
+        diagnosticsHealthy: 'Sağlıklı (Kilit & Journal Senkronize)',
+        telemetryIssueDetected: 'Telemetri Uyarısı / Senkronizasyon Sorunu Tespit Edildi'
       },
       stats: {
         blocked: 'Engellendi',
@@ -171,6 +177,7 @@ export const resources = {
         docGovTitle: 'Dokümantasyon Yönetişimi (§6 Same-Commit)',
         docGovDesc: 'Motor dosyası değiştiğinde oturum kapanışında CHANGELOG güncellenmesini zorlar.',
         badgeBlock: 'BLOCK',
+        badgeShadow: 'GÖLGE (SHADOW)',
         badgeWarnAdvisory: 'WARN (TAVSİYE)',
         badgeWarnStop: 'WARN (KAPANIŞ ŞARTI)',
         badgeOptInStop: 'OPT-IN (KAPANIŞ ŞARTI)',
@@ -222,6 +229,8 @@ export const resources = {
       live: {
         empty: 'No security events recorded yet.',
         recoveryHeader: 'Recovery: {{rule}}',
+        recoveryFlowBlocked: 'BLOCKED',
+        recoveryFlowRecovered: 'RECOVERED',
         recoveryAttempts: 'Resolved on attempt {{attempts}}',
         recoveryDuration: 'Duration: {{duration}}s',
         shadowDesc: 'Shadow Mode: Agent was not blocked; shadow telemetry recorded.',
@@ -249,6 +258,7 @@ export const resources = {
         reportCardTitle: 'Guardrail Effectiveness Scorecard (Empirical Data)',
         ruleClean: 'Clean in active session (0 Violations)',
         ruleInterventions: '{{blocked}} blocks • {{recovered}} recovered (%{{rate}})',
+        ruleWarnings: '{{count}} warnings • {{rate}}% follow-up / fixed',
         medianAttempts: 'Median: {{attempts}} attempts',
         badgeNoViolations: '0 Violations',
         badgeInsufficient: 'Insufficient Data (n={{n}})',
@@ -279,7 +289,10 @@ export const resources = {
         integrityTitle: 'Session & Concurrency Integrity',
         sessionLabel: 'Session ID:',
         circuitLabel: 'Circuit Breaker Counter:',
-        circuitValue: '{{retries}} / 5 attempts'
+        circuitValue: '{{retries}} / 5 attempts',
+        diagnosticsTitle: 'System Health & Diagnostics',
+        diagnosticsHealthy: 'Healthy (Lock & Journal Synced)',
+        telemetryIssueDetected: 'Telemetry Warning / Desynchronization Detected'
       },
       stats: {
         blocked: 'Blocked',
@@ -362,6 +375,7 @@ export const resources = {
         docGovTitle: 'Documentation Governance (§6 Same-Commit)',
         docGovDesc: 'Enforces CHANGELOG update on session close when engine files change.',
         badgeBlock: 'BLOCK',
+        badgeShadow: 'SHADOW',
         badgeWarnAdvisory: 'WARN (ADVISORY)',
         badgeWarnStop: 'WARN (STOP OBLIGATION)',
         badgeOptInStop: 'OPT-IN (STOP OBLIGATION)',

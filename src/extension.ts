@@ -544,6 +544,15 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
     const approvedCount = eventsList.filter(e => e.status === 'APPROVED').length;
     const totalEvents = eventsList.length;
 
+    const desyncWarning = (data as any)?.hasDesyncWarning || (data as any)?.rebuiltFromLog;
+    const desyncMsg = (data as any)?.desyncMessage || t('insights.telemetryIssueDetected');
+    const desyncAlertHtml = desyncWarning ? `
+      <div class="telemetry-alert-banner">
+        <span class="icon-inline">${lucide('alertTriangle', { size: 12, color: 'var(--color-amber)' })}</span>
+        <span>${escapeHtml(desyncMsg)}</span>
+      </div>
+    ` : '';
+
     // Agent Recovery Calculation: Did agent fix a blocked event on next turn?
     let recoveredCount = 0;
     let totalBlockedAnalyzed = 0;
@@ -675,9 +684,16 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
               </div>
               ${isRec ? `
                 <div class="drawer-meta-pill bg-cyan">
-                  <span class="pill-row">${lucide('rotateCw', { size: 11 })} <span>${t('live.recoveryHeader', { rule: escapeHtml(e.resolvedRuleId || e.ruleId || 'Rule') })}</span></span>
-                  <span>• ${t('live.recoveryAttempts', { attempts: e.recoveryAttempts || 1 })}</span>
-                  ${e.resolutionMs ? `<span>• ${t('live.recoveryDuration', { duration: (e.resolutionMs / 1000).toFixed(1) })}</span>` : ''}
+                  <div class="recovery-flow-row" style="margin-bottom: 3px;">
+                    <span class="status-badge badge-blocked" style="font-size: 8px; padding: 1px 5px;">${t('live.recoveryFlowBlocked')}</span>
+                    <span style="color: var(--color-cyan); display: inline-flex; align-items: center;">${lucide('arrowRight', { size: 9 })}</span>
+                    <span class="status-badge badge-allowed" style="font-size: 8px; padding: 1px 5px;">${t('live.recoveryFlowRecovered')}</span>
+                    <strong style="margin-left: 4px; color: var(--text-main); font-size: 10px;">${escapeHtml(e.resolvedRuleId || e.ruleId || 'Rule')}</strong>
+                  </div>
+                  <div class="recovery-meta-sub" style="font-size: 9px; color: var(--text-muted);">
+                    <span>${t('live.recoveryAttempts', { attempts: e.recoveryAttempts || 1 })}</span>
+                    ${e.resolutionMs ? `<span> • ${t('live.recoveryDuration', { duration: (e.resolutionMs / 1000).toFixed(1) })}</span>` : ''}
+                  </div>
                 </div>
               ` : ''}
               ${isShd ? `
@@ -781,24 +797,37 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
 
     // --- TAB 3: RULES (CATEGORIZED SECURITY / ARCHITECTURE / QUALITY) ---
     const docGovActive = projectCfg?.governance?.enforceDocObligations === true;
+
+    function getRuleBadge(ruleKey: string, defaultMode: 'block' | 'warn') {
+      const rCfg = projectCfg?.rules?.[ruleKey];
+      const isShadow = (typeof rCfg === 'object' && rCfg?.mode === 'shadow') || rCfg === 'shadow';
+      if (isShadow) {
+        return `<span class="mode-pill mode-shadow">${lucide('eye', { size: 9 })} ${t('rules.badgeShadow')}</span>`;
+      }
+      if (defaultMode === 'block') {
+        return `<span class="mode-pill mode-block">${t('rules.badgeBlock')}</span>`;
+      }
+      return `<span class="mode-pill mode-warn">${t('rules.badgeWarnAdvisory')}</span>`;
+    }
+
     const rulesHtml = `
       <div class="rules-group">
         <div class="group-title text-red"><span class="icon-inline">${lucide('lock', { size: 12 })}</span> ${t('rules.secTitle')}</div>
         <div class="rule-row">
           <div class="rule-name">${t('rules.g0Title')}</div>
-          <span class="mode-pill mode-block">${t('rules.badgeBlock')}</span>
+          ${getRuleBadge('G0_SECRET_LEAK', 'block')}
         </div>
         <div class="rule-desc">${t('rules.g0Desc')}</div>
 
         <div class="rule-row">
           <div class="rule-name">${t('rules.g1Title')}</div>
-          <span class="mode-pill mode-block">${t('rules.badgeBlock')}</span>
+          ${getRuleBadge('G1_SILENT_EXCEPTION', 'block')}
         </div>
         <div class="rule-desc">${t('rules.g1Desc')}</div>
 
         <div class="rule-row">
           <div class="rule-name">${t('rules.g2Title')}</div>
-          <span class="mode-pill mode-block">${t('rules.badgeBlock')}</span>
+          ${getRuleBadge('G2_TEST_INTEGRITY', 'block')}
         </div>
         <div class="rule-desc">${t('rules.g2Desc')}</div>
       </div>
@@ -807,25 +836,25 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
         <div class="group-title text-purple"><span class="icon-inline">${lucide('layers', { size: 12 })}</span> ${t('rules.archTitle')}</div>
         <div class="rule-row">
           <div class="rule-name">${t('rules.g4Title')}</div>
-          <span class="mode-pill mode-block">${t('rules.badgeBlock')}</span>
+          ${getRuleBadge('G4_IMPORT_MATRIX', 'block')}
         </div>
         <div class="rule-desc">${t('rules.g4Desc')}</div>
 
         <div class="rule-row">
           <div class="rule-name">${t('rules.srpTitle')}</div>
-          <span class="mode-pill mode-block">${t('rules.badgeBlock')}</span>
+          ${getRuleBadge('SRP_BOUNDARY', 'block')}
         </div>
         <div class="rule-desc">${t('rules.srpDesc')}</div>
 
         <div class="rule-row">
           <div class="rule-name">${t('rules.g3Title')}</div>
-          <span class="mode-pill mode-warn">${t('rules.badgeWarnAdvisory')}</span>
+          ${getRuleBadge('G3_COMPILER_BYPASS', 'warn')}
         </div>
         <div class="rule-desc">${t('rules.g3Desc')}</div>
 
         <div class="rule-row">
           <div class="rule-name">${t('rules.growthTitle')}</div>
-          <span class="mode-pill mode-warn">${t('rules.badgeWarnAdvisory')}</span>
+          ${getRuleBadge('ARCH_FILE_GROWTH', 'warn')}
         </div>
         <div class="rule-desc">${t('rules.growthDesc')}</div>
       </div>
@@ -868,7 +897,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
 
     const ruleStats: Record<string, any> = eff.ruleStats || {};
 
-    function formatRuleStat(ruleKey: string, defaultName: string) {
+    function formatRuleStat(ruleKey: string, defaultName: string, isWarning?: boolean) {
       const stat = ruleStats[ruleKey];
       const b = stat?.blocked || 0;
       const r = stat?.recovered || 0;
@@ -910,6 +939,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
         r,
         rate,
         med,
+        isWarning: !!isWarning,
         badgeText,
         badgeClass,
         badgeIcon
@@ -921,7 +951,9 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       formatRuleStat('G1_SILENT_EXCEPTION', 'G1 Silent Exception'),
       formatRuleStat('G2_TEST_INTEGRITY', 'G2 Test Integrity'),
       formatRuleStat('G4_IMPORT_MATRIX', 'G4 Import Matrix'),
-      formatRuleStat('SRP_BOUNDARY', 'SRP & Cohesion')
+      formatRuleStat('SRP_BOUNDARY', 'SRP & Cohesion'),
+      formatRuleStat('ARCH_FILE_GROWTH', 'ARCH_FILE_GROWTH', true),
+      formatRuleStat('G3_COMPILER_BYPASS', 'G3 Compiler Bypass', true)
     ];
 
     const lastSeq = (data as any)?.lastAuditSeq || 0;
@@ -948,8 +980,8 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
             </div>
             ${st.b > 0 ? `
               <div class="rule-stat-sub">
-                <span>${t('insights.ruleInterventions', { blocked: st.b, recovered: st.r, rate: st.rate })}</span>
-                <span>${t('insights.medianAttempts', { attempts: st.med })}</span>
+                <span>${st.isWarning ? t('insights.ruleWarnings', { count: st.b, rate: st.rate }) : t('insights.ruleInterventions', { blocked: st.b, recovered: st.r, rate: st.rate })}</span>
+                ${!st.isWarning ? `<span>${t('insights.medianAttempts', { attempts: st.med })}</span>` : ''}
               </div>
             ` : `<div class="rule-stat-sub text-muted">${t('insights.ruleClean')}</div>`}
           </div>
@@ -976,49 +1008,62 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
         </div>
       </div>
 
-      <div class="insight-card">
-        <div class="insight-title"><span class="icon-inline">${lucide('database', { size: 12 })}</span> ${t('insights.walTitle')}</div>
-        <div class="metric-row">
-          <span class="metric-lbl">${t('insights.walJournalLabel')}</span>
-          <span class="metric-val text-green"><span class="icon-inline">${lucide('circleDot', { size: 9, color: 'var(--color-green)' })}</span> ${t('insights.walJournalValue')}</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-lbl">${t('insights.walLiveLabel')}</span>
-          <span class="metric-val text-cyan"><span class="icon-inline">${lucide('circleDot', { size: 9, color: 'var(--color-cyan)' })}</span> ${t('insights.walLiveValue', { seq: lastSeq })}</span>
-        </div>
-      </div>
+      <details class="diagnostics-details">
+        <summary class="diagnostics-summary">
+          <span class="summary-left">
+            <span class="icon-inline">${lucide('settings', { size: 11, color: 'var(--text-muted)' })}</span>
+            <span class="diagnostics-title">${t('insights.diagnosticsTitle')}</span>
+          </span>
+          <span class="status-badge badge-allowed" style="font-size: 8px; padding: 1px 5px;">
+            ${lucide('checkCircle', { size: 8 })} ${t('insights.diagnosticsHealthy')}
+          </span>
+        </summary>
+        <div class="diagnostics-body">
+          <div class="insight-card" style="margin-top: 6px;">
+            <div class="insight-title"><span class="icon-inline">${lucide('database', { size: 12 })}</span> ${t('insights.walTitle')}</div>
+            <div class="metric-row">
+              <span class="metric-lbl">${t('insights.walJournalLabel')}</span>
+              <span class="metric-val text-green"><span class="icon-inline">${lucide('circleDot', { size: 9, color: 'var(--color-green)' })}</span> ${t('insights.walJournalValue')}</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-lbl">${t('insights.walLiveLabel')}</span>
+              <span class="metric-val text-cyan"><span class="icon-inline">${lucide('circleDot', { size: 9, color: 'var(--color-cyan)' })}</span> ${t('insights.walLiveValue', { seq: lastSeq })}</span>
+            </div>
+          </div>
 
-      <div class="insight-card">
-        <div class="insight-title"><span class="icon-inline">${lucide('cpu', { size: 12 })}</span> ${t('insights.perfTitle')}</div>
-        <div class="metric-row">
-          <span class="metric-lbl">${t('insights.latencyFast')}:</span>
-          <span class="metric-val text-green">${t('insights.fastBudget')}</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-lbl">${t('insights.latencySpawn')}:</span>
-          <span class="metric-val text-muted">${t('insights.spawnBudget')}</span>
-        </div>
-      </div>
+          <div class="insight-card">
+            <div class="insight-title"><span class="icon-inline">${lucide('cpu', { size: 12 })}</span> ${t('insights.perfTitle')}</div>
+            <div class="metric-row">
+              <span class="metric-lbl">${t('insights.latencyFast')}:</span>
+              <span class="metric-val text-green">${t('insights.fastBudget')}</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-lbl">${t('insights.latencySpawn')}:</span>
+              <span class="metric-val text-muted">${t('insights.spawnBudget')}</span>
+            </div>
+          </div>
 
-      <div class="insight-card">
-        <div class="insight-title"><span class="icon-inline">${lucide('lock', { size: 12 })}</span> ${t('insights.integrityTitle')}</div>
-        <div class="metric-row">
-          <span class="metric-lbl">${t('insights.lockStatus')}:</span>
-          <span class="metric-val text-green"><span class="icon-inline">${lucide('checkCircle', { size: 10, color: 'var(--color-green)' })}</span> ${t('insights.lockHealthy')}</span>
+          <div class="insight-card">
+            <div class="insight-title"><span class="icon-inline">${lucide('lock', { size: 12 })}</span> ${t('insights.integrityTitle')}</div>
+            <div class="metric-row">
+              <span class="metric-lbl">${t('insights.lockStatus')}:</span>
+              <span class="metric-val text-green"><span class="icon-inline">${lucide('checkCircle', { size: 10, color: 'var(--color-green)' })}</span> ${t('insights.lockHealthy')}</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-lbl">${t('insights.twoPhase')}:</span>
+              <span class="metric-val text-green"><span class="icon-inline">${lucide('checkCircle', { size: 10, color: 'var(--color-green)' })}</span> ${t('insights.twoPhaseActive')}</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-lbl">${t('insights.sessionLabel')}</span>
+              <span class="metric-val text-cyan">${shortSess}</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-lbl">${t('insights.circuitLabel')}</span>
+              <span class="metric-val text-muted">${t('insights.circuitValue', { retries: stopRetries })}</span>
+            </div>
+          </div>
         </div>
-        <div class="metric-row">
-          <span class="metric-lbl">${t('insights.twoPhase')}:</span>
-          <span class="metric-val text-green"><span class="icon-inline">${lucide('checkCircle', { size: 10, color: 'var(--color-green)' })}</span> ${t('insights.twoPhaseActive')}</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-lbl">${t('insights.sessionLabel')}</span>
-          <span class="metric-val text-cyan">${shortSess}</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-lbl">${t('insights.circuitLabel')}</span>
-          <span class="metric-val text-muted">${t('insights.circuitValue', { retries: stopRetries })}</span>
-        </div>
-      </div>
+      </details>
     `;
 
     // --- RENDER MAIN WEBVIEW HTML ---
@@ -1369,11 +1414,63 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
           .rule-row { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
           .rule-name { font-weight: 700; font-size: 10px; }
           .rule-desc { font-size: 9px; color: var(--text-muted); line-height: 1.3; margin-top: 2px; }
-          .mode-pill { font-size: 8px; font-weight: 800; padding: 1px 5px; border-radius: 3px; }
+          .mode-pill { font-size: 8px; font-weight: 800; padding: 1px 5px; border-radius: 3px; display: inline-flex; align-items: center; gap: 3px; }
           .mode-block { background: rgba(239, 68, 68, 0.15); color: var(--color-red); }
           .mode-warn { background: rgba(245, 158, 11, 0.15); color: var(--color-amber); }
+          .mode-shadow { background: rgba(192, 132, 252, 0.15); color: var(--color-purple); border: 1px solid rgba(192, 132, 252, 0.3); }
           .mode-active { background: rgba(16, 185, 129, 0.15); color: var(--color-green); }
           .mode-inactive { background: rgba(255, 255, 255, 0.05); color: var(--text-muted); }
+
+          /* Diagnostics & System Health (Collapsible) */
+          .diagnostics-details {
+            margin-top: 10px;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border-dim);
+            border-radius: 6px;
+            overflow: hidden;
+          }
+          .diagnostics-summary {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 8px;
+            cursor: pointer;
+            user-select: none;
+            font-size: 9px;
+            font-weight: 700;
+            color: var(--text-muted);
+          }
+          .diagnostics-summary:hover {
+            background: var(--bg-hover);
+            color: var(--text-main);
+          }
+          .diagnostics-title {
+            font-size: 9px;
+            font-weight: 800;
+            letter-spacing: 0.3px;
+          }
+          .diagnostics-body {
+            padding: 6px 8px 8px 8px;
+            border-top: 1px solid var(--border-dim);
+          }
+          .telemetry-alert-banner {
+            background: rgba(245, 158, 11, 0.15);
+            border: 1px solid var(--color-amber);
+            color: #fbbf24;
+            padding: 6px 8px;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            font-size: 10px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+          }
+          .recovery-flow-row {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+          }
 
           /* Insights */
           .insight-card {
@@ -1462,6 +1559,8 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
             <button class="mini-btn" onclick="clearLogs()" title="${t('actions.clearLogs')}">${lucide('trash2', { size: 11 })}</button>
           </div>
         </div>
+
+        ${desyncAlertHtml}
 
         <!-- Current Action Banner -->
         ${currentCardHtml}
