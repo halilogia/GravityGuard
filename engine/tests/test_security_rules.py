@@ -32,6 +32,37 @@ class TestSecurityRulesDomain(unittest.TestCase):
         blocked, _, _ = check_g0_secret_leak(f"const token = '{token}';")
         self.assertFalse(blocked)
 
+    def test_g0_blocks_legacy_openai_key(self):
+        token = "sk-" + "Zx9Qw7Er5Ty3" * 4
+        blocked, reason, _ = check_g0_secret_leak(f'KEY = "{token}"')
+        self.assertTrue(blocked)
+        self.assertIn("OpenAI", reason)
+
+    def test_g0_blocks_openai_t3blbkfj_key(self):
+        token = "sk-" + "A" * 20 + "T3BlbkFJ" + "b" * 20
+        blocked, _, _ = check_g0_secret_leak(f'KEY = "{token}"')
+        self.assertTrue(blocked)
+
+    def test_g0_blocks_modern_openai_project_key(self):
+        token = "sk-proj-" + "abcd1234" * 6
+        blocked, _, _ = check_g0_secret_leak(f'KEY = "{token}"')
+        self.assertTrue(blocked)
+
+    def test_g0_legacy_key_rule_ignores_words_that_merely_contain_sk_dash(self):
+        for text in (
+            "demo task-report-cleanup-deepseekv4flash done",
+            "risk-assessment-for-the-quarterly-review-of-all-services",
+            "see the sk-learn-compatible-estimator-wrapper-package-name docs",
+            "disk-usage-monitoring-and-alerting-configuration-file",
+        ):
+            blocked, _, _ = check_g0_secret_leak(text)
+            self.assertFalse(blocked, text)
+
+    def test_g0_legacy_key_rule_allows_placeholders(self):
+        for token in ("sk-" + "x" * 48, "sk-your_api_key_here_" + "0" * 27, "sk-" + "example" * 7):
+            blocked, _, _ = check_g0_secret_leak(f'KEY = "{token}"')
+            self.assertFalse(blocked, token)
+
     def test_g1_blocks_empty_except_in_python(self):
         code = "try:\n    do_it()\nexcept:\n    pass\n"
         blocked, reason = check_g1_silent_exception(

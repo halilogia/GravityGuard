@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"<GRAVITYGUARD>/plugin/claude-code/gravityguard_claude_hook.py\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"<GRAVITYGUARD>/plugin/claude-code/gravityguard_claude_hook.py\" --stop",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

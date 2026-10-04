@@ -308,5 +308,113 @@ record_pending_doc_obligation(prod_file, ['CHANGELOG.md'], 'Test obligation', co
         self.assertNotIn("corrupted", state_after, "State must not be modified when lock acquisition times out")
 
 
+class TestSessionIsolation(unittest.TestCase):
+    """One conversation's debt, retries and circuit breaker never reach another conversation of the same project."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="gg_iso_test_")
+        self.orig_log_dir = os.environ.get("GRAVITYGUARD_LOG_DIR")
+        os.environ["GRAVITYGUARD_LOG_DIR"] = self.temp_dir
+        self.root = Path(self.temp_dir)
+
+    def tearDown(self):
+        if self.orig_log_dir is not None:
+            os.environ["GRAVITYGUARD_LOG_DIR"] = self.orig_log_dir
+        else:
+            os.environ.pop("GRAVITYGUARD_LOG_DIR", None)
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_other_sessions_test_debt_is_not_mine(self):
+        record_pending_test_evidence("src/a.py", None, "test_a.py", "no test", project_root=self.root, conversation_id="A")
+        self.assertIn("src/a.py", get_unresolved_test_evidence(self.root, "A"))
+        self.assertEqual(get_unresolved_test_evidence(self.root, "B"), {})
+
+    def test_other_sessions_doc_debt_is_not_mine(self):
+        record_pending_doc_obligation("engine/a.py", ["CHANGELOG.md"], project_root=self.root, conversation_id="A")
+        self.assertIn("engine/a.py", get_unresolved_doc_obligations(self.root, "A"))
+        self.assertEqual(get_unresolved_doc_obligations(self.root, "B"), {})
+
+    def test_session_that_only_has_retries_still_sees_no_foreign_debt(self):
+        """B's session entry is created by its own Stop retries and has no obligation list; that must not fall back to A's."""
+        record_pending_test_evidence("src/a.py", None, "test_a.py", "no test", project_root=self.root, conversation_id="A")
+        increment_session_stop_retries(self.root, "B")
+        self.assertEqual(get_unresolved_test_evidence(self.root, "B"), {})
+
+    def test_both_sessions_owing_the_same_file_each_keep_it(self):
+        for cid in ("A", "B"):
+            record_pending_test_evidence("src/shared.py", None, "test_shared.py", "no test", project_root=self.root, conversation_id=cid)
+        self.assertIn("src/shared.py", get_unresolved_test_evidence(self.root, "A"))
+        self.assertIn("src/shared.py", get_unresolved_test_evidence(self.root, "B"))
+
+    def test_legacy_ownerless_pending_is_still_enforced(self):
+        """A state file written before sessions existed has project-wide entries nobody owns; every conversation owes them."""
+        save_governance_state({
+            "test_obligations": {"pending": {"src/old.py": {"reason": "legacy"}}},
+            "doc_obligations": {"pending": {"engine/old.py": {"reason": "legacy"}}},
+        }, self.root)
+        self.assertIn("src/old.py", get_unresolved_test_evidence(self.root, "B"))
+        self.assertIn("engine/old.py", get_unresolved_doc_obligations(self.root, "B"))
+
+    def test_no_conversation_id_sees_the_project_wide_list(self):
+        record_pending_test_evidence("src/a.py", None, "test_a.py", "no test", project_root=self.root, conversation_id="A")
+        self.assertIn("src/a.py", get_unresolved_test_evidence(self.root))
+
+    def test_stop_retries_do_not_leak_between_sessions(self):
+        for _ in range(4):
+            increment_session_stop_retries(self.root, "A")
+        self.assertEqual(get_session_stop_retries(self.root, "A"), 4)
+        self.assertEqual(get_session_stop_retries(self.root, "B"), 0)
+        self.assertEqual(increment_session_stop_retries(self.root, "B"), 1)
+        self.assertEqual(get_session_stop_retries(self.root, "A"), 4)
+
+    def test_malformed_retry_value_counts_as_zero(self):
+        save_governance_state({"sessions": {"A": {"stop_retries": "many"}}, "stop_retries": 9}, self.root)
+        self.assertEqual(get_session_stop_retries(self.root, "A"), 0)
+
+
+class TestProjectIsolation(unittest.TestCase):
+    """Two projects keep separate state files; a conversation's debt in one never shows up in the other."""
+
+    def setUp(self):
+        self.orig_log_dir = os.environ.pop("GRAVITYGUARD_LOG_DIR", None)
+        self.base = tempfile.mkdtemp(prefix="gg_proj_test_")
+        self.proj_a = Path(self.base) / "a"
+        self.proj_b = Path(self.base) / "b"
+        self.proj_a.mkdir()
+        self.proj_b.mkdir()
+
+    def tearDown(self):
+        if self.orig_log_dir is not None:
+            os.environ["GRAVITYGUARD_LOG_DIR"] = self.orig_log_dir
+        shutil.rmtree(self.base, ignore_errors=True)
+
+    def test_same_conversation_id_in_two_projects(self):
+        record_pending_test_evidence("src/x.py", None, "test_x.py", "no test", project_root=self.proj_a, conversation_id="S")
+        self.assertIn("src/x.py", get_unresolved_test_evidence(self.proj_a, "S"))
+        self.assertEqual(get_unresolved_test_evidence(self.proj_b, "S"), {})
+
+    def test_other_stop_roots_only_returns_roots_that_already_keep_state(self):
+        from gravityguard_engine.dispatcher import _other_stop_roots
+        record_pending_test_evidence("src/x.py", None, "test_x.py", "no test", project_root=self.proj_b, conversation_id="S")
+        payload = {"workspacePaths": [str(self.proj_a), str(self.proj_b), str(Path(self.base) / "missing")]}
+        self.assertEqual([p.name for p in _other_stop_roots(payload, self.proj_a)], ["b"])
+        self.assertFalse((self.proj_a / ".gravityguard").exists(), "the Stop check must not create state in the primary root")
+
+    def test_other_stop_roots_does_not_create_state_in_an_untouched_root(self):
+        from gravityguard_engine.dispatcher import _other_stop_roots
+        payload = {"workspacePaths": [str(self.proj_a), str(self.proj_b)]}
+        self.assertEqual(_other_stop_roots(payload, self.proj_a), [])
+        self.assertFalse((self.proj_b / ".gravityguard").exists())
+
+    def test_other_stop_roots_is_empty_with_the_log_dir_override(self):
+        from gravityguard_engine.dispatcher import _other_stop_roots
+        record_pending_test_evidence("src/x.py", None, "test_x.py", "no test", project_root=self.proj_b, conversation_id="S")
+        os.environ["GRAVITYGUARD_LOG_DIR"] = self.base
+        try:
+            self.assertEqual(_other_stop_roots({"workspacePaths": [str(self.proj_a), str(self.proj_b)]}, self.proj_a), [])
+        finally:
+            os.environ.pop("GRAVITYGUARD_LOG_DIR", None)
+
+
 if __name__ == "__main__":
     unittest.main()

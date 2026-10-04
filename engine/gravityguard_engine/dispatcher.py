@@ -73,6 +73,41 @@ def is_rule_shadow(rule_id: str, cfg: Optional[dict]) -> bool:
     return False
 
 
+def _other_stop_roots(payload: dict, primary: Path) -> List[Path]:
+    """Other roots of a multi-root window that already keep governance state, for the Stop check.
+
+    A Stop carries no target file, so the primary root is only the first declared workspace; a conversation that edited
+    the second root would otherwise end with its obligations unseen. Only roots that already have a state file are
+    returned (the check never creates state in a root this conversation did not touch), and obligations are session
+    scoped, so another conversation's debt in those roots is not seen either. With the log-directory override
+    (tests, isolated runs) the single override root is used as before.
+    """
+    if os.environ.get("GRAVITYGUARD_LOG_DIR"):
+        return []
+    workspaces = payload.get("workspacePaths", [])
+    if not isinstance(workspaces, list):
+        return []
+    try:
+        seen = {str(primary.resolve()).lower()}
+    except OSError:
+        seen = set()
+    roots: List[Path] = []
+    for ws in workspaces:
+        if not ws:
+            continue
+        candidate = Path(str(ws))
+        try:
+            key = str(candidate.resolve()).lower()
+        except OSError:
+            continue
+        if key in seen or not candidate.is_dir():
+            continue
+        seen.add(key)
+        if (candidate / ".gravityguard" / "runtime" / "governance.json").is_file():
+            roots.append(candidate)
+    return roots
+
+
 def validate_gravityguard() -> None:
     harden_streams_to_utf8()
     start_time = time.perf_counter()
@@ -118,8 +153,12 @@ def validate_gravityguard() -> None:
             # Defect B fix: Reconcile obligations with physical filesystem verification
             reconcile_obligations_on_disk(project_root, conversation_id, cfg)
 
-            unresolved_tests = get_unresolved_test_evidence(project_root, conversation_id)
-            unresolved_docs = get_unresolved_doc_obligations(project_root, conversation_id)
+            unresolved_tests = dict(get_unresolved_test_evidence(project_root, conversation_id))
+            unresolved_docs = dict(get_unresolved_doc_obligations(project_root, conversation_id))
+            for other_root in _other_stop_roots(payload, project_root):
+                reconcile_obligations_on_disk(other_root, conversation_id, load_gravityguard_config("", other_root))
+                unresolved_tests.update(get_unresolved_test_evidence(other_root, conversation_id))
+                unresolved_docs.update(get_unresolved_doc_obligations(other_root, conversation_id))
 
             warn_reasons = []
             if unresolved_tests:

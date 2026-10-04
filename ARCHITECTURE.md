@@ -107,6 +107,8 @@ The Prompt Enhancer talks to **any OpenAI-compatible local gateway** — 9Router
 - Evaluates code mutations using lightweight AST inspection and regex pattern matching:
   - **SRP Violation Check**: Scans for the simultaneous presence of UI elements (e.g. PyQt, Tkinter, Blender `bpy.types.Panel`, DOM manipulations) and Network operations (e.g. `urllib`, `requests`, `aiohttp`, `websocket`) within the same file.
   - **File Scale Heuristics**: Distinguishes cohesive single-responsibility files from unmaintainable god-files without arbitrary mechanical line-count blocking.
+- **Hosts**: Antigravity calls the engine directly (`plugin/hooks.json`). Claude Code goes through `plugin/claude-code/gravityguard_claude_hook.py`, which translates `PreToolUse` (`Write` / `Edit` / `MultiEdit`) and `Stop` events to the engine payload and the answer back (`deny` / `additionalContext` / `{"decision":"block"}`), using the conversation id `claude:<session_id>`. The adapter is not packaged into the VSIX and never copies a rule.
+- **State scope**: obligations and Stop retries are per conversation (`governance.json` → `sessions[<id>]`); the project-wide lists are a monitor-facing union plus legacy entries nobody owns. See `docs/KNOWLEDGE.md` §2.5.
 
 ### 2.5. Complexity Heuristics & Their Thresholds (`OE_SPIKE`, `ARCH_FILE_GROWTH`)
 

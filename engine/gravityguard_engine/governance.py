@@ -254,10 +254,13 @@ def compute_file_digest(file_path: Path) -> Tuple[Optional[str], Optional[float]
 
 
 def get_session_stop_retries(project_root: Optional[Path] = None, conversation_id: Optional[str] = None) -> int:
+    """Stop retries of ONE conversation. The project-wide ``stop_retries`` is a display value only (the live monitor
+    shows it); reading it here let another session's retries open or close this session's circuit breaker."""
     state = load_governance_state(project_root)
     cid = conversation_id or "default"
     session = state.get("sessions", {}).get(cid, {})
-    return session.get("stop_retries", state.get("stop_retries", 0))
+    value = session.get("stop_retries", 0)
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
 def increment_session_stop_retries(project_root: Optional[Path] = None, conversation_id: Optional[str] = None) -> int:
@@ -382,16 +385,38 @@ def resolve_pending_test_evidence(
     return resolved
 
 
+def _visible_pending(state: Dict[str, Any], category: str, conversation_id: Optional[str]) -> Dict[str, Any]:
+    """Pending obligations one conversation has to answer for: its own, plus project-wide entries NO session owns.
+
+    The project-wide list is a union kept for the live monitor and for state files written before sessions existed.
+    An entry some other session owns is that session's debt and must not block this one; an entry nobody owns (a legacy
+    file) still counts for everybody, as before. Without a conversation id the project-wide list is returned.
+    """
+    global_pending = state.get(category, {}).get("pending", {})
+    if not conversation_id:
+        return global_pending
+    sessions = state.get("sessions", {})
+    own_session = sessions.get(conversation_id, {})
+    own = own_session.get(category, {}).get("pending") if isinstance(own_session, dict) else None
+    owned_elsewhere = set()
+    for sid, sdata in sessions.items():
+        if sid == conversation_id or not isinstance(sdata, dict):
+            continue
+        other = sdata.get(category, {}).get("pending")
+        if isinstance(other, dict):
+            owned_elsewhere.update(other)
+    visible = {k: v for k, v in global_pending.items() if k not in owned_elsewhere} if isinstance(global_pending, dict) else {}
+    if isinstance(own, dict):
+        visible.update(own)
+    return visible
+
+
 def get_unresolved_test_evidence(
     project_root: Optional[Path] = None,
     conversation_id: Optional[str] = None
 ) -> Dict[str, Any]:
-    state = load_governance_state(project_root)
-    if conversation_id and conversation_id in state.get("sessions", {}):
-        sess_pending = state["sessions"][conversation_id].get("test_obligations", {}).get("pending")
-        if sess_pending is not None:
-            return sess_pending
-    return state.get("test_obligations", {}).get("pending", {})
+    """Pending test obligations this conversation owes (see ``_visible_pending``)."""
+    return _visible_pending(load_governance_state(project_root), "test_obligations", conversation_id)
 
 
 def clear_test_evidence_state(project_root: Optional[Path] = None) -> None:
@@ -486,12 +511,8 @@ def get_unresolved_doc_obligations(
     project_root: Optional[Path] = None,
     conversation_id: Optional[str] = None
 ) -> Dict[str, Any]:
-    state = load_governance_state(project_root)
-    if conversation_id and conversation_id in state.get("sessions", {}):
-        sess_pending = state["sessions"][conversation_id].get("doc_obligations", {}).get("pending")
-        if sess_pending is not None:
-            return sess_pending
-    return state.get("doc_obligations", {}).get("pending", {})
+    """Pending documentation obligations this conversation owes (same isolation rule as the test obligations)."""
+    return _visible_pending(load_governance_state(project_root), "doc_obligations", conversation_id)
 
 
 def clear_doc_obligations(project_root: Optional[Path] = None) -> None:

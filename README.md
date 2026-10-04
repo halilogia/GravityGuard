@@ -1,11 +1,11 @@
-# GravityGuard — v1.3.0
+# GravityGuard — v1.3.1
 
 > Deterministic Architecture Airbag, Secret Leak Airbag & AI Agent Gatekeeper for Antigravity IDE.
 
 [English](#english) | [Türkçe](#türkçe)
 
 [![Antigravity Compatible](https://img.shields.io/badge/Antigravity%20IDE-Compatible-blue.svg)](https://antigravity.google/)
-[![Tests](https://img.shields.io/badge/Engine%20125%20%2B%20TS%2020-Passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Engine%20238%20%2B%20TS%2037-Passing-brightgreen.svg)]()
 [![Core Evaluator](https://img.shields.io/badge/Core%20Benchmark-Avg%20~0.1ms%20%7C%20p95%20%3C0.5ms-blue.svg)]()
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9%20%7C%20ES2022-blue.svg)](https://www.typescriptlang.org/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B%20%7C%20Zero%20Dependencies-brightgreen.svg)](https://www.python.org/)
@@ -24,7 +24,7 @@ GravityGuard operates an ordered, zero-overhead pipeline before any file modific
 
 | ID | Rule Name | Severity | What It Enforces / Catches |
 | :--- | :--- | :--- | :--- |
-| **`G0`** | **Secret Leak Guard** | **BLOCK / WARN** | Blocks leaked credentials in diffs (OpenAI, Anthropic/Claude, Gemini, Slack, GitHub tokens, and private keys). Emits audit warnings for raw connection URIs and bearer tokens. Masks all logs. |
+| **`G0`** | **Secret Leak Guard** | **BLOCK / WARN** | Blocks leaked credentials in diffs (OpenAI — modern and legacy keys, Anthropic/Claude, Gemini, Slack, GitHub tokens, and private keys). Emits audit warnings for raw connection URIs and bearer tokens. Masks all logs. |
 | **`G1`** | **Silent Exception Guard** | **BLOCK** | Rejects newly added empty exception blocks (`except: pass`, `except: ...`, `catch {}`). Forces robust error logging or re-raising. |
 | **`G2`** | **Test Integrity Guard** | **BLOCK / WARN** | Prevents AI agents from "cheating" tests. Blocks test deletion via frequency counters (`collections.Counter`) and disables trickery (`.skip()`, `xit()`). Emits WARN on `.only()`. |
 | **`G3`** | **Compiler Bypass Guard** | **WARN ONLY** | Flags newly introduced linter/compiler suppression pragmas (`# noqa`, `# type: ignore`, `@ts-ignore`, `eslint-disable`). |
@@ -94,6 +94,10 @@ GravityGuard operates an ordered, zero-overhead pipeline before any file modific
 4. Go to Antigravity Chat, press Ctrl + V, and submit!
 ```
 
+### Use the guard in Claude Code
+
+The same engine guards Claude Code through a thin adapter in [`plugin/claude-code/`](plugin/claude-code/README.md): `Write` / `Edit` / `MultiEdit` go through the file rules, and the `Stop` hook holds a session until its own test/doc obligations are met. Each session is tracked separately, so parallel sessions never block each other. `Bash` writes are not inspected. Setup is one `settings.json` snippet.
+
 ---
 
 ## Türkçe
@@ -104,7 +108,7 @@ GravityGuard, herhangi bir dosya değiştirme aracı çalıştırılmadan önce 
 
 | Kural | Adı | Seviye | Ne Yapar / Neyi Yakalar? |
 | :--- | :--- | :--- | :--- |
-| **`G0`** | **Gizli Veri Hava Yastığı (Secret Leak)** | **ENGELLE / UYAR** | Kod farklarında unutulan API anahtarlarını (OpenAI, Anthropic/Claude, Gemini, Slack, GitHub tokenları, Private Key'ler) engeller. Ham bağlantı adresleri ve Bearer tokenları için uyarı verir. Logları maskeler. |
+| **`G0`** | **Gizli Veri Hava Yastığı (Secret Leak)** | **ENGELLE / UYAR** | Kod farklarında unutulan API anahtarlarını (OpenAI — modern ve eski biçim, Anthropic/Claude, Gemini, Slack, GitHub tokenları, Private Key'ler) engeller. Ham bağlantı adresleri ve Bearer tokenları için uyarı verir. Logları maskeler. |
 | **`G1`** | **Sessiz Hata Engelleme (Silent Exception)** | **ENGELLE (BLOCK)** | Yeni eklenen boş `except: pass` ve `catch {}` bloklarını reddeder. Hataların loglanmasını veya fırlatılmasını zorunlu kılar. |
 | **`G2`** | **Test Bütünlüğü Koruma (Test Integrity)** | **ENGELLE / UYAR** | Ajanın testleri silmesini (`Counter` ile tam dosya karşılaştırması) ve testleri `.skip()` / `xit()` ile susturmasını engeller. Odaklanmış testlere (`.only()`) karşı uyarır. |
 | **`G3`** | **Derleyici Susturma Tespiti (Compiler Bypass)**| **YALNIZCA UYAR** | Yeni eklenen `# noqa`, `# type: ignore`, `@ts-ignore` gibi linter susturmalarını tespit eder ve geliştiriciyi uyarır. |
@@ -142,6 +146,9 @@ GravityGuard, herhangi bir dosya değiştirme aracı çalıştırılmadan önce 
 
 ### 💬 4. Sohbet İçi Yerel `/enhance` Yeteneği
 - Harici kutucuk açmak istemeyenler için: Doğrudan Antigravity Chat kutusuna `/enhance <isteğiniz>` yazarak sohbet penceresi içinden de prompt geliştirebilirsiniz.
+
+### 🤖 5. Claude Code'da Kullanım
+- Aynı motor, [`plugin/claude-code/`](plugin/claude-code/README.md) altındaki ince bir adaptörle Claude Code'u da korur: `Write` / `Edit` / `MultiEdit` dosya kurallarından geçer, `Stop` kancası oturumu kendi test/doküman yükümlülükleri bitene kadar tutar. Her oturum ayrı izlenir; paralel oturumlar birbirini engellemez. `Bash` ile yazılan dosyalar denetlenmez. Kurulum tek bir `settings.json` parçasıdır.
 
 ---
 

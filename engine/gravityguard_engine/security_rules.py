@@ -93,6 +93,15 @@ def check_g0_secret_leak(added_text: str) -> Tuple[bool, str, Optional[str]]:
         if not is_placeholder(raw_token):
             return True, f"OpenAI API anahtarı tespit edildi: {redact_token(raw_token)}. Ortam değişkeni kullanın.", None
 
+    # D2) OpenAI legacy keys: sk- + 48 letters/digits (no hyphens), or the older sk-<20>T3BlbkFJ<20> form.
+    # `\b` before "sk-" keeps words such as "task-report-..." or "risk-..." out; the fixed hyphen-free length keeps
+    # kebab-case slugs that merely start with "sk-" out.
+    legacy_match = re.search(r"\bsk-(?:[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}|[A-Za-z0-9]{48})\b", added_text)
+    if legacy_match:
+        raw_token = legacy_match.group(0)
+        if not is_placeholder(raw_token):
+            return True, f"OpenAI API anahtarı (eski biçim) tespit edildi: {redact_token(raw_token)}. Ortam değişkeni kullanın.", None
+
     # E) Google / Gemini API Keys (AIza...)
     gemini_match = re.search(r"\bAIza[0-9A-Za-z\-_]{35,40}\b", added_text)
     if gemini_match:

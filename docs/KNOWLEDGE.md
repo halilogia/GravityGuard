@@ -152,6 +152,10 @@ The Python engine enforces checks through an ordered, high-to-low priority pipel
 - **L4 (Git Pre-Commit Gate)**: `tools/verify_doc_governance.py` enforcing §6 same-commit discipline.
 - **L5 (Learning Ledger)**: `tools/telemetry_dashboard.py --candidates` surfacing human-reviewed policy proposals.
 
+**Obligations belong to ONE conversation.** A conversation sees its own pending obligations plus project-wide entries that no session owns (state written before sessions existed); another session's debt never blocks its Stop, and its Stop retries never touch another session's circuit breaker (`governance._visible_pending`, `get_session_stop_retries`). The project-wide lists and `stop_retries` are a union kept for the live monitor, not an enforcement source. The Stop hook has no target file, so it also checks the other declared workspace roots that already keep state (`dispatcher._other_stop_roots`) and never creates state in a root the conversation did not touch.
+
+**One engine, several hosts.** The engine speaks the Antigravity payload. Other hosts get a thin adapter that translates and calls the unchanged entry point; today that is `plugin/claude-code/` (conversation id `claude:<session_id>`, warnings as context only, never as an allow, `Bash` not inspected, fail-open). A new host never gets its own copy of a rule.
+
 ---
 
 ## 3. Developer Guidelines

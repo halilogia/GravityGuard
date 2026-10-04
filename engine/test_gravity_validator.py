@@ -3756,6 +3756,7 @@ class TestObligationGovernance(unittest.TestCase):
         src_file = os.path.join(self.temp_dir, "engine", "stub.py")
         os.makedirs(os.path.dirname(src_file), exist_ok=True)
         run_validator({
+            "conversationId": "circ-test-sess",     # the session that owes the docs is the one whose Stop is retried
             "toolCall": {
                 "name": "write_to_file",
                 "args": {"TargetFile": src_file, "CodeContent": "def stub(): pass\n"}
