@@ -65,6 +65,25 @@ class TestDocPolicy(unittest.TestCase):
         self.assertFalse(self.governed("addons/godot_sidebar_ai/a.md", PATTERN_CFG))
         self.assertFalse(self.governed("addons/other/a.gd", PATTERN_CFG))
 
+    def test_project_can_replace_the_default_directories(self):
+        cfg = {"governance": {"docGovernedDirs": ["addons", "Core"]}}
+        self.assertTrue(self.governed("addons/x/a.gd", cfg))
+        self.assertTrue(self.governed("core/a.py", cfg))
+        self.assertFalse(self.governed("tools/a.gd", cfg), "throwaway helpers do not owe a CHANGELOG entry")
+        self.assertFalse(self.governed("engine/a.py", cfg))
+
+    def test_patterns_are_added_on_top_of_a_replaced_directory_list(self):
+        cfg = {"governance": {"docGovernedDirs": ["addons"], "docObligationPatterns": ["tools/keep/**"]}}
+        self.assertTrue(self.governed("tools/keep/a.py", cfg))
+        self.assertFalse(self.governed("tools/other/a.py", cfg))
+
+    def test_empty_directory_list_governs_only_patterns(self):
+        self.assertFalse(self.governed("engine/a.py", {"governance": {"docGovernedDirs": []}}))
+
+    def test_malformed_directory_list_falls_back_to_the_defaults(self):
+        for value in ("core", [1], [""], None, {"core": True}):
+            self.assertTrue(self.governed("engine/a.py", {"governance": {"docGovernedDirs": value}}), repr(value))
+
     def test_malformed_pattern_config_is_ignored(self):
         for cfg in ({"governance": {"docObligationPatterns": "core/**"}}, {"governance": {"docObligationPatterns": [None, 3, ""]}},
                     {"governance": "yes"}, {}, None):
@@ -140,6 +159,13 @@ class TestCommitVerifier(unittest.TestCase):
         self.config('{"governance": {"enforceDocObligations": true}}')
         self.stage("core/engine.py")
         self.assertEqual(self.verify()[0], 0)
+
+    def test_replaced_directory_list_decides_what_owes_a_changelog(self):
+        self.config('{"governance": {"enforceDocObligations": true, "docGovernedDirs": ["core"]}}')
+        self.stage("tools/helper.py")
+        self.assertEqual(self.verify()[0], 0, "tools/ is not governed in this project")
+        self.stage("core/engine.py")
+        self.assertEqual(self.verify()[0], 1)
 
     def test_comment_only_change_owes_nothing(self):
         self.config('{"governance": {"enforceDocObligations": true}}')

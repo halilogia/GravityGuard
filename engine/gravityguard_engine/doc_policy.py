@@ -75,11 +75,22 @@ def matches_any_pattern(rel_path: str, patterns: Iterable[str]) -> bool:
     return False
 
 
+def governed_dirs(governance: Optional[dict]) -> frozenset:
+    """The default directories, unless the project replaces them with `governance.docGovernedDirs` (a list of directory
+    names). A project whose `tools/` or `scripts/` hold throwaway helpers, or whose code lives in `core/` and `ui/`,
+    names its own; a malformed value degrades to the defaults."""
+    configured = governance.get("docGovernedDirs") if isinstance(governance, dict) else None
+    if isinstance(configured, list) and all(isinstance(d, str) and d.strip() for d in configured):
+        return frozenset(d.strip().lower() for d in configured)
+    return DEFAULT_GOVERNED_DIRS
+
+
 def is_doc_governed_path(path_str: str, cfg: Optional[dict] = None, project_root: Optional[Path] = None) -> bool:
     """Does changing this file create a documentation obligation?
 
     Tests, caches, runtime dirs and non-code files never do. Otherwise it does when a directory of the project-relative
-    path is one of the governed directories, or the relative path matches a `governance.docObligationPatterns` glob.
+    path is one of the governed directories (`DEFAULT_GOVERNED_DIRS`, or `governance.docGovernedDirs` when set), or the
+    relative path matches a `governance.docObligationPatterns` glob (added on top of the directories).
     With a project root the directory check looks only inside the project (a checkout that happens to live under
     `/home/me/src/` must not govern everything); without one it falls back to the path as given.
     """
@@ -95,10 +106,10 @@ def is_doc_governed_path(path_str: str, cfg: Optional[dict] = None, project_root
     if rel.endswith(_NON_CODE_SUFFIXES):
         return False
 
-    if any(part in DEFAULT_GOVERNED_DIRS for part in path.parent.parts):
+    governance = cfg.get("governance") if isinstance(cfg, dict) else None
+    if any(part in governed_dirs(governance) for part in path.parent.parts):
         return True
 
-    governance = cfg.get("governance") if isinstance(cfg, dict) else None
     if isinstance(governance, dict):
         patterns = governance.get("docObligationPatterns", [])
         if isinstance(patterns, list):
