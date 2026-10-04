@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-04
+
+> **Yönetişim Olgunlaşma ve Çok-Platform Sürümü.** Claude Code adaptörü eklendi, oturum
+> izolasyonu (session-scoped obligations, retries ve devre kesici) sağlandı, dokümantasyon
+> politikası tek kaynağa (`doc_policy.py`) indirildi ve §6 yükümlülüğü Godot `.uid` gibi
+> gürültüyü eleyecek biçimde hassaslaştırıldı.
+
 ### Added
 - **Ürün Tasarım Felsefesi (README)**: `README.md` vitrinine (EN + TR) GravityGuard'ın çekirdek ilkesi eklendi: *"modele değil, mekanizmaya güven — yalnızca metin olarak yaşayan bir kural, bir dilektir."* Her yükümlülüğün ya diske yazılan bir artefakta ya da deterministik bir hava yastığı/linter/kancaya dayandığı; inisiyatif ve "bana güven" yerine kapalı kapı ilkesi belgelendi.
 
