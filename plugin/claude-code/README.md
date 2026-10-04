@@ -14,7 +14,7 @@ Python 3.10+ is the only requirement; the engine has no dependencies. To use an 
 | Claude Code event | What the adapter does |
 |---|---|
 | `PreToolUse` — `Write`, `Edit`, `MultiEdit` | Runs the file rules (G0 secrets, G1 silent exceptions, G2 test integrity, G3, G4, SRP, …). A BLOCK becomes a `deny` with the engine's reason; a warning is handed to the model as context and never as an `allow`, so your own permission prompt still appears. |
-| `Stop` | Runs the lifecycle gate. Unfinished test/doc obligations of **this session** make Claude continue (`{"decision":"block"}`). Asked once per stop: when Claude Code reports `stop_hook_active`, the adapter stays silent so it can never loop. |
+| `Stop` | Runs the lifecycle gate. Unfinished test/doc obligations of **this session** make Claude continue (`{"decision":"block"}`). Asked on **every** stop, including the ones Claude Code flags with `stop_hook_active`, so an agent cannot leave after one extra turn: the loop ends when the obligations are cleared, when the engine's circuit breaker releases the stop (after 5 blocked retries of the session), or when Claude Code overrides a Stop hook that blocked 8 times in a row. |
 
 Each session is tracked as `claude:<session_id>`, so two Claude Code windows (or Claude Code and Antigravity) on the same project never block each other's Stop.
 

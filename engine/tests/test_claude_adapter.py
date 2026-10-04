@@ -94,9 +94,13 @@ class TestAnswerTranslation(unittest.TestCase):
 
 
 class TestHandle(unittest.TestCase):
-    def test_second_stop_in_a_row_is_not_asked_again(self):
-        with mock.patch.object(adapter, "run_engine", side_effect=AssertionError("engine must not run")):
-            self.assertIsNone(adapter.handle({"session_id": "s1", "cwd": "/p", "stop_hook_active": True}, stop=True))
+    def test_stop_hook_active_does_not_short_circuit_the_engine(self):
+        """Claude Code continuing because of this hook is no reason to let the agent leave: the engine decides."""
+        answer = {"decision": "continue", "reason": "tests missing"}
+        with mock.patch.object(adapter, "run_engine", return_value=answer) as run:
+            out = adapter.handle({"session_id": "s1", "cwd": "/p", "stop_hook_active": True}, stop=True)
+        self.assertEqual(out, {"decision": "block", "reason": "tests missing"})
+        run.assert_called_once()
 
     def test_missing_engine_fails_open_with_a_note(self):
         event = {"session_id": "s1", "cwd": "/p", "tool_name": "Write", "tool_input": {"file_path": "/p/a.py", "content": "x"}}
@@ -177,7 +181,24 @@ class TestEndToEnd(unittest.TestCase):
         blocked = self.hook("A", stop=True)
         self.assertEqual(blocked["decision"], "block")
         self.assertIsNone(self.hook("B", stop=True), "session B touched nothing and must be allowed to stop")
-        self.assertIsNone(self.hook("A", stop=True, stop_hook_active=True), "no second block in a row")
+
+    def test_open_obligation_keeps_blocking_through_stop_hook_active_until_the_engine_breaker_releases(self):
+        self.hook("A", "Write", {"file_path": os.path.join(self.proj, "foo.py"), "content": "def foo():\n    return 1\n"})
+        self.assertEqual(self.hook("A", stop=True)["decision"], "block")
+        for attempt in range(2, 6):          # Claude Code reports stop_hook_active from the second stop on
+            out = self.hook("A", stop=True, stop_hook_active=True)
+            self.assertIsNotNone(out, f"stop #{attempt} must still be blocked")
+            self.assertEqual(out["decision"], "block")
+        self.assertIsNone(self.hook("A", stop=True, stop_hook_active=True), "the engine circuit breaker (5 retries) releases the stop")
+
+    def test_clearing_the_obligation_releases_the_stop(self):
+        self.hook("A", "Write", {"file_path": os.path.join(self.proj, "foo.py"), "content": "def foo():\n    return 1\n"})
+        self.assertEqual(self.hook("A", stop=True)["decision"], "block")
+        test_file = os.path.join(self.proj, "tests", "test_foo.py")
+        content = "def test_foo():\n    assert 1 == 1\n\ndef test_foo_again():\n    assert 2 == 2\n"
+        self.hook("A", "Write", {"file_path": test_file, "content": content})
+        Path(test_file).write_text(content, encoding="utf-8")        # the PreToolUse hook runs before the write itself
+        self.assertIsNone(self.hook("A", stop=True, stop_hook_active=True), "evidence exists on disk, nothing is owed")
 
 
 if __name__ == "__main__":

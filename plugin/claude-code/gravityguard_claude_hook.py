@@ -154,9 +154,10 @@ def run_engine(payload: Dict[str, Any], extra_args: Sequence[str] = ()) -> Optio
 def handle(event: Dict[str, Any], stop: bool) -> Optional[Dict[str, Any]]:
     """Claude Code event in, Claude Code answer out (None = say nothing, let it proceed)."""
     if stop:
-        if event.get("stop_hook_active"):
-            # Claude Code already continued once because of this hook; asking again would loop.
-            return None
+        # `stop_hook_active` is deliberately ignored: it only says that Claude Code is already continuing because of
+        # a Stop hook, and answering "allow" to it would let an agent leave after ONE extra turn without clearing its
+        # obligations. The loop is bounded twice instead: the engine's own circuit breaker allows the stop after 5
+        # blocked retries (per session), and Claude Code overrides a Stop hook that blocked 8 times in a row.
         answer = run_engine(to_engine_stop(event), ["--stop"])
         return from_engine_stop(answer) if answer else None
     payload = to_engine_pretool(event)

@@ -3,12 +3,13 @@
 GravityGuard Engine — Project Context, Multi-Root Workspace & Configuration Subsystem.
 Zero external dependencies.
 """
-import fnmatch
 import json
 import os
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+from .doc_policy import is_doc_governed_path
 
 DEFAULT_COMPLEXITY_THRESHOLDS: Dict[str, int] = {
     "monolithLoc": 1000,              # projected LOC that makes a file a monolith
@@ -186,42 +187,9 @@ def should_enforce_doc_obligations(target_file: str = "", cfg: Optional[dict] = 
     return False
 
 
-def is_doc_governed_target(target_file: str, cfg: Optional[dict] = None) -> bool:
+def is_doc_governed_target(target_file: str, cfg: Optional[dict] = None, project_root: Optional[Path] = None) -> bool:
     """
     Checks if modifying target_file creates a documentation obligation under docs/KNOWLEDGE.md §6.
-    By default, changes to engine/, src/, plugin/, or rules/ require a CHANGELOG update.
+    The rules live in ``doc_policy`` and are shared with the commit-time verifier (tools/verify_doc_governance.py).
     """
-    p = Path(target_file)
-    file_name_lower = p.name.lower()
-    parent_parts_lower = [part.lower() for part in p.parent.parts]
-
-    # Exclude test files
-    is_in_test_dir = any(d in parent_parts_lower for d in ("tests", "test", "__tests__"))
-    is_test_name = (
-        file_name_lower.startswith("test_") or
-        "_test." in file_name_lower or
-        file_name_lower.endswith("_test.py") or
-        ".test." in file_name_lower or
-        ".spec." in file_name_lower
-    )
-    if is_in_test_dir or is_test_name:
-        return False
-
-    norm = target_file.replace("\\", "/").lower()
-    # Exclude temporary, cache, and runtime dirs
-    if any(m in norm for m in ["/.gravityguard/", "/logs/", "/scratch/", "/brain/", "/dist/", "/node_modules/", "/.git/"]):
-        return False
-    if file_name_lower.endswith((".md", ".txt", ".json", ".lock", ".svg", ".png", ".jpg", ".jpeg", ".ico")):
-        return False
-
-    governed_dirs = {"engine", "src", "plugin", "rules", "scripts"}
-    if any(part in governed_dirs for part in parent_parts_lower):
-        return True
-
-    if cfg and isinstance(cfg.get("governance"), dict):
-        patterns = cfg["governance"].get("docObligationPatterns", [])
-        for pat in patterns:
-            if fnmatch.fnmatch(norm, pat.lower()):
-                return True
-
-    return False
+    return is_doc_governed_path(target_file, cfg, project_root)

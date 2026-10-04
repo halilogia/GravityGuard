@@ -497,7 +497,7 @@ def validate_gravityguard() -> None:
 
     # Stage doc obligation if production/engine code is changed and doc governance is enabled
     pending_doc_record = None
-    if should_enforce_doc_obligations(target_file, cfg=cfg) and is_doc_governed_target(target_file, cfg):
+    if should_enforce_doc_obligations(target_file, cfg=cfg) and is_doc_governed_target(target_file, cfg, p_root):
         pending_doc_record = target_file
 
     # ========================================================================

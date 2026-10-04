@@ -15,7 +15,17 @@ import os
 import sys
 import subprocess
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
+
+# The path policy is the engine's (gravityguard_engine/doc_policy.py): the Stop-time tracker and this commit gate must
+# never disagree about which files owe a CHANGELOG entry. The engine is found relative to THIS file, so the script can
+# also be run from another repository's pre-commit hook (cwd = that repository).
+_ENGINE_DIR = Path(__file__).resolve().parent.parent / "engine"
+if str(_ENGINE_DIR) not in sys.path:
+    sys.path.insert(0, str(_ENGINE_DIR))
+
+from gravityguard_engine.doc_policy import is_doc_governed_path  # noqa: E402
+from gravityguard_engine.project_context import load_gravityguard_config, should_enforce_doc_obligations  # noqa: E402
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -45,20 +55,8 @@ def get_working_tree_files() -> List[str]:
         return []
 
 
-def is_governed_code_file(path_str: str) -> bool:
-    p = path_str.replace("\\", "/").lower()
-
-    # Exclude tests, temporary/runtime dirs, and docs
-    if any(m in p for m in ["/tests/", "/test/", "test_", ".test.", ".spec.", ".gravityguard/", "archives/"]):
-        return False
-    if p.endswith((".md", ".txt", ".json", ".lock", ".svg", ".png", ".jpg", ".ico")):
-        # Only plugin/hooks.json or rules/*.md might be governed, but hooks.json is handled below
-        if not p.endswith("plugin/hooks.json"):
-            return False
-
-    parts = [part.lower() for part in Path(p).parts]
-    governed_roots = {"engine", "src", "plugin", "rules", "tools"}
-    return any(g in parts for g in governed_roots)
+def is_governed_code_file(path_str: str, cfg: Optional[dict] = None, project_root: Optional[Path] = None) -> bool:
+    return is_doc_governed_path(path_str, cfg, project_root)
 
 
 def has_substantive_changes(file_path: str, staged_only: bool = True) -> bool:
@@ -89,9 +87,12 @@ def verify_doc_governance(staged_only: bool = True) -> Tuple[bool, List[str]]:
         return True, ["Staged veya değiştirilmiş dosya bulunamadı; denetim temiz."]
 
     git_root = get_git_root()
+    cfg = load_gravityguard_config("", git_root)
+    if not should_enforce_doc_obligations(cfg=cfg):
+        return True, ["Dokümantasyon denetimi bu projede kapalı (.gravityguard.json → governance.enforceDocObligations); atlandı."]
     staged_code_files = [
         f for f in files
-        if is_governed_code_file(f) and has_substantive_changes(f, staged_only=staged_only)
+        if is_governed_code_file(str(git_root / f), cfg, git_root) and has_substantive_changes(f, staged_only=staged_only)
     ]
     
     if not staged_code_files:
