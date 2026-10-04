@@ -22,7 +22,7 @@ _TEST_DIR_NAMES = frozenset({"tests", "test", "__tests__"})
 _SKIPPED_PATH_MARKERS = (
     "/.gravityguard/", "/logs/", "/scratch/", "/brain/", "/dist/", "/node_modules/", "/.git/", "/archives/",
 )
-_NON_CODE_SUFFIXES = (".md", ".txt", ".json", ".lock", ".svg", ".png", ".jpg", ".jpeg", ".ico")
+_NON_CODE_SUFFIXES = (".md", ".txt", ".json", ".lock", ".svg", ".png", ".jpg", ".jpeg", ".ico", ".uid")
 # Behaviour-bearing non-code files: a changed hook table changes what the guard does.
 _ALWAYS_GOVERNED_SUFFIXES = ("plugin/hooks.json",)
 
@@ -103,13 +103,10 @@ def is_doc_governed_path(path_str: str, cfg: Optional[dict] = None, project_root
         return False
     if rel.endswith(_ALWAYS_GOVERNED_SUFFIXES):
         return True
-    if rel.endswith(_NON_CODE_SUFFIXES):
-        return False
 
     governance = cfg.get("governance") if isinstance(cfg, dict) else None
-    if any(part in governed_dirs(governance) for part in path.parent.parts):
-        return True
 
+    # Explicit project patterns take precedence over generic non-code exclusions (e.g. behaviour-bearing skill .md files)
     if isinstance(governance, dict):
         patterns = governance.get("docObligationPatterns", [])
         if isinstance(patterns, list):
@@ -119,4 +116,11 @@ def is_doc_governed_path(path_str: str, cfg: Optional[dict] = None, project_root
             absolute = str(path_str).replace("\\", "/").lower()
             if absolute != rel and matches_any_pattern(absolute, patterns):
                 return True
+
+    if rel.endswith(_NON_CODE_SUFFIXES):
+        return False
+
+    if any(part in governed_dirs(governance) for part in path.parent.parts):
+        return True
+
     return False

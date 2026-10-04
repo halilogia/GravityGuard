@@ -102,6 +102,19 @@ class TestDocPolicy(unittest.TestCase):
     def test_matches_any_pattern_skips_junk(self):
         self.assertFalse(matches_any_pattern("core/a.py", [None, "", "  ", 5]))
 
+    def test_explicit_pattern_can_govern_markdown_and_json_files(self):
+        cfg = {"governance": {"docObligationPatterns": ["plugin/skills/**/*.md", "plugin/.claude-plugin/*.json"]}}
+        self.assertTrue(self.governed("plugin/skills/sub/SKILL.md", cfg))
+        self.assertTrue(self.governed("plugin/.claude-plugin/plugin.json", cfg))
+        self.assertFalse(self.governed("plugin/skills/other.txt", cfg))
+        self.assertFalse(self.governed("docs/guide.md", cfg))
+
+    def test_godot_uid_files_are_non_code_metadata(self):
+        cfg = {"governance": {"docGovernedDirs": ["addons"]}}
+        self.assertTrue(self.governed("addons/game/player.gd", cfg))
+        self.assertFalse(self.governed("addons/game/player.gd.uid", cfg))
+        self.assertFalse(self.governed("addons/game/readme.md", cfg))
+
     def test_the_runtime_wrapper_agrees_with_the_policy(self):
         for rel in ("engine/a.py", "core/a.py", "tests/test_a.py", "plugin/hooks.json", "tools/a.py"):
             path = str(self.root / rel)
