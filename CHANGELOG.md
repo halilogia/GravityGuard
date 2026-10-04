@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Ürün Tasarım Felsefesi (README)**: `README.md` vitrinine (EN + TR) GravityGuard'ın çekirdek ilkesi eklendi: *"modele değil, mekanizmaya güven — yalnızca metin olarak yaşayan bir kural, bir dilektir."* Her yükümlülüğün ya diske yazılan bir artefakta ya da deterministik bir hava yastığı/linter/kancaya dayandığı; inisiyatif ve "bana güven" yerine kapalı kapı ilkesi belgelendi.
+
 ### Fixed
 - **Ajan Davranış Dosyaları (Skill/Prompt) İçin Desen Önceliği ve Godot `.uid` Muafiyeti**:
   - `engine/gravityguard_engine/doc_policy.py`: Proje tarafından tanımlanan `governance.docObligationPatterns` kontrolleri genel `_NON_CODE_SUFFIXES` filtresinden **önce** değerlendirilecek şekilde yeniden sıralandı. Böylece `plugin/skills/**/*.md`, `commands/**/*.md`, `.claude-plugin/*.json` gibi doğrudan yapay zeka ajanının davranışını belirleyen skill ve prompt dosyaları `.md` veya `.json` uzantısı sebebiyle gözden kaçmaz; projelerce açıkça yönetilmesi sağlanır.

@@ -14,6 +14,8 @@
 
 **GravityGuard** is an ultra-lightweight, deterministic architectural gatekeeper, secret airbag, and prompt engineering companion built specifically for **Antigravity IDE** and modern autonomous AI coding agents. In development benchmarks, it intercepts AI agent tool-calls with an average in-memory logic execution of `~0.1ms` (p95 `< 0.5ms`), preventing codebase degradation, accidental credential leaks, architectural violations, and silent error masking without adding synchronous developer friction. Absolute latency is host- and load-dependent; the number that is held stable is the ratio against the previous release, measured interleaved in the same time slice.
 
+> **Design philosophy — trust the mechanism, not the model.** GravityGuard exists because an AI agent's goodwill cannot be relied upon: *a rule that lives only as prose is a wish.* Every obligation is therefore backed either by an artifact the agent must actually write to disk, or — wherever it can be made deterministic — by an airbag, linter or hook that refuses the operation outright. No initiative, no "trust me"; the gate stays shut until the artifact exists.
+
 ---
 
 ## English
@@ -101,6 +103,8 @@ The same engine guards Claude Code through a thin adapter in [`plugin/claude-cod
 ---
 
 ## Türkçe
+
+> **Tasarım felsefesi — modele değil, mekanizmaya güven.** GravityGuard, bir yapay zeka ajanının iyi niyetine güvenilemeyeceği için vardır: *yalnızca metin olarak yaşayan bir kural, bir dilektir.* Bu yüzden her yükümlülük ya ajanın gerçekten diske yazmak zorunda olduğu bir artefakta, ya da — deterministik kılınabildiği her yerde — işlemi doğrudan reddeden bir hava yastığına, linter'a veya kancaya (hook) dayanır. İnisiyatif yok, "bana güven" yok; artefakt oluşana kadar kapı kapalı kalır.
 
 ## Aktif Kural ve Kanıt Matrisi
 
