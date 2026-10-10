@@ -64,7 +64,7 @@ const CONNECTION_ERROR_CODES = new Set([
 
 export function activate(context: vscode.ExtensionContext): void {
   const savedLang = context.globalState.get<string>('gravityguard.language');
-  const initialLang = savedLang || (vscode.env.language && vscode.env.language.toLowerCase().startsWith('tr') ? 'tr' : 'en');
+  const initialLang = savedLang || 'tr';
   initI18n(initialLang);
   console.log(`[GravityGuard] Extension activated successfully! Language: ${initialLang}`);
 
@@ -174,8 +174,8 @@ async function handleOpenConfig(): Promise<void> {
         }
       }, null, 2), 'utf8');
     }
-    const uri = vscode.Uri.file(cfgFile);
-    await vscode.commands.executeCommand('vscode.open', uri);
+    const doc = await vscode.workspace.openTextDocument(cfgFile);
+    await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.One, preview: false });
   } catch (e: any) {
     vscode.window.showErrorMessage(t('actions.configOpenError', { error: e.message }));
   }
@@ -499,21 +499,21 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
         this.updateHtml(true);
       } else if (message.command === 'setTab' && message.tab) {
         this._activeTab = message.tab;
-        this._lastHtml = '';
-        this.updateHtml(true);
       } else if (message.command === 'findSkills') {
         await vscode.commands.executeCommand('antigravityBridge.findSkills');
       } else if (message.command === 'toggleLanguage') {
         const next = getCurrentLanguage() === 'tr' ? 'en' : 'tr';
         setLanguage(next);
-        if (this._context) {
-          await this._context.globalState.update('gravityguard.language', next);
-        }
         if (this._onLanguageChanged) {
           this._onLanguageChanged();
         }
         this._lastHtml = '';
         this.updateHtml(true);
+        if (this._context) {
+          this._context.globalState.update('gravityguard.language', next).then(undefined, (err) => {
+            console.debug('Failed to persist language setting:', err);
+          });
+        }
       } else if (message.command === 'openFile' && message.path) {
         try {
           const doc = await vscode.workspace.openTextDocument(message.path);
