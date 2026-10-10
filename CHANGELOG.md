@@ -5,6 +5,17 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-10-10
+
+### Fixed & Hardened (Audit, Reliability & Metrics Precision)
+- **Kritik Eşzamanlılık Kilidi Senkronizasyonu (P0-A)**: `telemetry_dashboard.py` içindeki log rotasyonu/arşivleme kilidi, yazıcının (`audit.py`) kullandığı `.audit.lock` dosya yoluna eşitlendi. Klasör seviyesinde hatalı kilitleme giderildi; kilit zaman aşımında kopyalama işlemi derhal durdurularak yazma çakışmaları engellendi.
+- **Kalıcı Günlük Doğrulamalı Spool İdempotency Protokolü (P0-B)**: Yedek havuz (`fallback spool`) tekrar oynatma mekanizması, 50 olaylık geçici canlı bellek penceresinden bağımsızlaştırıldı. Tekrarlanan olaylar doğrudan diske yazılmış kanonik `gravityguard_permanent_audit.jsonl` üzerinden taranıp tekilleştirildi. Canlı projeksiyon ve sıra numarası ilerletimi, yalnızca kanonik günlüğe dayanıklı yazım başarılı olduğunda devreye girecek şekilde sıralandı.
+- **Dönemsel Medyan Hesaplama Doğruluğu (P1-B)**: `AggregatedMetrics` içindeki deneme dağılımından medyan hesaplama algoritması düzeltildi; tekil, çift ve çoklu frekans dağılımlarında matematiksel olarak doğru medyan (çift sayılarda ortadaki iki değerin ortalaması) hesaplanması sağlandı.
+- **Akışlı Tekilleştirme Tahliyesi ve Çift Sayım Engelleme (P1-C)**: `LogStreamReader` içindeki 50.000 kayıtlık hafıza sıfırlaması (`seen_keys.clear()`), en eski anahtarları sırayla tahliye eden FIFO mekanizmasına dönüştürüldü. Ayrıca çoklu kaynak taramasında (`--all`), aktif günlük varken yedek zaman damgalı arşiv snapshot'larının (`*_20*.jsonl`) taranması engellenerek mükerrer sayım riski ortadan kaldırıldı.
+- **Sınırlı Kardinalite ve Bellek Güvencesi (P1-A)**: `AggregatedMetrics` içindeki `_pending_warnings` ve `candidate_targets` yapılarına üst sınırlar getirilerek uzun süreli akışlarda bellek kontrolü sağlandı.
+- **Arayüz Metrik Semantiği ve Tooltip Şeffaflığı**: Canlı arayüzdeki özet kartlarına (Engellendi, Uyarı, Onaylandı), bu sayaçların son 50 olayı kapsayan kayan pencereyi temsil ettiğini belirten açıklayıcı ipuçları (`title` tooltips) eklendi.
+- **Antigravity IDE 1.4.1 Paketi**: Eklenti sürümü `1.4.1` olarak artırıldı ve Antigravity IDE'ye doğrudan kuruldu.
+
 ## [Unreleased]
 
 > **Specialist Review (R1) — Uzman İnceleme Yükümlülüğü.** GravityGuard artık yönetilen

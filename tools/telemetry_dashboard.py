@@ -140,11 +140,14 @@ def discover_all_log_paths(
         for sub_log in pr_path.glob("**/.gravityguard/logs/*.jsonl"):
             add_if_exists(sub_log)
 
-    # Repository archive directory
+    # Repository archive directory (historical base log; skip timestamped archive snapshots to prevent duplicate counts)
     repo_root = Path(__file__).resolve().parent.parent
     archive_dir = repo_root / "archives" / "audit-logs"
     if archive_dir.is_dir():
         for af in archive_dir.glob("*.jsonl"):
+            if "_20" in af.name:
+                # Timestamped snapshot created by rotation/backup; active log already contains these
+                continue
             add_if_exists(af)
 
     return found
@@ -167,7 +170,7 @@ class LogStreamReader:
         status_filter: Optional[str] = None,
     ) -> Generator[Dict[str, Any], None, None]:
         needs_dedup = len(self.paths) > 1
-        seen_keys: Set[str] = set()
+        seen_keys: Dict[str, bool] = {}
         MAX_SEEN_KEYS = 50000
 
         for path in self.paths:
@@ -197,8 +200,9 @@ class LogStreamReader:
                             if dedup_key in seen_keys:
                                 continue
                             if len(seen_keys) >= MAX_SEEN_KEYS:
-                                seen_keys.clear()
-                            seen_keys.add(dedup_key)
+                                # FIFO eviction: prune oldest key instead of wiping all deduplication state
+                                seen_keys.pop(next(iter(seen_keys)))
+                            seen_keys[dedup_key] = True
 
                         # Filter by timestamp window
                         ev_dt = parse_iso_datetime(ev.get("timestamp", ""))
@@ -316,8 +320,9 @@ class AggregatedMetrics:
             elif st == "WARNING":
                 self.total_warning += 1
                 self.warn_rules[r_id] += 1
-                if tgt and len(self._pending_warnings[(cid, tgt)]) < 20:
-                    self._pending_warnings[(cid, tgt)].append((r_id, ts))
+                if tgt and len(self._pending_warnings) < 2000:
+                    if len(self._pending_warnings[(cid, tgt)]) < 20:
+                        self._pending_warnings[(cid, tgt)].append((r_id, ts))
             elif st == "APPROVED":
                 self.total_approved += 1
                 if tgt and (cid, tgt) in self._pending_warnings:
@@ -335,23 +340,37 @@ class AggregatedMetrics:
 
                 self.candidate_rule_counts[r_id] += 1
                 t_base = os.path.basename(ev.get("target") or "bilinmeyen")
-                self.candidate_targets[r_id][t_base] += 1
+                if len(self.candidate_targets[r_id]) < 200:
+                    self.candidate_targets[r_id][t_base] += 1
                 if len(self.candidate_sessions[r_id]) < 500:
                     self.candidate_sessions[r_id].add(cid)
 
         self.recovery_rate = (self.total_recovered / self.total_blocked * 100) if self.total_blocked > 0 else 100.0
 
-        if self._attempts_counter:
+        if self._attempts_counter and sum(self._attempts_counter.values()) > 0:
             tot_atts = sum(self._attempts_counter.values())
-            half = tot_atts // 2
-            running = 0
-            med = 1.0
-            for att_val in sorted(self._attempts_counter.keys()):
-                running += self._attempts_counter[att_val]
-                if running >= half:
-                    med = float(att_val)
-                    break
-            self.median_attempts = med
+            if tot_atts % 2 == 1:
+                target_rank = (tot_atts + 1) // 2
+                running = 0
+                for att_val in sorted(self._attempts_counter.keys()):
+                    running += self._attempts_counter[att_val]
+                    if running >= target_rank:
+                        self.median_attempts = float(att_val)
+                        break
+            else:
+                r1 = tot_atts // 2
+                r2 = r1 + 1
+                val1 = None
+                val2 = None
+                running = 0
+                for att_val in sorted(self._attempts_counter.keys()):
+                    running += self._attempts_counter[att_val]
+                    if val1 is None and running >= r1:
+                        val1 = float(att_val)
+                    if val2 is None and running >= r2:
+                        val2 = float(att_val)
+                        break
+                self.median_attempts = ((val1 if val1 is not None else 1.0) + (val2 if val2 is not None else 1.0)) / 2.0
         else:
             self.median_attempts = 1.0
 
@@ -774,14 +793,18 @@ def perform_log_rotation(threshold_mb: float = 10.0) -> None:
     archive_name = f"gravityguard_permanent_audit_{timestamp}.jsonl"
     target_archive = archive_dir / archive_name
 
-    # Safe snapshot under StateLock: Never wipe or truncate active journal!
-    lock = StateLock(str(active_path.parent), timeout=5.0)
+    # Safe snapshot under StateLock: Must synchronize on the exact same .audit.lock file as audit.py!
+    audit_lock_path = active_path.parent / ".audit.lock"
+    lock = StateLock(audit_lock_path, timeout=5.0)
     lock_acquired = lock.acquire()
+    if not lock_acquired:
+        print(f"[!] Hata: .audit.lock kilidi zaman aşımına uğradı ({audit_lock_path}). Yazma çakışmasını önlemek için arşivleme durduruldu.")
+        return
+
     try:
         shutil.copy2(active_path, target_archive)
     finally:
-        if lock_acquired:
-            lock.release()
+        lock.release()
 
     print(f"🎉 Arşivleme başarıyla tamamlandı (StateLock korumalı):")
     print(f"   Arşivlenen dosya : {target_archive} ({size_mb:.2f} MB)")

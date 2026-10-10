@@ -1626,11 +1626,11 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
 
         <!-- Quick Summary Bar -->
         <div class="stat-summary-bar">
-          <div class="stat-chip"><div class="chip-val text-red">${blockedCount}</div><div class="chip-lbl">${t('stats.blocked')}</div></div>
-          <div class="stat-chip"><div class="chip-val text-amber">${warningCount}</div><div class="chip-lbl">${t('stats.warning')}</div></div>
-          <div class="stat-chip"><div class="chip-val text-green">${approvedCount}</div><div class="chip-lbl">${t('stats.approved')}</div></div>
-          ${shadowCount > 0 ? `<div class="stat-chip"><div class="chip-val text-purple">${shadowCount}</div><div class="chip-lbl">${t('current.statusShadow')}</div></div>` : ''}
-          <div class="stat-chip" title="${t('obligations.title')}"><div class="chip-val ${totalObligations > 0 ? 'text-cyan' : 'text-muted'}">${totalObligations}</div><div class="chip-lbl">${t('stats.pending')}</div></div>
+          <div class="stat-chip" title="${t('stats.blockedTooltip')}"><div class="chip-val text-red">${blockedCount}</div><div class="chip-lbl">${t('stats.blocked')}</div></div>
+          <div class="stat-chip" title="${t('stats.warningTooltip')}"><div class="chip-val text-amber">${warningCount}</div><div class="chip-lbl">${t('stats.warning')}</div></div>
+          <div class="stat-chip" title="${t('stats.approvedTooltip')}"><div class="chip-val text-green">${approvedCount}</div><div class="chip-lbl">${t('stats.approved')}</div></div>
+          ${shadowCount > 0 ? `<div class="stat-chip" title="${t('stats.shadowTooltip')}"><div class="chip-val text-purple">${shadowCount}</div><div class="chip-lbl">${t('current.statusShadow')}</div></div>` : ''}
+          <div class="stat-chip" title="${t('stats.pendingTooltip')}"><div class="chip-val ${totalObligations > 0 ? 'text-cyan' : 'text-muted'}">${totalObligations}</div><div class="chip-lbl">${t('stats.pending')}</div></div>
         </div>
 
         <!-- Tabs -->

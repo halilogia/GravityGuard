@@ -157,6 +157,38 @@ def _commit_fallback_spool(processing_files: List[str]) -> None:
             sys.stderr.write(f"[GravityGuard Spool Commit Warning: {p_path}] {rm_err}\n")
 
 
+def _find_committed_event_ids(permanent_log_path: str, candidate_ids: Set[str]) -> Set[str]:
+    """
+    Checks the canonical permanent audit journal directly to discover which candidate
+    eventIds are already persistently committed. Guarantees true idempotency independent
+    of the sliding 50-event live memory window.
+    """
+    committed: Set[str] = set()
+    if not candidate_ids or not os.path.exists(permanent_log_path):
+        return committed
+
+    try:
+        with open(permanent_log_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                for cid in candidate_ids:
+                    if cid not in committed and cid in line_str:
+                        try:
+                            rec = json.loads(line_str)
+                            if isinstance(rec, dict) and rec.get("eventId") == cid:
+                                committed.add(cid)
+                        except (json.JSONDecodeError, ValueError) as parse_err:
+                            sys.stderr.write(f"[GravityGuard Idempotency Parse Warning] {parse_err}\n")
+                if len(committed) == len(candidate_ids):
+                    break
+    except Exception as err:
+        sys.stderr.write(f"[GravityGuard Idempotency Scan Warning] {err}\n")
+
+    return committed
+
+
 
 
 def _resolve_log_dir() -> str:
@@ -824,21 +856,19 @@ def log_event(
 
             # Replay any fallback spool events that were buffered during previous lock timeouts
             spool_writes_succeeded = True
-            existing_event_ids: Set[str] = {
-                e.get("eventId") for e in current_data.get("events", []) if isinstance(e, dict) and e.get("eventId")
-            }
+            candidate_spool_ids = {sp.get("eventId") for sp in spooled_events if sp.get("eventId")}
+            committed_spool_ids = _find_committed_event_ids(permanent_log_path, candidate_spool_ids)
 
             for sp_ev in spooled_events:
                 sp_eid = sp_ev.get("eventId")
-                if sp_eid and sp_eid in existing_event_ids:
-                    # Idempotency guard: event was already committed before crash
+                if sp_eid and sp_eid in committed_spool_ids:
+                    # Idempotency guard: event was already committed to canonical journal
                     continue
-                if sp_eid:
-                    existing_event_ids.add(sp_eid)
 
-                journal_seq += 1
-                sp_ev["auditSeq"] = journal_seq
+                sp_seq = journal_seq + 1
+                sp_ev["auditSeq"] = sp_seq
                 sp_redacted = redact_record(sp_ev)
+                write_ok = False
                 try:
                     with open(permanent_log_path, "a", encoding="utf-8") as af:
                         af.write(json.dumps(sp_redacted, ensure_ascii=False) + "\n")
@@ -848,33 +878,41 @@ def log_event(
                                 os.fsync(af.fileno())
                             except (OSError, AttributeError) as sync_err:
                                 sys.stderr.write(f"[GravityGuard Durability Sync Warning] {sync_err}\n")
+                    write_ok = True
                 except Exception as spool_write_err:
                     spool_writes_succeeded = False
                     sys.stderr.write(f"[GravityGuard Spool Replay Write Error] {spool_write_err}\n")
 
-                # Reconcile causal effectiveness and live violations for spooled events
-                _apply_event_to_live_state(current_data, sp_redacted)
+                if write_ok:
+                    journal_seq = sp_seq
+                    if sp_eid:
+                        committed_spool_ids.add(sp_eid)
 
-                sp_live = {
-                    "eventId": sp_ev.get("eventId"),
-                    "auditSeq": journal_seq,
-                    "timestamp": sp_ev.get("timestamp"),
-                    "action": sp_ev.get("action"),
-                    "status": sp_ev.get("status"),
-                    "ruleId": sp_ev.get("ruleId"),
-                    "resolvedRuleId": sp_ev.get("resolvedRuleId"),
-                    "target": sp_ev.get("target"),
-                    "reason": sp_ev.get("reason"),
-                    "outcome": sp_ev.get("outcome"),
-                    "parentViolationId": sp_ev.get("parentViolationId"),
-                    "recoveryAttempts": sp_ev.get("recoveryAttempts"),
-                    "resolutionMs": sp_ev.get("resolutionMs"),
-                }
-                ev_list = current_data.get("events", [])
-                if not isinstance(ev_list, list):
-                    ev_list = []
-                    current_data["events"] = ev_list
-                ev_list.insert(0, redact_record(sp_live))
+                    # Reconcile causal effectiveness and live violations for spooled events ONLY on write success
+                    _apply_event_to_live_state(current_data, sp_redacted)
+
+                    sp_live = {
+                        "eventId": sp_ev.get("eventId"),
+                        "auditSeq": journal_seq,
+                        "timestamp": sp_ev.get("timestamp"),
+                        "action": sp_ev.get("action"),
+                        "status": sp_ev.get("status"),
+                        "ruleId": sp_ev.get("ruleId"),
+                        "resolvedRuleId": sp_ev.get("resolvedRuleId"),
+                        "target": sp_ev.get("target"),
+                        "reason": sp_ev.get("reason"),
+                        "outcome": sp_ev.get("outcome"),
+                        "parentViolationId": sp_ev.get("parentViolationId"),
+                        "recoveryAttempts": sp_ev.get("recoveryAttempts"),
+                        "resolutionMs": sp_ev.get("resolutionMs"),
+                    }
+                    ev_list = current_data.get("events", [])
+                    if not isinstance(ev_list, list):
+                        ev_list = []
+                        current_data["events"] = ev_list
+                    ev_list.insert(0, redact_record(sp_live))
+                    if len(ev_list) > 50:
+                        ev_list.pop()
 
             if spool_processing_files and spool_writes_succeeded:
                 _commit_fallback_spool(spool_processing_files)

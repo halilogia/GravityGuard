@@ -242,6 +242,88 @@ class TestAuditReliability(unittest.TestCase):
         archives = [f for f in os.listdir(repo_archive_dir) if f.startswith("gravityguard_permanent_audit_")]
         self.assertGreater(len(archives), 0)
 
+    def test_spool_idempotency_beyond_50_live_events(self):
+        """
+        Verifies that an event already committed in the permanent journal is NOT duplicated,
+        even if it occurred more than 50 events ago and is no longer present in the live state window.
+        """
+        perm_path = os.path.join(self.test_dir, "gravityguard_permanent_audit.jsonl")
+
+        # 1. Write the target event as event #1
+        target_eid = "evt_historical_spool_target_999"
+        historical_event = {
+            "auditSeq": 1,
+            "eventId": target_eid,
+            "timestamp": "2026-10-01T12:00:00+00:00",
+            "action": "write",
+            "status": "BLOCKED",
+            "ruleId": "G1_SILENT_EXCEPTION",
+            "target": "src/old.py",
+            "outcome": "BLOCKED"
+        }
+        with open(perm_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(historical_event) + "\n")
+            # 2. Add 55 subsequent events to push event #1 completely out of the 50-event live window
+            for i in range(2, 58):
+                ev = {
+                    "auditSeq": i,
+                    "eventId": f"evt_subsequent_{i}",
+                    "timestamp": f"2026-10-02T12:00:{i:02d}+00:00",
+                    "action": "write",
+                    "status": "APPROVED",
+                    "ruleId": "PASS",
+                    "target": f"src/file_{i}.py",
+                    "outcome": "CLEAN"
+                }
+                f.write(json.dumps(ev) + "\n")
+
+        # 3. Simulate an orphaned processing file containing target_eid
+        orphaned_file = os.path.join(self.test_dir, "gravityguard_audit_fallback.processing.1234_historical")
+        with open(orphaned_file, "w", encoding="utf-8") as f:
+            f.write(json.dumps(historical_event) + "\n")
+
+        # 4. Trigger log_event
+        new_eid = log_event("write", "APPROVED", "src/new_trigger.py", "trigger", rule_id="PASS")
+
+        # 5. Check permanent log: target_eid must appear EXACTLY ONCE
+        with open(perm_path, "r", encoding="utf-8") as f:
+            all_records = [json.loads(line) for line in f if line.strip()]
+
+        eids = [r.get("eventId") for r in all_records]
+        count_target = eids.count(target_eid)
+        self.assertEqual(count_target, 1, "Idempotency failed: historical spool event was duplicated in permanent log!")
+        self.assertIn(new_eid, eids)
+        self.assertFalse(os.path.exists(orphaned_file))
+
+    def test_median_attempts_calculation_odd_and_even(self):
+        """Verifies mathematical correctness of median calculation for odd, even, and multi-count distributions."""
+        # 1. Odd distribution: [1, 2, 3] -> median must be 2.0
+        stream_odd = [
+            {"status": "APPROVED", "outcome": "RECOVERED", "recoveryAttempts": 1},
+            {"status": "APPROVED", "outcome": "RECOVERED", "recoveryAttempts": 2},
+            {"status": "APPROVED", "outcome": "RECOVERED", "recoveryAttempts": 3},
+        ]
+        metrics_odd = AggregatedMetrics(stream_odd, label="Odd")
+        self.assertEqual(metrics_odd.median_attempts, 2.0)
+
+        # 2. Even distribution: [1, 4] -> median must be (1 + 4) / 2 = 2.5
+        stream_even = [
+            {"status": "APPROVED", "outcome": "RECOVERED", "recoveryAttempts": 1},
+            {"status": "APPROVED", "outcome": "RECOVERED", "recoveryAttempts": 4},
+        ]
+        metrics_even = AggregatedMetrics(stream_even, label="Even")
+        self.assertEqual(metrics_even.median_attempts, 2.5)
+
+        # 3. Multi-count even distribution: [1, 2, 2, 3] -> median must be 2.0
+        stream_multi = [
+            {"status": "APPROVED", "outcome": "RECOVERED", "recoveryAttempts": 1},
+            {"status": "APPROVED", "outcome": "RECOVERED", "recoveryAttempts": 2},
+            {"status": "APPROVED", "outcome": "RECOVERED", "recoveryAttempts": 2},
+            {"status": "APPROVED", "outcome": "RECOVERED", "recoveryAttempts": 3},
+        ]
+        metrics_multi = AggregatedMetrics(stream_multi, label="Multi")
+        self.assertEqual(metrics_multi.median_attempts, 2.0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -104,7 +104,12 @@ export const resources = {
         approved: 'Onaylandı',
         total: 'Toplam',
         pending: 'Bekleyen',
-        clean: 'Temiz'
+        clean: 'Temiz',
+        blockedTooltip: 'Canlı akıştaki engellenen eylemler (Son 50 olay penceresi)',
+        warningTooltip: 'Canlı akıştaki uyarılar (Son 50 olay penceresi)',
+        approvedTooltip: 'Canlı akıştaki onaylanan eylemler (Son 50 olay penceresi)',
+        pendingTooltip: 'Bekleyen test ve dokümantasyon yükümlülükleri (T1 ve §6)',
+        shadowTooltip: 'Gölge modunda kaydedilen kural gözlemleri'
       },
       actions: {
         refresh: 'Yenile',
@@ -305,7 +310,12 @@ export const resources = {
         approved: 'Approved',
         total: 'Total',
         pending: 'Pending',
-        clean: 'Clean'
+        clean: 'Clean',
+        blockedTooltip: 'Blocked actions in active stream (sliding 50-event window)',
+        warningTooltip: 'Advisory warnings in active stream (sliding 50-event window)',
+        approvedTooltip: 'Approved actions in active stream (sliding 50-event window)',
+        pendingTooltip: 'Pending test and documentation governance debts (T1 & §6)',
+        shadowTooltip: 'Shadow-mode rule observations'
       },
       actions: {
         refresh: 'Refresh',
