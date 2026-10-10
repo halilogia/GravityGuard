@@ -5,6 +5,14 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.6] - 2026-10-10
+
+### Fixed & Hardened (CSP-Compliant Event Delegation)
+- **Tüm Butonların Açılışta Kilitlenmesinin Kökten Çözümü (Event Delegation)**:
+  - CSP `script-src 'nonce-...'` kuralı gereğince Chromium tarafından engellenen bütün inline `onclick="..."` öznitelikleri kaldırıldı.
+  - Başlık butonları (dil, ayarlar, log temizleme), sekme butonları (Canlı, Yükümlülükler, Kurallar, Analiz, Beceriler), akış satırları (`toggleDetail`) ve dosya açma butonları deklaratif `data-action` yapısına geçirildi.
+  - Nonce ile yetkilendirilmiş script bloğunda merkezi `document.addEventListener('click', ...)` delegasyonu kuruldu; bu sayede açılış anından itibaren (0ms) tüm butonlar ve sekmeler gecikmesiz ve CSP engeline takılmadan çalışır hale getirildi.
+
 ## [1.4.5] - 2026-10-10
 
 ### Fixed & Hardened (Root-Cause ServiceWorker & Memory Fix)

@@ -805,7 +805,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
 
         liveHtml += `
           <div class="stream-item">
-            <div class="stream-row" onclick="toggleDetail('evt-${idx}')">
+            <div class="stream-row" data-action="toggleDetail" data-target="evt-${idx}">
               <div class="stream-left">
                 <span class="status-badge ${badgeCls}">${statusIcon} ${statusLabel}</span>
                 <span class="stream-file" title="${fullTargetEsc}">${escapeHtml(fileName)}</span>
@@ -842,8 +842,8 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
               ${e.target ? `<div class="drawer-target" title="${fullTargetEsc}"><span class="icon-inline">${lucide('folder', { size: 11, color: 'var(--text-muted)' })}</span> ${fullTargetEsc}</div>` : ''}
               ${e.reason ? `<div class="drawer-reason">${reasonEsc}</div>` : ''}
               <div class="drawer-buttons">
-                ${e.target ? `<button class="action-btn" onclick="openFile('${escapeJs(e.target)}')">${lucide('fileText', { size: 11 })} ${t('current.openFile')}</button>` : ''}
-                ${e.reason ? `<button class="action-btn" onclick="copyReason('${escapeJs(e.reason)}')">${lucide('copy', { size: 11 })} ${t('current.copyReason')}</button>` : ''}
+                ${e.target ? `<button class="action-btn" data-action="openFile" data-path="${fullTargetEsc}">${lucide('fileText', { size: 11 })} ${t('current.openFile')}</button>` : ''}
+                ${e.reason ? `<button class="action-btn" data-action="copyReason" data-text="${reasonEsc}">${lucide('copy', { size: 11 })} ${t('current.copyReason')}</button>` : ''}
               </div>
             </div>
           </div>
@@ -876,7 +876,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
             <div class="task-card border-cyan">
               <div class="task-header">
                 <span class="task-title" title="${escapeHtml(tk)}">${escapeHtml(path.basename(tk))}</span>
-                <button class="mini-icon-btn" onclick="openFile('${escapeJs(tk)}')" title="${t('current.openFile')}">${lucide('fileText', { size: 12 })}</button>
+                <button class="mini-icon-btn" data-action="openFile" data-path="${escapeHtml(tk)}" title="${t('current.openFile')}">${lucide('fileText', { size: 12 })}</button>
               </div>
               <div class="task-meta">${t('obligations.expectedTest')}: <code class="text-cyan">${escapeHtml(item.expected_name || 'test')}</code></div>
               <div class="state-track">
@@ -907,7 +907,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
             <div class="task-card border-amber">
               <div class="task-header">
                 <span class="task-title" title="${escapeHtml(dk)}">${escapeHtml(path.basename(dk))}</span>
-                <button class="mini-icon-btn" onclick="openFile('${escapeJs(dk)}')" title="${t('current.openFile')}">${lucide('fileText', { size: 12 })}</button>
+                <button class="mini-icon-btn" data-action="openFile" data-path="${escapeHtml(dk)}" title="${t('current.openFile')}">${lucide('fileText', { size: 12 })}</button>
               </div>
               <div class="task-meta">${t('obligations.requiredDoc')}: <code class="text-amber">${escapeHtml(reqs)}</code></div>
               <div class="state-track">
@@ -1013,7 +1013,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       </div>
 
       <div style="margin-top: 14px; text-align: center;">
-        <button class="action-btn wide" onclick="openConfig()">${lucide('settings', { size: 12 })} ${t('actions.openConfig')}</button>
+        <button class="action-btn wide" data-action="openConfig">${lucide('settings', { size: 12 })} ${t('actions.openConfig')}</button>
       </div>
     `;
 
@@ -1233,7 +1233,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
           <span class="project-pill">${t('skills.totalCount', { count: skillsList.length })}</span>
         </div>
         <div style="margin-bottom: 8px;">
-          <button class="action-btn wide" onclick="findSkills()" title="${t('skills.findSkillsTooltip')}">
+          <button class="action-btn wide" data-action="findSkills" title="${t('skills.findSkillsTooltip')}">
             ${lucide('sparkles', { size: 12, color: 'var(--color-cyan)' })} ${t('skills.findSkillsBtn')}
           </button>
         </div>
@@ -1253,7 +1253,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
           scopeLabel = t('skills.pluginScope');
         }
 
-        const safePath = escapeJs(sk.skillFilePath);
+        const safePath = escapeHtml(sk.skillFilePath);
         skillsHtml += `
           <div class="stream-item" style="padding: 7px 8px; margin-bottom: 6px;">
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
@@ -1261,7 +1261,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
                 <span style="font-weight: 700; font-size: 11px; color: var(--text-main);">${escapeHtml(sk.name)}</span>
                 <span class="status-badge ${badgeCls}" style="margin-left: 5px; font-size: 8px; padding: 1px 5px;">${scopeLabel}</span>
               </div>
-              <button class="mini-icon-btn" onclick="openFile('${safePath}')" title="${t('skills.openSkillMd')}">
+              <button class="mini-icon-btn" data-action="openFile" data-path="${safePath}" title="${t('skills.openSkillMd')}">
                 ${lucide('fileText', { size: 12, color: 'var(--text-muted)' })}
               </button>
             </div>
@@ -1767,9 +1767,9 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
             <span class="project-pill">${escapeHtml(projectName)}</span>
           </div>
           <div class="header-right">
-            <button class="mini-btn" onclick="toggleLanguage()" title="${t('actions.switchLang')}">${lucide('globe', { size: 11 })} <span>${getCurrentLanguage().toUpperCase()}</span></button>
-            <button class="mini-btn" onclick="openConfig()" title="${t('actions.openConfig')}">${lucide('settings', { size: 11 })}</button>
-            <button class="mini-btn" onclick="clearLogs()" title="${t('actions.clearLogs')}">${lucide('trash2', { size: 11 })}</button>
+            <button class="mini-btn" data-action="toggleLanguage" title="${t('actions.switchLang')}">${lucide('globe', { size: 11 })} <span>${getCurrentLanguage().toUpperCase()}</span></button>
+            <button class="mini-btn" data-action="openConfig" title="${t('actions.openConfig')}">${lucide('settings', { size: 11 })}</button>
+            <button class="mini-btn" data-action="clearLogs" title="${t('actions.clearLogs')}">${lucide('trash2', { size: 11 })}</button>
           </div>
         </div>
 
@@ -1787,11 +1787,11 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
 
         <!-- Tabs -->
         <div class="tabs-bar">
-          <button class="tab-btn ${activeTab === 'live' ? 'active' : ''}" id="btn-live" onclick="setTab('live')">${lucide('zap', { size: 11 })} ${t('tabs.live')}</button>
-          <button class="tab-btn ${activeTab === 'obligations' ? 'active' : ''}" id="btn-obligations" onclick="setTab('obligations')">${lucide('clipboardList', { size: 11 })} ${t('tabs.obligations')}${totalObligations > 0 ? `<span class="badge-counter">${totalObligations}</span>` : ''}</button>
-          <button class="tab-btn ${activeTab === 'rules' ? 'active' : ''}" id="btn-rules" onclick="setTab('rules')">${lucide('sliders', { size: 11 })} ${t('tabs.rules')}</button>
-          <button class="tab-btn ${activeTab === 'insights' ? 'active' : ''}" id="btn-insights" onclick="setTab('insights')">${lucide('barChart', { size: 11 })} ${t('tabs.insights')}</button>
-          <button class="tab-btn ${activeTab === 'skills' ? 'active' : ''}" id="btn-skills" onclick="setTab('skills')">${lucide('sparkles', { size: 11 })} ${t('tabs.skills')}<span class="badge-counter" style="background: rgba(56, 189, 248, 0.25); color: #38bdf8;">${skillsList.length}</span></button>
+          <button class="tab-btn ${activeTab === 'live' ? 'active' : ''}" id="btn-live" data-action="setTab" data-tab="live">${lucide('zap', { size: 11 })} ${t('tabs.live')}</button>
+          <button class="tab-btn ${activeTab === 'obligations' ? 'active' : ''}" id="btn-obligations" data-action="setTab" data-tab="obligations">${lucide('clipboardList', { size: 11 })} ${t('tabs.obligations')}${totalObligations > 0 ? `<span class="badge-counter">${totalObligations}</span>` : ''}</button>
+          <button class="tab-btn ${activeTab === 'rules' ? 'active' : ''}" id="btn-rules" data-action="setTab" data-tab="rules">${lucide('sliders', { size: 11 })} ${t('tabs.rules')}</button>
+          <button class="tab-btn ${activeTab === 'insights' ? 'active' : ''}" id="btn-insights" data-action="setTab" data-tab="insights">${lucide('barChart', { size: 11 })} ${t('tabs.insights')}</button>
+          <button class="tab-btn ${activeTab === 'skills' ? 'active' : ''}" id="btn-skills" data-action="setTab" data-tab="skills">${lucide('sparkles', { size: 11 })} ${t('tabs.skills')}<span class="badge-counter" style="background: rgba(56, 189, 248, 0.25); color: #38bdf8;">${skillsList.length}</span></button>
         </div>
 
         <!-- Panes -->
@@ -1847,13 +1847,34 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
             }
           }
 
-          function clearLogs() { vscode.postMessage({ command: 'clearLogs' }); }
-          function refresh() { vscode.postMessage({ command: 'refresh' }); }
-          function toggleLanguage() { vscode.postMessage({ command: 'toggleLanguage' }); }
-          function openFile(path) { vscode.postMessage({ command: 'openFile', path }); }
-          function openConfig() { vscode.postMessage({ command: 'openConfig' }); }
-          function copyReason(text) { vscode.postMessage({ command: 'copyReason', text }); }
-          function findSkills() { vscode.postMessage({ command: 'findSkills' }); }
+          // Centralized CSP-Compliant Event Delegation (No inline onclick violations)
+          document.addEventListener('click', (event) => {
+            const target = event.target instanceof Element ? event.target.closest('[data-action]') : null;
+            if (!target) return;
+
+            const action = target.getAttribute('data-action');
+            if (action === 'setTab') {
+              const tab = target.getAttribute('data-tab');
+              if (tab) setTab(tab);
+            } else if (action === 'openConfig') {
+              vscode.postMessage({ command: 'openConfig' });
+            } else if (action === 'toggleLanguage') {
+              vscode.postMessage({ command: 'toggleLanguage' });
+            } else if (action === 'clearLogs') {
+              vscode.postMessage({ command: 'clearLogs' });
+            } else if (action === 'findSkills') {
+              vscode.postMessage({ command: 'findSkills' });
+            } else if (action === 'openFile') {
+              const filePath = target.getAttribute('data-path');
+              if (filePath) vscode.postMessage({ command: 'openFile', path: filePath });
+            } else if (action === 'copyReason') {
+              const text = target.getAttribute('data-text');
+              if (text) vscode.postMessage({ command: 'copyReason', text });
+            } else if (action === 'toggleDetail') {
+              const elId = target.getAttribute('data-target');
+              if (elId) toggleDetail(elId);
+            }
+          });
         </script>
       </body>
       </html>
