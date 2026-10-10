@@ -1,7 +1,16 @@
 import { t } from '../../i18n';
 import { lucide } from '../../icons';
-import { SkillItem } from '../../skills';
+import { SkillItem, AgentType } from '../../skills';
 import { escapeHtml } from '../html_utils';
+
+const AGENT_BADGES: Record<AgentType, { label: string; color: string; bg: string }> = {
+  claude: { label: '🟠 Claude', color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.15)' },
+  gemini: { label: '🔵 Antigravity/Gemini', color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.15)' },
+  cursor: { label: '🟣 Cursor', color: '#c084fc', bg: 'rgba(192, 132, 252, 0.15)' },
+  copilot: { label: '🟢 Copilot', color: '#34d399', bg: 'rgba(16, 185, 129, 0.15)' },
+  windsurf: { label: '🌊 Windsurf', color: '#2dd4bf', bg: 'rgba(45, 212, 191, 0.15)' },
+  generic: { label: '⚪ Generic', color: '#94a3b8', bg: 'rgba(255, 255, 255, 0.08)' }
+};
 
 export function renderSkillsTab(skillsList: SkillItem[]): string {
   // --- TAB 5: SKILLS (ACTIVE WORKSPACE, GLOBAL, PLUGIN, BUILT-IN) ---
@@ -36,11 +45,13 @@ export function renderSkillsTab(skillsList: SkillItem[]): string {
       }
 
       const safePath = escapeHtml(sk.skillFilePath);
+      const agent = AGENT_BADGES[sk.agentType || 'generic'] || AGENT_BADGES.generic;
       skillsHtml += `
-          <div class="stream-item" style="padding: 7px 8px; margin-bottom: 6px;">
+          <div class="stream-item" data-action="openFile" data-path="${safePath}" style="padding: 7px 8px; margin-bottom: 6px; cursor: pointer;">
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
               <div>
                 <span style="font-weight: 700; font-size: 11px; color: var(--text-main);">${escapeHtml(sk.name)}</span>
+                <span class="status-badge" style="margin-left: 5px; font-size: 8px; padding: 1px 5px; color: ${agent.color}; background: ${agent.bg};">${escapeHtml(agent.label)}</span>
                 <span class="status-badge ${badgeCls}" style="margin-left: 5px; font-size: 8px; padding: 1px 5px;">${scopeLabel}</span>
               </div>
               <button class="mini-icon-btn" data-action="openFile" data-path="${safePath}" title="${t('skills.openSkillMd')}">

@@ -4,6 +4,8 @@ import * as os from 'os';
 
 export type SkillScope = 'workspace' | 'global' | 'plugin' | 'builtin';
 
+export type AgentType = 'claude' | 'cursor' | 'gemini' | 'copilot' | 'windsurf' | 'generic';
+
 export interface SkillItem {
   id: string;
   name: string;
@@ -11,6 +13,7 @@ export interface SkillItem {
   scope: SkillScope;
   skillFilePath: string;
   skillDirPath: string;
+  agentType?: AgentType;
 }
 
 export function parseSkillMdContent(content: string, fallbackName: string): { name: string; description: string } {
@@ -49,7 +52,7 @@ export function parseSkillMdContent(content: string, fallbackName: string): { na
   return { name, description };
 }
 
-export function scanDirectoryForSkills(dirPath: string, scope: SkillScope): SkillItem[] {
+export function scanDirectoryForSkills(dirPath: string, scope: SkillScope, agentType: AgentType = 'generic'): SkillItem[] {
   const items: SkillItem[] = [];
   if (!fs.existsSync(dirPath)) {
     return items;
@@ -71,7 +74,8 @@ export function scanDirectoryForSkills(dirPath: string, scope: SkillScope): Skil
               description: meta.description,
               scope,
               skillFilePath: skillFile,
-              skillDirPath: skillDir
+              skillDirPath: skillDir,
+              agentType
             });
           } catch (readErr) {
             console.warn(`[GravityGuard] Failed to read skill at ${skillFile}:`, readErr);
@@ -83,6 +87,59 @@ export function scanDirectoryForSkills(dirPath: string, scope: SkillScope): Skil
     console.warn(`[GravityGuard] Failed to scan skills directory at ${dirPath}:`, dirErr);
   }
 
+  return items;
+}
+
+function firstHeading(content: string): string | undefined {
+  const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---/, '');
+  const m = body.match(/^#{1,6}\s+(.+?)\s*#*\s*$/m);
+  return m ? m[1].trim() : undefined;
+}
+
+/** Reads a single agent rule/instruction file (CLAUDE.md, .cursorrules, ...). Returns null if missing/unreadable. */
+export function readAgentFile(filePath: string, scope: SkillScope, agentType: AgentType): SkillItem | null {
+  try {
+    if (!fs.statSync(filePath).isFile()) {
+      return null;
+    }
+    const content = fs.readFileSync(filePath, 'utf8');
+    const baseName = path.basename(filePath);
+    const meta = parseSkillMdContent(content, baseName);
+    let name = meta.name;
+    if (name === baseName) {
+      name = firstHeading(content) || baseName;
+    }
+    return {
+      id: `${scope}:${agentType}:${filePath}`,
+      name,
+      description: meta.description,
+      scope,
+      skillFilePath: filePath,
+      skillDirPath: path.dirname(filePath),
+      agentType
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Reads all *.md / *.mdc rule files directly inside a directory (non-recursive). */
+function scanRuleFilesInDir(dirPath: string, scope: SkillScope, agentType: AgentType): SkillItem[] {
+  const items: SkillItem[] = [];
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      if (entry.isFile() && /\.(mdc|md)$/i.test(entry.name)) {
+        const item = readAgentFile(path.join(dirPath, entry.name), scope, agentType);
+        if (item) {
+          items.push(item);
+        }
+      }
+    }
+  } catch {
+    // directory missing: skip silently
+  }
   return items;
 }
 
@@ -102,15 +159,36 @@ export function scanAllSkills(workspaceRoot?: string): SkillItem[] {
 
   // 1. Workspace Skills
   if (workspaceRoot) {
-    addItems(scanDirectoryForSkills(path.join(workspaceRoot, '.agent', 'skills'), 'workspace'));
-    addItems(scanDirectoryForSkills(path.join(workspaceRoot, '.gemini', 'skills'), 'workspace'));
-    addItems(scanDirectoryForSkills(path.join(workspaceRoot, 'skills'), 'workspace'));
+    addItems(scanDirectoryForSkills(path.join(workspaceRoot, '.agent', 'skills'), 'workspace', 'gemini'));
+    addItems(scanDirectoryForSkills(path.join(workspaceRoot, '.gemini', 'skills'), 'workspace', 'gemini'));
+    addItems(scanDirectoryForSkills(path.join(workspaceRoot, 'skills'), 'workspace', 'generic'));
+
+    // Universal agent rule / instruction files
+    const addFile = (rel: string[], agent: AgentType) => {
+      const item = readAgentFile(path.join(workspaceRoot, ...rel), 'workspace', agent);
+      if (item) {
+        addItems([item]);
+      }
+    };
+    addFile(['CLAUDE.md'], 'claude');
+    addFile(['CLAUDE.local.md'], 'claude');
+    addFile(['.claude', 'CLAUDE.md'], 'claude');
+    addItems(scanDirectoryForSkills(path.join(workspaceRoot, '.claude', 'skills'), 'workspace', 'claude'));
+    addFile(['GEMINI.md'], 'gemini');
+    addFile(['AGENTS.md'], 'gemini');
+    addFile(['docs', 'AGENTS.md'], 'gemini');
+    addFile(['.cursorrules'], 'cursor');
+    addItems(scanRuleFilesInDir(path.join(workspaceRoot, '.cursor', 'rules'), 'workspace', 'cursor'));
+    addItems(scanDirectoryForSkills(path.join(workspaceRoot, '.cursor', 'skills'), 'workspace', 'cursor'));
+    addFile(['.github', 'copilot-instructions.md'], 'copilot');
+    addFile(['.windsurfrules'], 'windsurf');
   }
 
   // 2. Global Skills (~/.gemini/config/skills)
   const home = os.homedir();
-  addItems(scanDirectoryForSkills(path.join(home, '.gemini', 'config', 'skills'), 'global'));
-  addItems(scanDirectoryForSkills(path.join(home, '.agent', 'skills'), 'global'));
+  addItems(scanDirectoryForSkills(path.join(home, '.gemini', 'config', 'skills'), 'global', 'gemini'));
+  addItems(scanDirectoryForSkills(path.join(home, '.agent', 'skills'), 'global', 'gemini'));
+  addItems(scanDirectoryForSkills(path.join(home, '.claude', 'skills'), 'global', 'claude'));
 
   // 3. Plugin Skills (~/.gemini/config/plugins/*/skills)
   const pluginsDir = path.join(home, '.gemini', 'config', 'plugins');
@@ -120,7 +198,7 @@ export function scanAllSkills(workspaceRoot?: string): SkillItem[] {
       for (const pe of pluginEntries) {
         if (pe.isDirectory()) {
           const pSkillDir = path.join(pluginsDir, pe.name, 'skills');
-          addItems(scanDirectoryForSkills(pSkillDir, 'plugin'));
+          addItems(scanDirectoryForSkills(pSkillDir, 'plugin', 'gemini'));
         }
       }
     } catch (pluginErr) {
@@ -130,7 +208,7 @@ export function scanAllSkills(workspaceRoot?: string): SkillItem[] {
 
   // 4. Built-in Skills (~/.gemini/antigravity/builtin/skills)
   const builtinDir = path.join(home, '.gemini', 'antigravity', 'builtin', 'skills');
-  addItems(scanDirectoryForSkills(builtinDir, 'builtin'));
+  addItems(scanDirectoryForSkills(builtinDir, 'builtin', 'gemini'));
 
   return all;
 }

@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Claude Code İşlemleri Canlı Akışta Anında Görünür**: `plugin/claude-code/gravityguard_claude_hook.py` içindeki, audit logunu zorunlu olarak `<proje>/.gravityguard/logs` dizinine yönlendiren `GRAVITYGUARD_AUDIT_DIR` atamasi kaldirildi. Claude Code artik varsayilan olarak merkezi `~/.gemini/logs/srp_guardian_live.json` dosyasina yazar; Live Monitor bu dosyayi dinledigi icin `🟠 Claude Code` rozetli olaylar aninda gorunur. `GRAVITYGUARD_LOG_DIR` / `GRAVITYGUARD_AUDIT_DIR` ile elle yonlendirme hala desteklenir.
 - **Webview Log Yolu Çözümlemesi (Geriye Uyumlu)**: `getLiveLogPath()` once merkezi logu kullanir; merkezi log yoksa ve calisma alaninda `.gravityguard/logs/srp_guardian_live.json` varsa onu kullanir.
 
+### Added (Universal Agent Skill & Rule Catalog)
+- **Evrensel Ajan Yetenek ve Kural Kataloğu**: Beceriler sekmesi artık yalnızca `SKILL.md` değil, çalışma alanındaki tüm ajan talimat/kural dosyalarını tespit eder: `CLAUDE.md`, `CLAUDE.local.md`, `.claude/CLAUDE.md`, `.claude/skills/*/SKILL.md`, `~/.claude/skills/*/SKILL.md`, `GEMINI.md`, `AGENTS.md`, `docs/AGENTS.md`, `.cursorrules`, `.cursor/rules/*.{mdc,md}`, `.cursor/skills/*/SKILL.md`, `.github/copilot-instructions.md`, `.windsurfrules`.
+- **Ajan Türü Rozetleri**: `SkillItem.agentType` alanı eklendi; kartlarda `🟠 Claude`, `🔵 Antigravity/Gemini`, `🟣 Cursor`, `🟢 Copilot` rozetleri ve Proje/Global kapsam rozeti gösterilir.
+- **Karttan Dosya Açma**: Kartın tamamı `data-action="openFile"` ile (CSP uyumlu event delegation) tıklanınca dosyayı editörde açar.
+- Başlık/açıklama frontmatter'dan, yoksa ilk başlık ve ilk anlamlı paragraftan çıkarılır; eksik dosyalar sessizce atlanır, aynı dosya çift listelenmez.
+
 ## [1.4.6] - 2026-10-10
 
 ### Added & Modularized (Architecture & Triad Attribution)
