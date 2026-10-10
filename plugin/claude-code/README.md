@@ -22,7 +22,7 @@ Each session is tracked as `claude:<session_id>`, so two Claude Code windows (or
 ## What it does not do
 
 - **`Bash` is not inspected.** A shell command cannot be reduced reliably to "these lines were added to that file", so `echo > file` or `sed -i` never reach the file rules. The only backstop is the Stop gate (final diff guard, doc and test obligations); there is no git-level secret scanner (`.githooks/pre-commit` only runs the documentation gate).
-- **Audit log location.** Unless `GRAVITYGUARD_LOG_DIR` or `GRAVITYGUARD_AUDIT_DIR` is set, the adapter writes the audit log to `<project>/.gravityguard/logs` (not Antigravity's `~/.gemini/logs`).
+- **Audit log location.** Unless `GRAVITYGUARD_LOG_DIR` or `GRAVITYGUARD_AUDIT_DIR` is set, the adapter writes the audit log to the central `~/.gemini/logs` (shared with Antigravity), so the GravityGuard Live Monitor shows Claude Code activity with the `Claude Code` badge immediately. Set `GRAVITYGUARD_AUDIT_DIR` (e.g. to `<project>/.gravityguard/logs`) to keep the log project-local.
 - **Fail-open.** If the engine is missing or crashes, the tool call proceeds and the reason is written to stderr (visible in Claude Code's verbose mode).
 - **Cost.** Every guarded write starts two short Python processes (the adapter, then the engine): expect a few hundred milliseconds per `Write` / `Edit`.
 - Language coverage is the engine's: GDScript and other languages get the secret rules and the generic ones, not the Python-specific ones (G1 looks for a literal `pass` in an `except`).

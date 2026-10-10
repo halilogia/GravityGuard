@@ -145,12 +145,9 @@ def run_engine(payload: Dict[str, Any], extra_args: Sequence[str] = ()) -> Optio
     if not engine.is_file():
         print(f"[GravityGuard Claude adapter] engine not found: {engine} (set GRAVITYGUARD_ENGINE)", file=sys.stderr)
         return None
+    # The audit log stays in the central ~/.gemini/logs (the Live Monitor watches it) unless the caller overrides it
+    # through GRAVITYGUARD_LOG_DIR / GRAVITYGUARD_AUDIT_DIR.
     env = dict(os.environ)
-    if not env.get("GRAVITYGUARD_LOG_DIR") and not env.get("GRAVITYGUARD_AUDIT_DIR"):
-        # Claude Code sessions keep their audit log in the project, not in the Antigravity default (~/.gemini/logs).
-        workspaces = payload.get("workspacePaths") or []
-        if workspaces:
-            env["GRAVITYGUARD_AUDIT_DIR"] = str(Path(workspaces[0]) / ".gravityguard" / "logs")
     try:
         proc = subprocess.run(
             [sys.executable, str(engine), *extra_args],

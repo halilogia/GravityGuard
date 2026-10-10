@@ -7,9 +7,21 @@ import { GuardianData, GuardianViewModel } from './types';
 
 /**
  * Absolute path of the live guardian log written by the SRP guardian.
+ * The central log (~/.gemini/logs) wins; a workspace-local log is only a fallback when the central one is absent.
  */
 export function getLiveLogPath(): string {
-  return path.join(os.homedir(), '.gemini', 'logs', 'srp_guardian_live.json');
+  const centralPath = path.join(os.homedir(), '.gemini', 'logs', 'srp_guardian_live.json');
+  if (fs.existsSync(centralPath)) {
+    return centralPath;
+  }
+  const folders = vscode.workspace.workspaceFolders;
+  if (folders && folders.length > 0) {
+    const localPath = path.join(folders[0].uri.fsPath, '.gravityguard', 'logs', 'srp_guardian_live.json');
+    if (fs.existsSync(localPath)) {
+      return localPath;
+    }
+  }
+  return centralPath;
 }
 
 /**

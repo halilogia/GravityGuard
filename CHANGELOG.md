@@ -5,6 +5,12 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.7] - 2026-10-10
+
+### Fixed (Claude Code Live Monitor Visibility)
+- **Claude Code İşlemleri Canlı Akışta Anında Görünür**: `plugin/claude-code/gravityguard_claude_hook.py` içindeki, audit logunu zorunlu olarak `<proje>/.gravityguard/logs` dizinine yönlendiren `GRAVITYGUARD_AUDIT_DIR` atamasi kaldirildi. Claude Code artik varsayilan olarak merkezi `~/.gemini/logs/srp_guardian_live.json` dosyasina yazar; Live Monitor bu dosyayi dinledigi icin `🟠 Claude Code` rozetli olaylar aninda gorunur. `GRAVITYGUARD_LOG_DIR` / `GRAVITYGUARD_AUDIT_DIR` ile elle yonlendirme hala desteklenir.
+- **Webview Log Yolu Çözümlemesi (Geriye Uyumlu)**: `getLiveLogPath()` once merkezi logu kullanir; merkezi log yoksa ve calisma alaninda `.gravityguard/logs/srp_guardian_live.json` varsa onu kullanir.
+
 ## [1.4.6] - 2026-10-10
 
 ### Added & Modularized (Architecture & Triad Attribution)

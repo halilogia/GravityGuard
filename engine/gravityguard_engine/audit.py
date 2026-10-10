@@ -196,7 +196,7 @@ def _resolve_log_dir() -> str:
     Resolves the audit-log directory.
     GRAVITYGUARD_LOG_DIR lets the test suite / CI redirect the audit stream to a
     temp directory. Without it, test runs append to ~/.gemini/logs.
-    GRAVITYGUARD_AUDIT_DIR relocates the audit stream only (the Claude Code adapter sets it to a project-local folder);
+    GRAVITYGUARD_AUDIT_DIR relocates the audit stream only (opt-in project-local or custom folder);
     GRAVITYGUARD_LOG_DIR wins when both are set.
     """
     for var in ("GRAVITYGUARD_LOG_DIR", "GRAVITYGUARD_AUDIT_DIR"):
