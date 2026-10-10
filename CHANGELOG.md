@@ -5,6 +5,15 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.5] - 2026-10-10
+
+### Fixed & Hardened (Root-Cause ServiceWorker & Memory Fix)
+- **ServiceWorker `InvalidStateError` ve Teardown Döngüsünün Kökten Çözümü**:
+  - `getNonce()` her renderda rastgele üretilmek yerine `_nonce` olarak sağlayıcı örneğinde sabitlendi; bu sayede HTML string'inin her 1.5 saniyede bir sahte şekilde farklı algılanıp dokümanı yok etmesi engellendi.
+  - `updateHtml` içine `_lastDataSig` veri imzası kontrolü eklendi; verilerde, loglarda veya yükümlülüklerde gerçek bir değişiklik yoksa HTML ve DOM'a dokunulmadan 0ms'de işlem sonlandırılır.
+  - `resolveWebviewView` başlangıcında arka plan kontrolü 2.5 saniye geciktirilerek Chromium ve VS Code ServiceWorker kayıt sürecine oturma süresi tanındı.
+  - `fs.watch` dinleyicisi `_logWatcher` referansında saklandı ve webview `onDidDispose` sırasında kaynak sızıntısı bırakmadan güvenle kapatıldı (`close()`).
+
 ## [1.4.4] - 2026-10-10
 
 ### Fixed & Optimized

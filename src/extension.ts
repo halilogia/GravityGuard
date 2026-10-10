@@ -458,9 +458,12 @@ function getNonce(): string {
 class GuardianViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
   private _pollInterval?: NodeJS.Timeout;
+  private _logWatcher?: fs.FSWatcher;
   private _clearedAfterSeq: number | null = null;
   private _activeTab: string = 'live';
   private _lastHtml: string = '';
+  private _lastDataSig: string = '';
+  private _nonce: string = getNonce();
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -471,6 +474,8 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
   public resolveWebviewView(webviewView: vscode.WebviewView): void {
     this._view = webviewView;
     this._lastHtml = '';
+    this._lastDataSig = '';
+    this._nonce = getNonce();
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [this._extensionUri]
@@ -478,7 +483,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.onDidChangeVisibility(() => {
       if (this._view?.visible) {
-        this.updateHtml(true);
+        this.updateHtml(false);
       }
     });
 
@@ -487,8 +492,17 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
         clearInterval(this._pollInterval);
         this._pollInterval = undefined;
       }
+      if (this._logWatcher) {
+        try {
+          this._logWatcher.close();
+        } catch (err) {
+          console.debug('[GravityGuard] Watcher close error:', err);
+        }
+        this._logWatcher = undefined;
+      }
       this._view = undefined;
       this._lastHtml = '';
+      this._lastDataSig = '';
     });
 
     webviewView.webview.onDidReceiveMessage(async (message: { command: string; path?: string; text?: string; tab?: string }) => {
@@ -496,6 +510,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
         this.clearView();
       } else if (message.command === 'refresh') {
         this._lastHtml = '';
+        this._lastDataSig = '';
         this.updateHtml(true);
       } else if (message.command === 'setTab' && message.tab) {
         this._activeTab = message.tab;
@@ -508,6 +523,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
           this._onLanguageChanged();
         }
         this._lastHtml = '';
+        this._lastDataSig = '';
         this.updateHtml(true);
         if (this._context) {
           this._context.globalState.update('gravityguard.language', next).then(undefined, (err) => {
@@ -529,13 +545,17 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       }
     });
 
+    // Initial render
     this.updateHtml(true);
 
-    // 1. Live File Watcher
+    // 1. Live File Watcher (Stored in _logWatcher to prevent leak)
     const logPath = path.join(os.homedir(), '.gemini', 'logs', 'srp_guardian_live.json');
     if (fs.existsSync(logPath)) {
       try {
-        fs.watch(logPath, () => {
+        if (this._logWatcher) {
+          this._logWatcher.close();
+        }
+        this._logWatcher = fs.watch(logPath, () => {
           this.updateHtml(false);
         });
       } catch (e) {
@@ -543,13 +563,18 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       }
     }
 
-    // 2. Continuous 1.5s Auto-Refresh (Heartbeat)
+    // 2. Delayed Polling (3s heartbeat) only after webview is stable (prevents Service Worker registration race)
     if (this._pollInterval) {
       clearInterval(this._pollInterval);
+      this._pollInterval = undefined;
     }
-    this._pollInterval = setInterval(() => {
-      this.updateHtml(false);
-    }, 1500);
+    setTimeout(() => {
+      if (this._view && !this._pollInterval) {
+        this._pollInterval = setInterval(() => {
+          this.updateHtml(false);
+        }, 3000);
+      }
+    }, 2500);
   }
 
   public clearView(): void {
@@ -652,6 +677,14 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
 
     const totalObligations = Object.keys(pendingTests).length + Object.keys(pendingDocs).length;
     let eventsList = filterEventsAfterSeq(data.events || [], this._clearedAfterSeq);
+
+    // Skip DOM teardown / re-render if data has not changed
+    const currentSig = `${getCurrentLanguage()}:${this._clearedAfterSeq}:${eventsList.length}:${eventsList[0]?.timestamp || ''}:${eventsList[0]?.seq || 0}:${govData?.seq || 0}:${stopRetries}:${resolutionIntents.length}:${totalObligations}`;
+    if (!force && this._lastDataSig === currentSig && this._lastHtml) {
+      return;
+    }
+    this._lastDataSig = currentSig;
+
     const blockedCount = eventsList.filter(e => e.status === 'BLOCKED').length;
     const warningCount = eventsList.filter(e => e.status === 'WARNING').length;
     const approvedCount = eventsList.filter(e => e.status === 'APPROVED').length;
@@ -1243,7 +1276,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       }
     }
 
-    const nonce = getNonce();
+    const nonce = this._nonce;
 
     // --- RENDER MAIN WEBVIEW HTML ---
     const htmlContent = `
