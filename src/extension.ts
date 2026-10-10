@@ -49,6 +49,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('antigravityBridge.refreshLogs', () => {
       provider.updateHtml();
     }),
+    vscode.commands.registerCommand('antigravityBridge.resetWebview', () => {
+      provider.resetWebview();
+    }),
     vscode.commands.registerCommand('antigravityBridge.clearLogs', () => {
       provider.clearLogs();
     }),

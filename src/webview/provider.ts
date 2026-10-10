@@ -18,6 +18,18 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
   private _lastDataSig: string = '';
   private _nonce: string = getNonce();
   private _isHtmlInitialized: boolean = false;
+  private _visibilityListener?: vscode.Disposable;
+  private _pollStartTimer?: NodeJS.Timeout;
+  private _readyTimer?: NodeJS.Timeout;
+  private _recoveryTimer?: NodeJS.Timeout;
+  private _isWebviewReady: boolean = false;
+  private _recoveryAttempts: number = 0;
+
+  // Webview must post 'ready' within this window after html assignment, otherwise recovery kicks in
+  private static readonly READY_TIMEOUT_MS = 5000;
+  // Gap between clearing html and re-assigning it, lets Chromium tear down the old iframe document
+  private static readonly RECOVERY_DELAY_MS = 250;
+  private static readonly MAX_RECOVERY_ATTEMPTS = 3;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -31,18 +43,29 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
     this._lastDataSig = '';
     this._nonce = getNonce();
     this._isHtmlInitialized = false;
+    this._isWebviewReady = false;
+    this._recoveryAttempts = 0;
+    this.clearTimers();
+    this._visibilityListener?.dispose();
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [this._extensionUri]
     };
 
-    webviewView.onDidChangeVisibility(() => {
-      if (this._view?.visible) {
-        this.updateHtml(false);
+    // Html is never assigned while the view is hidden: the first render is deferred until visible
+    // (service worker registration fails with InvalidStateError on a detached iframe document).
+    this._visibilityListener = webviewView.onDidChangeVisibility(() => {
+      if (!this._view?.visible) {
+        return;
       }
+      this.updateHtml(!this._isHtmlInitialized);
     });
 
     webviewView.onDidDispose(() => {
+      this.clearTimers();
+      this._visibilityListener?.dispose();
+      this._visibilityListener = undefined;
+      this._isWebviewReady = false;
       if (this._pollInterval) {
         clearInterval(this._pollInterval);
         this._pollInterval = undefined;
@@ -62,7 +85,14 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
     });
 
     webviewView.webview.onDidReceiveMessage(async (message: { command: string; path?: string; text?: string; tab?: string }) => {
-      if (message.command === 'clearLogs' || message.command === 'clearView') {
+      if (message.command === 'ready') {
+        this._isWebviewReady = true;
+        this._recoveryAttempts = 0;
+        if (this._readyTimer) {
+          clearTimeout(this._readyTimer);
+          this._readyTimer = undefined;
+        }
+      } else if (message.command === 'clearLogs' || message.command === 'clearView') {
         this.clearView();
       } else if (message.command === 'refresh') {
         this._lastHtml = '';
@@ -101,8 +131,10 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
       }
     });
 
-    // Initial render synchronously inside resolveWebviewView (no deferred render)
-    this.updateHtml(true);
+    // Initial render only when visible; otherwise onDidChangeVisibility triggers it (single render)
+    if (webviewView.visible) {
+      this.updateHtml(true);
+    }
 
     // 1. Live File Watcher (Stored in _logWatcher to prevent leak)
     const logPath = getLiveLogPath();
@@ -124,13 +156,86 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
       clearInterval(this._pollInterval);
       this._pollInterval = undefined;
     }
-    setTimeout(() => {
+    this._pollStartTimer = setTimeout(() => {
+      this._pollStartTimer = undefined;
       if (this._view && !this._pollInterval) {
         this._pollInterval = setInterval(() => {
           this.updateHtml(false);
         }, 3000);
       }
     }, 2500);
+  }
+
+  /**
+   * Public reset (antigravityBridge.resetWebview): tears the webview document down and rebuilds it
+   * with a fresh nonce. Safe to call at any time, also after an InvalidStateError black screen.
+   */
+  public resetWebview(): void {
+    this._recoveryAttempts = 0;
+    this.recoverWebview('manual reset');
+  }
+
+  private clearTimers(): void {
+    for (const timer of [this._pollStartTimer, this._readyTimer, this._recoveryTimer]) {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
+    this._pollStartTimer = undefined;
+    this._readyTimer = undefined;
+    this._recoveryTimer = undefined;
+  }
+
+  private armReadyWatchdog(): void {
+    if (this._readyTimer) {
+      clearTimeout(this._readyTimer);
+    }
+    this._isWebviewReady = false;
+    this._readyTimer = setTimeout(() => {
+      this._readyTimer = undefined;
+      if (this._view && !this._isWebviewReady) {
+        this.recoverWebview('ready timeout');
+      }
+    }, GuardianViewProvider.READY_TIMEOUT_MS);
+  }
+
+  private recoverWebview(reason: string): void {
+    const view = this._view;
+    if (!view) {
+      return;
+    }
+    if (this._recoveryAttempts >= GuardianViewProvider.MAX_RECOVERY_ATTEMPTS) {
+      console.warn(`[GravityGuard] Webview recovery gave up (${reason}).`);
+      vscode.window.showWarningMessage(t('actions.webviewRecoveryFailed'));
+      return;
+    }
+    this._recoveryAttempts++;
+    console.warn(`[GravityGuard] Recovering webview (${reason}), attempt ${this._recoveryAttempts}`);
+
+    if (this._readyTimer) {
+      clearTimeout(this._readyTimer);
+      this._readyTimer = undefined;
+    }
+    if (this._recoveryTimer) {
+      clearTimeout(this._recoveryTimer);
+    }
+    this._nonce = getNonce();
+    this._lastHtml = '';
+    this._lastDataSig = '';
+    this._isHtmlInitialized = false;
+    this._isWebviewReady = false;
+    try {
+      view.webview.html = '';
+    } catch (err) {
+      console.debug('[GravityGuard] Webview html reset error:', err);
+    }
+    this._recoveryTimer = setTimeout(() => {
+      this._recoveryTimer = undefined;
+      if (this._view === view && view.visible) {
+        this.updateHtml(true);
+      }
+      // If hidden, onDidChangeVisibility renders once the view becomes visible again
+    }, GuardianViewProvider.RECOVERY_DELAY_MS);
   }
 
   public clearView(): void {
@@ -159,7 +264,8 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
     if (!this._view) {
       return;
     }
-    if (!force && !this._view.visible) {
+    if (!this._view.visible && (!force || !this._isHtmlInitialized)) {
+      // Hidden view: never touch webview.html; first render is deferred to onDidChangeVisibility
       return;
     }
 
@@ -194,7 +300,10 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
     if (!this._isHtmlInitialized || force) {
       this._isHtmlInitialized = true;
       this._lastHtml = htmlContent;
-      this._view.webview.html = htmlContent;
+      // Per-render marker busts any html cache so the document is always re-created
+      this._view.webview.html = `${htmlContent}
+<!-- gg-render:${nonce}:${Date.now()} -->`;
+      this.armReadyWatchdog();
     } else if (bodyInnerHtml) {
       this._view.webview.postMessage({
         type: 'updateContent',

@@ -88,6 +88,11 @@
         "icon": "$(trash)"
       },
       {
+        "command": "antigravityBridge.resetWebview",
+        "title": "GravityGuard: Reset Live Monitor / Paneli Sıfırla",
+        "icon": "$(debug-restart)"
+      },
+      {
         "command": "antigravityBridge.findSkills",
         "title": "GravityGuard: Projeye Uygun Skill Bul / Find Skills for Project",
         "icon": "$(sparkle)"
