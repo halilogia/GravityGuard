@@ -167,6 +167,25 @@ class TestEndToEnd(unittest.TestCase):
                                        "new_string": "    try:\n        x = int('a')\n    except Exception:\n        pass\n"})
         self.assertIsNone(out)
 
+    def test_user_default_config_shadows_rules_for_a_project_without_its_own(self):
+        """~/.gravityguard.json (here via GRAVITYGUARD_USER_CONFIG) applies end to end when the project has no config."""
+        user_cfg = Path(self.proj) / "user_default.json"
+        user_cfg.write_text(json.dumps({"rules": {"G1_SILENT_EXCEPTION": "shadow", "SRP_BOUNDARY": {"mode": "shadow"}}}), encoding="utf-8")
+        self.env["GRAVITYGUARD_USER_CONFIG"] = str(user_cfg)
+        silent = {"file_path": os.path.join(self.proj, "util.py"), "old_string": "    x = 1\n",
+                  "new_string": "    try:\n        x = int('a')\n    except Exception:\n        pass\n"}
+        self.assertIsNone(self.hook("s1", "Edit", silent))
+        ts = "const a = () => { if (activeTab === 'x') {} if (activeTab === 'y') {} };\n" + "<div className=\"glass-card\"/>\n" * 3
+        self.assertIsNone(self.hook("s1", "Write", {"file_path": os.path.join(self.proj, "App.tsx"), "content": ts}))
+        # secrets are not in the shadow list and stay denied
+        key = "sk-proj-" + "abcd1234" * 6
+        out = self.hook("s1", "Write", {"file_path": os.path.join(self.proj, "k.py"), "content": f'KEY = "{key}"\n'})
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        # a project config wins completely: its empty rules make the silent except deny again
+        (Path(self.proj) / ".gravityguard.json").write_text("{}", encoding="utf-8")
+        out = self.hook("s1", "Edit", silent)
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
     def test_harmless_edit_is_silent(self):
         out = self.hook("s1", "Edit", {"file_path": os.path.join(self.proj, "util.py"), "old_string": "    return x\n",
                                        "new_string": "    return x + 1\n"})
@@ -191,6 +210,22 @@ class TestEndToEnd(unittest.TestCase):
             self.assertEqual(out["decision"], "block")
         self.assertIsNone(self.hook("A", stop=True, stop_hook_active=True), "the engine circuit breaker (5 retries) releases the stop")
 
+    def test_doc_debt_stop_message_is_project_relative_and_plain(self):
+        (Path(self.proj) / ".gravityguard.json").write_text(
+            json.dumps({"governance": {"enforceDocObligations": True}, "testEvidence": {"exemptPatterns": ["engine/*"]}}), encoding="utf-8")
+        self.hook("A", "Write", {"file_path": os.path.join(self.proj, "engine", "core.py"), "content": "def core():\n    return 1\n"})
+        out = self.hook("A", stop=True)
+        reason = out["reason"]
+        self.assertIn("CHANGELOG.md [Unreleased] bölümüne bu değişikliği anlatan bir girdi ekle", reason)
+        self.assertIn("'engine/core.py'", reason)
+        self.assertNotIn(self.proj, reason, "no absolute path in the message")
+        self.assertNotIn("KNOWLEDGE.md", reason, "the project has no docs/KNOWLEDGE.md")
+        self.assertIn("Kalan deneme: 4", reason)
+
+    def test_non_string_content_is_treated_as_empty_not_a_traceback(self):
+        out = self.hook("A", "Write", {"file_path": os.path.join(self.proj, "n.py"), "content": 12345})
+        self.assertIsNone(out)
+
     def test_clearing_the_obligation_releases_the_stop(self):
         self.hook("A", "Write", {"file_path": os.path.join(self.proj, "foo.py"), "content": "def foo():\n    return 1\n"})
         self.assertEqual(self.hook("A", stop=True)["decision"], "block")
@@ -199,6 +234,56 @@ class TestEndToEnd(unittest.TestCase):
         self.hook("A", "Write", {"file_path": test_file, "content": content})
         Path(test_file).write_text(content, encoding="utf-8")        # the PreToolUse hook runs before the write itself
         self.assertIsNone(self.hook("A", stop=True, stop_hook_active=True), "evidence exists on disk, nothing is owed")
+
+
+class TestAdapterRobustness(unittest.TestCase):
+    def setUp(self):
+        self.proj = tempfile.mkdtemp(prefix="gg_claude_rb_")
+        (Path(self.proj) / ".git").mkdir()
+        (Path(self.proj) / "src" / "deep").mkdir(parents=True)
+        (Path(self.proj) / ".env").write_text("SECRET=1\n", encoding="utf-8")
+        self.env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_PROJECT_DIR", "GRAVITYGUARD_LOG_DIR", "GRAVITYGUARD_AUDIT_DIR")}
+        self.env.update(PYTHONIOENCODING="utf-8", GRAVITYGUARD_DISABLE_ASYNC="1")
+
+    def tearDown(self):
+        shutil.rmtree(self.proj, ignore_errors=True)
+
+    def run_hook(self, event, raw=None):
+        proc = subprocess.run([sys.executable, str(_ADAPTER)], input=raw if raw is not None else json.dumps(event),
+                              capture_output=True, text=True, encoding="utf-8", env=self.env, timeout=60)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return (json.loads(proc.stdout) if proc.stdout.strip() else None), proc.stderr
+
+    def test_read_of_live_env_is_denied_and_other_reads_pass_silently(self):
+        env_read = {"session_id": "r", "cwd": self.proj, "tool_name": "Read", "tool_input": {"file_path": str(Path(self.proj) / ".env")}}
+        out, _ = self.run_hook(env_read)
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("G0_ENV_PROTECTION", out["hookSpecificOutput"]["permissionDecisionReason"])
+        self.assertIsNone(adapter.to_engine_pretool({"tool_name": "Read", "tool_input": {"file_path": "/p/src/a.py"}}))
+        self.assertIsNotNone(adapter.to_engine_pretool({"tool_name": "Read", "tool_input": {"file_path": "/p/.env.local"}}))
+        example = {"session_id": "r", "cwd": self.proj, "tool_name": "Read", "tool_input": {"file_path": str(Path(self.proj) / ".env.example")}}
+        self.assertIsNone(self.run_hook(example)[0])
+
+    def test_settings_example_matcher_includes_read(self):
+        settings = json.loads((_ADAPTER.parent / "settings.example.json").read_text(encoding="utf-8"))
+        self.assertIn("Read", settings["hooks"]["PreToolUse"][0]["matcher"].split("|"))
+
+    def test_deeply_nested_payload_fails_open_with_a_note(self):
+        out, err = self.run_hook(None, raw="[" * 100000)
+        self.assertIsNone(out)
+        self.assertIn("nested too deeply", err)
+
+    def test_without_claude_project_dir_the_root_is_found_by_walking_up(self):
+        event = {"session_id": "w", "cwd": str(Path(self.proj) / "src" / "deep")}
+        self.assertEqual(Path(adapter.workspace_paths(event)[0]).resolve(), Path(self.proj).resolve())
+
+    def test_audit_log_goes_to_the_project_not_to_gemini_by_default(self):
+        event = {"session_id": "a", "cwd": self.proj, "tool_name": "Write",
+                 "tool_input": {"file_path": str(Path(self.proj) / "src" / "x.py"), "content": "x = 1\n"}}
+        self.env["CLAUDE_PROJECT_DIR"] = self.proj
+        self.run_hook(event)
+        logs = Path(self.proj) / ".gravityguard" / "logs"
+        self.assertTrue(logs.is_dir() and any(logs.rglob("*.jsonl")), "audit stream must land in <project>/.gravityguard/logs")
 
 
 if __name__ == "__main__":

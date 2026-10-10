@@ -112,6 +112,22 @@ from gravityguard_engine.dispatcher import (  # noqa: F401
     run_cli,
     validate_gravityguard,
 )
+from gravityguard_engine.review_policy import (  # noqa: F401
+    DEFAULT_REVIEW_EXEMPT_PATTERNS,
+    is_review_enabled,
+    is_review_exempt_file,
+    should_require_review,
+)
+from gravityguard_engine.review_governance import (  # noqa: F401
+    evaluate_review_obligations,
+    fingerprint_from_hashes,
+    get_unresolved_review_obligations,
+    new_review_id,
+    record_final_diff_guard,
+    record_review_obligation,
+    register_review_invocation,
+    scan_git_governed_changes,
+)
 
 # Compatibility alias for private function
 _harden_streams_to_utf8 = harden_streams_to_utf8

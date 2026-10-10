@@ -111,6 +111,16 @@ The Prompt Enhancer talks to **any OpenAI-compatible local gateway** — 9Router
 - **Doc policy**: `gravityguard_engine/doc_policy.py` is the single definition of which files owe a CHANGELOG entry; `project_context.is_doc_governed_target` (Stop-time tracker) and `tools/verify_doc_governance.py` (git pre-commit, also callable from another repository's hook) both use it.
 - **State scope**: obligations and Stop retries are per conversation (`governance.json` → `sessions[<id>]`); the project-wide lists are a monitor-facing union plus legacy entries nobody owns. See `docs/KNOWLEDGE.md` §2.5.
 
+### 2.6. Specialist Review Subsystem (`review_policy.py`, `review_governance.py`)
+
+Opt-in (`.gravityguard.json` → `review.enabled`), path-based, and split in two so the trigger can be tested without touching state:
+
+- **Trigger — `review_policy.py`.** `should_require_review` fires only for production code suffixes and never for tests (`tests/`, `test_*`, `*.test.ts`, …) or configured `exemptPatterns`. `is_review_enabled` keeps the feature inert until a project asks for it.
+- **Obligation & provenance — `review_governance.py`.** A session's governed writes accumulate into one candidate keyed by `review_id`, with `source_fingerprint` = SHA-256 over the sorted newline-normalized file hashes. `register_review_invocation` records the `review_id`/`nonce`/`source_fingerprint` carried by an observed MCP reviewer call. `evaluate_review_obligations` closes an obligation only when an invocation was observed, a schema-valid receipt exists under `.gravityguard/runtime/reviews/`, the fingerprint **and** nonce match, and the candidate is not stale.
+- **Two guards.** *Pre-write* (intent): an approved governed write records the obligation. *Final diff guard* (state): at Stop, `record_final_diff_guard` runs `git status --porcelain` and folds in governed code changed out-of-band (e.g. a shell write), best-effort and fail-open.
+- **Hook wiring.** `dispatcher.py` observes MCP calls matching `mcp[_-].*code[_-]review` and registers the invocation; `plugin/hooks.json` carries the `"matcher": "mcp_.*code[_-]review"` PreToolUse group.
+- **Invariant.** A specialist result cannot authorize integration; GravityGuard verifies process evidence, not semantic correctness. No HMAC (single trust boundary; provenance is correlation). See `docs/adr/0001-specialist-review-v1.md`.
+
 ### 2.5. Complexity Heuristics & Their Thresholds (`OE_SPIKE`, `ARCH_FILE_GROWTH`)
 
 Both rules are WARN-only and both are calibrated against 6,404 real production file-writes (11 repositories, last 400 commits each, one file per commit as the unit of work; see the CHANGELOG for the method and its limits). Every number is a default in `DEFAULT_COMPLEXITY_THRESHOLDS` and can be overridden per project through the `complexity` block of `.gravityguard.json`.

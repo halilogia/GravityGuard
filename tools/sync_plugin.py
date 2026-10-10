@@ -51,6 +51,8 @@ def collect_sync_pairs(root: str) -> list[tuple[str, str, str]]:
         ("plugin/hooks.json", "hooks.json", "Hook manifesti: hangi scripti cagiracagimizi yazar"),
         ("plugin/plugin.json", "plugin.json", "Plugin kimlik dosyasi"),
         ("plugin/rules/gravityguard_invariants.md", "rules/gravityguard_invariants.md", "Mekanik invariant kural dosyasi"),
+        ("plugin/skills/srp-modularizer/SKILL.md", "skills/srp-modularizer/SKILL.md", "SRP bolme karar skill'i"),
+        ("plugin/skills/core-docs/SKILL.md", "skills/core-docs/SKILL.md", "Core Docs (8 temel dokuman) skill'i"),
     ]
     pkg_dir = os.path.join(root, "engine", "gravityguard_engine")
     if os.path.isdir(pkg_dir):

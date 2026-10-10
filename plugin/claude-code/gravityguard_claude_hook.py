@@ -7,12 +7,12 @@ Claude Code and Antigravity speak different hook dialects. This file translates 
 engine (`engine/gravity-validator.py`) as a subprocess, so every rule, the state files and the audit log behave exactly
 as they do under Antigravity.
 
-    PreToolUse (Write | Edit | MultiEdit)  ->  engine PreToolUse payload  ->  deny / additionalContext / silent allow
+    PreToolUse (Write | Edit | MultiEdit | Read) -> engine PreToolUse payload -> deny / additionalContext / silent allow
     Stop                                   ->  engine `--stop` payload    ->  {"decision": "block"} or silent allow
 
 What it does not cover: Bash. A shell command cannot be reliably reduced to "which lines were added to which file", so
-a file written with `echo > x` or `sed -i` never reaches the file rules. The git pre-commit secret net and the Stop
-hook are the backstops there.
+a file written with `echo > x` or `sed -i` never reaches the file rules. The Stop hook (final diff guard, doc and test
+obligations) is the only backstop there; there is no git-level secret scanner.
 
 Fail-open by design: when the engine cannot be started or gives no answer, the tool call proceeds and the reason goes to
 stderr. A guard that wedges the agent on its own bug is worse than a guard that steps aside and says so.
@@ -35,6 +35,7 @@ TOOL_MAP = {
     "Write": "write_to_file",
     "Edit": "replace_file_content",
     "MultiEdit": "multi_replace_file_content",
+    "Read": "read_file",
 }
 
 
@@ -50,8 +51,19 @@ def conversation_id(event: Dict[str, Any]) -> str:
 
 def workspace_paths(event: Dict[str, Any]) -> List[str]:
     """The project directory Claude Code was started in; `cwd` drifts when the agent `cd`s, the project dir does not."""
-    project = os.environ.get("CLAUDE_PROJECT_DIR") or event.get("cwd") or os.getcwd()
+    project = os.environ.get("CLAUDE_PROJECT_DIR")
+    if not project:
+        cwd = str(event.get("cwd") or os.getcwd())
+        project = _find_project_root(Path(cwd)) or cwd
     return [str(project)]
+
+
+def _find_project_root(start: Path) -> Optional[Path]:
+    """Without CLAUDE_PROJECT_DIR: the nearest parent of `start` holding .git or .gravityguard.json (None if none)."""
+    for candidate in (start, *start.parents):
+        if (candidate / ".git").exists() or (candidate / ".gravityguard.json").is_file():
+            return candidate
+    return None
 
 
 def to_engine_pretool(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -61,8 +73,13 @@ def to_engine_pretool(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
     tool_input = event.get("tool_input") or {}
     target = tool_input.get("file_path", "")
-    if name == "Write":
-        args: Dict[str, Any] = {"TargetFile": target, "CodeContent": tool_input.get("content", "")}
+    if name == "Read":
+        # Only the live-.env check matters for a read; skip the engine process for every other file.
+        if "env" not in os.path.basename(str(target)).lower():
+            return None
+        args: Dict[str, Any] = {"TargetFile": target}
+    elif name == "Write":
+        args = {"TargetFile": target, "CodeContent": tool_input.get("content", "")}
     elif name == "Edit":
         args = {
             "TargetFile": target,
@@ -128,6 +145,12 @@ def run_engine(payload: Dict[str, Any], extra_args: Sequence[str] = ()) -> Optio
     if not engine.is_file():
         print(f"[GravityGuard Claude adapter] engine not found: {engine} (set GRAVITYGUARD_ENGINE)", file=sys.stderr)
         return None
+    env = dict(os.environ)
+    if not env.get("GRAVITYGUARD_LOG_DIR") and not env.get("GRAVITYGUARD_AUDIT_DIR"):
+        # Claude Code sessions keep their audit log in the project, not in the Antigravity default (~/.gemini/logs).
+        workspaces = payload.get("workspacePaths") or []
+        if workspaces:
+            env["GRAVITYGUARD_AUDIT_DIR"] = str(Path(workspaces[0]) / ".gravityguard" / "logs")
     try:
         proc = subprocess.run(
             [sys.executable, str(engine), *extra_args],
@@ -136,6 +159,7 @@ def run_engine(payload: Dict[str, Any], extra_args: Sequence[str] = ()) -> Optio
             text=True,
             encoding="utf-8",
             timeout=ENGINE_TIMEOUT_SECONDS,
+            env=env,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         print(f"[GravityGuard Claude adapter] engine did not run: {exc}", file=sys.stderr)
@@ -174,6 +198,9 @@ def main(argv: Sequence[str]) -> int:
     try:
         event = json.load(sys.stdin)
     except ValueError:
+        return 0
+    except RecursionError:
+        print("[GravityGuard Claude adapter] hook payload nested too deeply to parse; letting the call proceed", file=sys.stderr)
         return 0
     if not isinstance(event, dict):
         return 0

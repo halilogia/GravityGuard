@@ -3,10 +3,8 @@
     "enforceDocObligations": true
   },
   "layers": {
-    "forbidden": {
-      "ui": ["db", "backend", "engine"],
-      "view": ["db", "repository", "model"]
-    }
+    "ui": { "forbiddenImports": ["db", "backend", "engine"] },
+    "view": { "forbiddenImports": ["db", "repository", "model"] }
   },
   "testEvidence": {
     "deferredMode": true,

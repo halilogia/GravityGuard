@@ -38,6 +38,7 @@ GravityGuard operates an ordered, zero-overhead pipeline before any file modific
 | **`T2`** | **Observable Assertion** | **WARN ONLY** | Verifies newly added test cases (`def test_...`, `it(...)`) contain observable assertions (`assert`, `self.assert*`, `pytest.raises`, `expect()`, `.toBe()`, `.toEqual()`). |
 | **`T3`** | **Symbol-to-Test Link** | **WARN ONLY** | Verifies that newly added top-level/exported functions or classes appear by name in the candidate test file. Never double-warns if test is absent. |
 | **`LINT`**| **Diagnostic Feedback** | **WARN ONLY** | Non-blocking Tier 2 background linters (Ruff, ESLint, Godot) write findings to `.gravityguard/runtime/diagnostics.json`, surfaced on subsequent pre-tool calls (<0.5ms). |
+| **`R1`** | **Independent Review** | **WARN (Stop gate)** | Opt-in. When a governed production file changes, the Stop hook requires process evidence of an independent `code-reviewer` review: an observed MCP invocation, a schema-valid receipt under `.gravityguard/runtime/reviews/`, matching fingerprint + nonce, and a non-stale candidate. A final diff guard also folds in governed code changed out-of-band (e.g. a shell write). It proves a review ran against a specific candidate — not that the review was correct or complete. |
 
 ## Key Features
 
@@ -124,6 +125,7 @@ GravityGuard, herhangi bir dosya değiştirme aracı çalıştırılmadan önce 
 | **`T2`** | **Gözlemlenebilir Assertion (Observable Assertion)**| **YALNIZCA UYAR** | Yeni eklenen test case'lerinin (`def test_...`, `it(...)`) en az bir assertion (`assert`, `self.assert*`, `expect()`, `.toBe()`, `pytest.raises`) içerdiğini doğrular. |
 | **`T3`** | **Sembol-Test İlişkisi (Symbol-to-Test Link)** | **YALNIZCA UYAR** | Eklenen/değişen fonksiyon veya sınıf isimlerinin ilgili test dosyasında adıyla geçip geçmediğini kontrol eder. Test yoksa T1 önceliklidir. |
 | **`LINT`**| **Statik Linter Bildirimi (Diagnostics)** | **YALNIZCA UYAR** | Arka planda çalışan linter'lar (Ruff, ESLint, Godot) bulgularını `.gravityguard/runtime/diagnostics.json` dosyasına yazar; bir sonraki hook çağrısında yapay zekaya bağlamsal uyarı verilir (<0.5ms). |
+| **`R1`** | **Bağımsız İnceleme (Independent Review)** | **UYAR (Stop kapısı)** | Opt-in. Yönetilen üretim kodu değiştiğinde Stop kapısı bağımsız bir `code-reviewer` incelemesinin süreç kanıtını ister: gözlenen MCP çağrısı, `.gravityguard/runtime/reviews/` altında şema-geçerli makbuz, eşleşen fingerprint + nonce ve bayat olmayan aday. Ayrıca bir final diff guard, kanca dışı (ör. kabuk yazımı) değişen yönetilen kodu da katar. İncelemenin belirli bir adaya karşı yapıldığını kanıtlar; incelemenin doğru ya da eksiksiz olduğunu kanıtlamaz. |
 
 ## Temel Özellikler
 

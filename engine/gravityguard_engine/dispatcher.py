@@ -48,15 +48,53 @@ from .project_context import (
     should_enforce_doc_obligations,
 )
 from .security_rules import (
+    check_blind_doc_overwrite,
     check_escape_hatch_tampering,
     check_g0_secret_leak,
     check_g1_silent_exception,
     check_g2_test_integrity,
+    is_protected_env_file,
 )
 from .test_evidence import (
     evaluate_test_evidence,
     resolve_candidate_test_file,
 )
+from .review_governance import (
+    evaluate_review_obligations,
+    record_final_diff_guard,
+    record_review_obligation,
+    register_review_invocation,
+)
+
+#: Matcher for the Swarm reviewer MCP tool, matched against the raw tool name
+#: (which arrives as e.g. ``mcp_swarm-orchestrator_code_review``).
+_MCP_REVIEW_TOOL_RE = re.compile(r"mcp[_-].*code[_-]review", re.IGNORECASE)
+
+
+def _extract_mcp_review_args(args: dict) -> Optional[dict]:
+    """Returns the reviewer arguments if ``args`` look like a code_review call.
+
+    The MCP tool schema is camel-agnostic in practice, so both snake_case and
+    the plain keys are accepted.
+    """
+    if not isinstance(args, dict):
+        return None
+    review_id = args.get("review_id") or args.get("reviewId")
+    if not review_id:
+        return None
+    return {
+        "review_id": str(review_id),
+        "nonce": str(args.get("nonce") or ""),
+        "source_fingerprint": str(args.get("source_fingerprint") or args.get("sourceFingerprint") or ""),
+    }
+
+
+def _project_relative(path: str, root: Path) -> str:
+    """Project-relative, forward-slash form of a recorded path (the absolute path when it lies outside the root)."""
+    try:
+        return Path(path).resolve().relative_to(root.resolve()).as_posix()
+    except (ValueError, OSError):
+        return str(path).replace("\\", "/")
 
 
 def is_rule_shadow(rule_id: str, cfg: Optional[dict]) -> bool:
@@ -153,12 +191,22 @@ def validate_gravityguard() -> None:
             # Defect B fix: Reconcile obligations with physical filesystem verification
             reconcile_obligations_on_disk(project_root, conversation_id, cfg)
 
+            # FINAL DIFF GUARD (state guard): catch governed code changed on disk
+            # that never passed through the PreToolUse hook (e.g. a shell write).
+            record_final_diff_guard(project_root, conversation_id, cfg)
+
             unresolved_tests = dict(get_unresolved_test_evidence(project_root, conversation_id))
             unresolved_docs = dict(get_unresolved_doc_obligations(project_root, conversation_id))
+            review_report = evaluate_review_obligations(project_root, conversation_id)
+            unresolved_reviews = dict(review_report.get("unresolved", {}))
             for other_root in _other_stop_roots(payload, project_root):
-                reconcile_obligations_on_disk(other_root, conversation_id, load_gravityguard_config("", other_root))
+                other_cfg = load_gravityguard_config("", other_root)
+                reconcile_obligations_on_disk(other_root, conversation_id, other_cfg)
+                record_final_diff_guard(other_root, conversation_id, other_cfg)
                 unresolved_tests.update(get_unresolved_test_evidence(other_root, conversation_id))
                 unresolved_docs.update(get_unresolved_doc_obligations(other_root, conversation_id))
+                other_reviews = evaluate_review_obligations(other_root, conversation_id)
+                unresolved_reviews.update(other_reviews.get("unresolved", {}))
 
             warn_reasons = []
             if unresolved_tests:
@@ -174,16 +222,33 @@ def validate_gravityguard() -> None:
                 warn_reasons.append(t1_warn)
 
             if unresolved_docs:
-                missing_docs = [
-                    f"'{p}' (gereken: {', '.join(info.get('required_docs', ['CHANGELOG.md']))})"
-                    for p, info in unresolved_docs.items()
-                ]
+                changed = ", ".join(f"'{_project_relative(p, project_root)}'" for p in unresolved_docs)
+                needed = sorted({d for info in unresolved_docs.values() for d in info.get("required_docs", ["CHANGELOG.md"])})
+                if needed == ["CHANGELOG.md"]:
+                    todo = "CHANGELOG.md [Unreleased] bölümüne bu değişikliği anlatan bir girdi ekle."
+                else:
+                    todo = f"Şu dokümanları güncelle: {', '.join(needed)}."
+                policy_ref = " (docs/KNOWLEDGE.md §6)" if (project_root / "docs" / "KNOWLEDGE.md").is_file() else ""
+                retries_left = max(0, 5 - (session_retries + 1))
                 doc_warn = (
-                    f"Dokümantasyon Yükümlülüğü: Motor/kod dosyaları değiştirildi ancak "
-                    f"dokümantasyon güncellenmedi (docs/KNOWLEDGE.md §6 Same-commit rule): {', '.join(missing_docs)}"
+                    f"Dokümantasyon Yükümlülüğü{policy_ref}: Kod değişti ({changed}) ama doküman güncellenmedi. {todo} "
+                    f"(Kalan deneme: {retries_left}; sonra devre kesici durdurmaya izin verir.)"
                 )
                 log_event("stop", "WARNING", "workspace", doc_warn, rule_id="DOC_OBLIGATION_UNRESOLVED", conversation_id=conversation_id)
                 warn_reasons.append(doc_warn)
+
+            if unresolved_reviews:
+                review_items = []
+                for r_id, info in unresolved_reviews.items():
+                    problems = ", ".join(info.get("problems", [])) if isinstance(info, dict) else ""
+                    review_items.append(f"{r_id} [{problems}]" if problems else r_id)
+                review_warn = (
+                    "Kod İnceleme Yükümlülüğü (R1): Governed kod değişti ancak bağımsız "
+                    "inceleme kanıtı yok. Lead, yapılandırılmış `code-reviewer` uzmanını "
+                    f"çağırmalıdır (review obligation: {', '.join(review_items)})."
+                )
+                log_event("stop", "WARNING", "workspace", review_warn, rule_id="REVIEW_OBLIGATION_UNRESOLVED", conversation_id=conversation_id)
+                warn_reasons.append(review_warn)
 
             if warn_reasons:
                 increment_session_stop_retries(project_root, conversation_id)
@@ -206,12 +271,42 @@ def validate_gravityguard() -> None:
     # ========================================================================
     tool_call = payload.get("toolCall", {})
     args = tool_call.get("args", {})
-    target_file = args.get("TargetFile") or args.get("target_file") or args.get("file_path") or ""
+    target_file = (
+        args.get("TargetFile") or
+        args.get("target_file") or
+        args.get("file_path") or
+        args.get("AbsolutePath") or
+        args.get("path") or
+        ""
+    )
     tool_name = tool_call.get("name", "edit")
     c_id = payload.get("conversationId", "default")
 
     def _log(status: str, target: str, reason: str, rule_id: str = "") -> None:
         log_event(tool_name, status, target, reason, rule_id=rule_id, conversation_id=c_id)
+
+    # ========================================================================
+    # MCP Reviewer Observation — provenance anchor (not a file write)
+    # When the Lead calls the Swarm code-reviewer, record the review_id / nonce /
+    # fingerprint it carried. A receipt with no matching invocation is refused.
+    # ========================================================================
+    if _MCP_REVIEW_TOOL_RE.search(tool_name or ""):
+        mcp_review = _extract_mcp_review_args(args)
+        if mcp_review:
+            mcp_root = resolve_project_root(payload)
+            try:
+                register_review_invocation(
+                    mcp_review["review_id"],
+                    mcp_review["nonce"],
+                    mcp_review["source_fingerprint"],
+                    mcp_root,
+                    c_id
+                )
+                _log("APPROVED", tool_name, f"Reviewer invocation observed (review_id={mcp_review['review_id']})", rule_id="REVIEW_INVOCATION")
+            except StateLockTimeout as lock_err:
+                _log("WARNING", tool_name, f"State lock timeout observing reviewer call: {lock_err}", rule_id="STATE_LOCK_TIMEOUT")
+        print(json.dumps({"decision": "allow"}))
+        sys.exit(0)
 
     # 1. Normalize path
     normalized_path = target_file.replace("\\\\", "/").replace("\\", "/")
@@ -249,9 +344,43 @@ def validate_gravityguard() -> None:
         print(json.dumps({"decision": "allow"}))
         sys.exit(0)
 
-    # Reconcile disk state for any obligations satisfied by prior tool writes
+    # 1.1 Protect live .env files from being read, created, overwritten, or modified by AI agents
+    if is_protected_env_file(target_file):
+        p_root = resolve_project_root(payload, target_file)
+        cfg = load_gravityguard_config(target_file, p_root)
+        if not is_rule_shadow("G0_ENV_PROTECTION", cfg):
+            _log("BLOCKED", target_file, "Live environment secret file (.env) access denied", rule_id="G0_ENV_PROTECTION")
+            print(json.dumps({
+                "decision": "deny",
+                "reason": (
+                    f"🛑 [G0_ENV_PROTECTION]: '{target_file}' dosyası doğrudan yapay zeka ajanları tarafından "
+                    f"OKUNAMAZ, DÜZENLENEMEZ veya OLUŞTURULAMAZ! Bu dosya gizli API anahtarları, parolalar ve özel ortam "
+                    f"değişkenleri barındırır. Sızıntıyı önlemek için okuma engellenmiştir. Lütfen şablon için "
+                    f"'.env.example' dosyasını inceleyin veya ilgili değişkeni kullanıcıya sorun."
+                )
+            }))
+            sys.exit(0)
+
+    # Fast-pass for view/read tools once protected env files are checked
+    if tool_name.lower() in ("view_file", "read_file", "read_file_content", "view", "read"):
+        if target_file:
+            _log("APPROVED", target_file, "Read tool allowed for non-sensitive file", rule_id="READ_ALLOW")
+        print(json.dumps({"decision": "allow"}))
+        sys.exit(0)
+
+    # 1.2 Prevent blind overwriting of existing documentation, architecture, rule, and skill files
     p_root = resolve_project_root(payload, target_file)
     cfg = load_gravityguard_config(target_file, p_root)
+    is_blocked, doc_reason = check_blind_doc_overwrite(target_file, tool_name, args, p_root)
+    if is_blocked and not is_rule_shadow("G4_NO_BLIND_OVERWRITE", cfg):
+        _log("BLOCKED", target_file, "Blind overwrite of existing documentation/rule file forbidden", rule_id="G4_NO_BLIND_OVERWRITE")
+        print(json.dumps({
+            "decision": "deny",
+            "reason": doc_reason
+        }))
+        sys.exit(0)
+
+    # Reconcile disk state for any obligations satisfied by prior tool writes
     try:
         reconcile_obligations_on_disk(p_root, c_id, cfg)
     except StateLockTimeout as lock_err:
@@ -466,7 +595,10 @@ def validate_gravityguard() -> None:
             multi_job = (tab_matches >= 2 and card_matches >= 3) or (scroll_ids >= 3 and grid_blocks >= 3)
 
             if multi_job and not is_ts_cohesive_monolith(projected_content):
-                reason_msg = f"SRP İhlali: Dosya {tab_matches} sekme, {card_matches} kart ve {grid_blocks} grid bloğu içeriyor."
+                reason_msg = (
+                    f"SRP İhlali: Dosya {tab_matches} sekme, {card_matches} kart ve {grid_blocks} grid bloğu içeriyor. "
+                    f"Her sekmeyi / kartı ayrı bir bileşen dosyasına bölün."
+                )
                 if is_rule_shadow("SRP_BOUNDARY", cfg):
                     _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {reason_msg}", rule_id="SRP_BOUNDARY")
                 else:
@@ -527,6 +659,11 @@ def validate_gravityguard() -> None:
 
         if pending_doc_record:
             record_pending_doc_obligation(pending_doc_record, project_root=p_root, conversation_id=c_id)
+
+        # Review obligation: governed code change requires an independent review
+        # before stop. record_review_obligation itself checks should_require_review.
+        if target_file:
+            record_review_obligation(target_file, projected_content, p_root, c_id, cfg)
     except StateLockTimeout as lock_err:
         _log("BLOCKED", target_file, f"State lock timeout: {lock_err}", rule_id="STATE_LOCK_TIMEOUT")
         print(json.dumps({

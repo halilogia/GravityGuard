@@ -159,6 +159,8 @@ def load_governance_state(
             "version": 2,
             "test_obligations": {"pending": {}},
             "doc_obligations": {"pending": {}},
+            "review_obligations": {"pending": {}},
+            "review_invocations": [],
             "resolution_intents": [],
             "sessions": {}
         }
@@ -167,6 +169,8 @@ def load_governance_state(
     data.setdefault("sessions", {})
     data.setdefault("test_obligations", {"pending": {}})
     data.setdefault("doc_obligations", {"pending": {}})
+    data.setdefault("review_obligations", {"pending": {}})
+    data.setdefault("review_invocations", [])
     data.setdefault("resolution_intents", [])
 
     now = time.time()
@@ -179,7 +183,7 @@ def load_governance_state(
         ]
 
     # Prune stale global pending (> 1 hour)
-    for cat in ("test_obligations", "doc_obligations"):
+    for cat in ("test_obligations", "doc_obligations", "review_obligations"):
         pending = data.get(cat, {}).get("pending", {})
         if isinstance(pending, dict):
             data[cat]["pending"] = {
@@ -191,7 +195,7 @@ def load_governance_state(
     for s_id, s_data in list(data["sessions"].items()):
         if not isinstance(s_data, dict):
             continue
-        for cat in ("test_obligations", "doc_obligations"):
+        for cat in ("test_obligations", "doc_obligations", "review_obligations"):
             if cat in s_data and isinstance(s_data[cat], dict) and "pending" in s_data[cat]:
                 pending = s_data[cat]["pending"]
                 if isinstance(pending, dict):
@@ -447,6 +451,16 @@ def record_pending_doc_obligation(
         baseline_hashes[req] = h
 
     with governance_transaction(project_root) as state:
+        # A required doc this session already updated before writing the code (docs-first order) counts once.
+        touched = state.get("sessions", {}).get(conversation_id or "default", {}).get("docs_touched", {})
+        still_required = []
+        for req in required_docs:
+            stamp = touched.pop(Path(req).name.lower(), None)
+            if stamp is None or (time.time() - stamp) >= 3600:
+                still_required.append(req)
+        if not still_required:
+            return
+        required_docs = still_required
         entry = {
             "required_docs": required_docs,
             "baseline_hashes": baseline_hashes,
@@ -525,6 +539,8 @@ def clear_governance_state(project_root: Optional[Path] = None) -> None:
         state["version"] = 2
         state["test_obligations"] = {"pending": {}}
         state["doc_obligations"] = {"pending": {}}
+        state["review_obligations"] = {"pending": {}}
+        state["review_invocations"] = []
         state["resolution_intents"] = []
         state["sessions"] = {}
         state["stop_retries"] = 0
@@ -627,6 +643,10 @@ def reconcile_obligations_on_disk(
                 if kind == "doc":
                     res = resolve_pending_doc_obligations(target_f, root, intent_cid)
                     resolved_docs.extend(res)
+                    if not res:
+                        # The doc was updated BEFORE any code debt existed: remember it for the next obligation.
+                        touched = state.setdefault("sessions", {}).setdefault(intent_cid, {}).setdefault("docs_touched", {})
+                        touched[Path(str(target_f).replace("\\", "/")).name.lower()] = time.time()
                 elif kind == "test":
                     res = resolve_pending_test_evidence(target_f, root, intent_cid)
                     resolved_tests.extend(res)

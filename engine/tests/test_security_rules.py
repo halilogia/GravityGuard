@@ -96,6 +96,45 @@ class TestSecurityRulesDomain(unittest.TestCase):
         self.assertTrue(blocked)
         self.assertIn(disabler, reason)
 
+    def test_g0_blocks_hyphenated_sk_secret_but_not_placeholders_or_slugs(self):
+        blocked, _, _ = check_g0_secret_leak("API_KEY = 'sk-FAKE-do-not-use-0000'")
+        self.assertTrue(blocked)
+        blocked, _, _ = check_g0_secret_leak("API_KEY = 'sk-Ab3dE-fG7hI-jK9lM-nO1pQ-rS5tU'")
+        self.assertTrue(blocked)
+        for harmless in ("KEY = 'sk-xxxx'", "KEY = 'sk-your-key-here'", "KEY=sk-example-0000-AAAA-bbbb-1111",
+                         "see sk-learn-pipeline-config-docs", "task-report-cleanup-Deepseek4"):
+            blocked, _, _ = check_g0_secret_leak(harmless)
+            self.assertFalse(blocked, harmless)
+
+    def test_g2_warns_on_always_true_assertions(self):
+        for tautology in ("def test_a():\n    assert True\n", "def test_a():\n    assert 1 == 1\n",
+                          "def test_a():\n    assert 'a' == 'a', 'msg'\n",
+                          "def test_a(self):\n        self.assertTrue(True)\n",
+                          "def test_a(self):\n        self.assertEqual(1, 1)\n",
+                          "it('x', () => { expect(true).toBe(true); });\n"):
+            blocked, _, warn = check_g2_test_integrity(tautology, "", tautology, is_test_file=True)
+            self.assertFalse(blocked)
+            self.assertIn("her zaman geçen", warn or "", tautology)
+        real = "def test_a():\n    assert compute(2) == 4\n"
+        self.assertIsNone(check_g2_test_integrity(real, "", real, is_test_file=True)[2])
+
+    def test_g2_warns_on_commented_out_assert(self):
+        added = "def test_a():\n    # assert compute(2) == 4\n    pass\n"
+        _, _, warn = check_g2_test_integrity(added, "", added, is_test_file=True)
+        self.assertIn("yorum satırına", warn or "")
+        prose = "def test_a():\n    # assert that the cache is warm first\n    assert compute(2) == 4\n"
+        self.assertIsNone(check_g2_test_integrity(prose, "", prose, is_test_file=True)[2])
+
+    def test_g2_rename_is_not_a_deletion_but_removal_is(self):
+        old = "def test_old_name():\n    assert compute(1) == 2\n\ndef test_other():\n    assert compute(2) == 4\n"
+        renamed = old.replace("test_old_name", "test_new_name")
+        blocked, _, _ = check_g2_test_integrity("def test_new_name():\n", old, renamed, is_test_file=True)
+        self.assertFalse(blocked)
+        removed = "def test_other():\n    assert compute(2) == 4\n"
+        blocked, reason, _ = check_g2_test_integrity("", old, removed, is_test_file=True)
+        self.assertTrue(blocked)
+        self.assertIn("yeniden adlandırıyorsan", reason)
+
     def test_escape_hatch_injection_blocked(self):
         # Escape hatch pattern constructed to test validator
         marker = "# " + "srp: allow-monolith"

@@ -14,6 +14,8 @@ from unittest.mock import patch, MagicMock
 # Set BEFORE importing any module so every spawn path observes it. Tests that
 # specifically assert the spawn contract clear this var locally.
 os.environ["GRAVITYGUARD_DISABLE_ASYNC"] = "1"
+# The developer's real ~/.gravityguard.json must never leak into a test.
+os.environ["GRAVITYGUARD_USER_CONFIG"] = os.path.join(tempfile.gettempdir(), "gg_no_such_user_config.json")
 
 # Audit-log isolation: each validator subprocess below appends to the security
 # audit stream. Without redirecting it, a suite run floods the REAL user log and
@@ -3521,7 +3523,7 @@ class TestObligationGovernance(unittest.TestCase):
         res, _ = run_validator(payload)
         self.assertEqual(res.get("decision"), "allow")
 
-        stop_res, _ = run_validator({"terminationReason": "model_stop"})
+        stop_res, _ = run_validator({"terminationReason": "model_stop", "workspacePaths": [self.temp_dir]})
         self.assertEqual(stop_res.get("decision"), "continue")
         self.assertIn("Dokümantasyon Yükümlülüğü", stop_res.get("reason", ""))
         self.assertIn("CHANGELOG.md", stop_res.get("reason", ""))
@@ -3595,7 +3597,7 @@ class TestObligationGovernance(unittest.TestCase):
 
         # Antigravity does NOT write the file (e.g. tool aborted).
         # Stop hook must NOT resolve the obligation!
-        stop_res, _ = run_validator({"terminationReason": "model_stop"})
+        stop_res, _ = run_validator({"terminationReason": "model_stop", "workspacePaths": [self.temp_dir]})
         self.assertEqual(stop_res.get("decision"), "continue")
         self.assertIn("Dokümantasyon Yükümlülüğü", stop_res.get("reason", ""))
 
@@ -3618,7 +3620,7 @@ class TestObligationGovernance(unittest.TestCase):
         run_validator(payload_code)
 
         # Defect A regression test: executionNum > 5 does NOT bypass the stop hook
-        stop_res, _ = run_validator({"terminationReason": "model_stop", "executionNum": 6})
+        stop_res, _ = run_validator({"terminationReason": "model_stop", "workspacePaths": [self.temp_dir], "executionNum": 6})
         self.assertEqual(stop_res.get("decision"), "continue")
         self.assertIn("Dokümantasyon Yükümlülüğü", stop_res.get("reason", ""))
 
@@ -3699,7 +3701,7 @@ class TestObligationGovernance(unittest.TestCase):
         self.assertEqual(bad_edit_res.get("decision"), "deny")
 
         # Stop hook must STILL hold the doc obligation open because the edit was blocked
-        stop_res, _ = run_validator({"terminationReason": "model_stop"})
+        stop_res, _ = run_validator({"terminationReason": "model_stop", "workspacePaths": [self.temp_dir]})
         self.assertEqual(stop_res.get("decision"), "continue")
         self.assertIn("Dokümantasyon Yükümlülüğü", stop_res.get("reason", ""))
 
@@ -3765,11 +3767,11 @@ class TestObligationGovernance(unittest.TestCase):
 
         # 5 retries return continue
         for attempt in range(5):
-            res, _ = run_validator({"terminationReason": "model_stop", "conversationId": "circ-test-sess"})
+            res, _ = run_validator({"terminationReason": "model_stop", "workspacePaths": [self.temp_dir], "conversationId": "circ-test-sess"})
             self.assertEqual(res.get("decision"), "continue", f"Attempt {attempt + 1} must continue")
 
         # After 5 retries, 6th attempt hits circuit breaker
-        final_res, _ = run_validator({"terminationReason": "model_stop", "conversationId": "circ-test-sess"})
+        final_res, _ = run_validator({"terminationReason": "model_stop", "workspacePaths": [self.temp_dir], "conversationId": "circ-test-sess"})
         self.assertEqual(final_res.get("decision"), "allow", "6th attempt must trigger circuit breaker")
 
     def test_state_lock_timeout_fails_closed_in_pretool_and_stop(self):

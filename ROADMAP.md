@@ -85,6 +85,10 @@ bağımlılık artışı (dependency creep).
       hook'un `added_text`inde görünür, bu yüzden uygulanabilir; ancak yeni bir
       bağımlılığın "küçük bir fonksiyon için mi" olduğunu bilmek statik olarak
       mümkün değil — bu kural kaçınılmaz olarak spekülatiftir ve **WARN** olmalı.
+- [ ] **TS/JS `SRP_BOUNDARY` dedektörü projeye özgü** (`activeTab ===` + `glass-card`,
+      `scrollToSection(` + `display: 'grid'`); genel, AST tabanlı bir dedektör ertelendi
+      (bkz. Anti-Hedef 2: hook içinde ağır AST yok). Yerine `srp-modularizer` skill'i
+      "değişim nedeni" kararını ajana bırakır.
 
 ## 2.2 `run_command` Mutation Detection (P3-02)
 

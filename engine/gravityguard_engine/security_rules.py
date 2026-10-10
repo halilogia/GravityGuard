@@ -9,8 +9,10 @@ Implements:
 Zero external dependencies.
 """
 import ast
+import os
 import re
 from collections import Counter
+from pathlib import Path
 from typing import List, Optional, Set, Tuple
 
 PLACEHOLDER_KEYWORDS = (
@@ -18,6 +20,67 @@ PLACEHOLDER_KEYWORDS = (
     "placeholder", "dummy", "mock", "test_token", "changeme",
     "insert_key", "sample", "replace_me", "xxxxxxxx", "00000000"
 )
+
+
+def is_protected_env_file(file_path: str) -> bool:
+    """
+    Checks if target file is a live environment configuration file containing secrets (.env, .env.local, .env.production).
+    Template and fixture files (.env.example, .env.sample, .env.template, .env.test) are exempt.
+    """
+    if not file_path:
+        return False
+    clean = str(file_path).replace("\\\\", "/").replace("\\", "/").rstrip("/")
+    base_name = os.path.basename(clean).lower()
+
+    if base_name in (".env.example", ".env.sample", ".env.template", "example.env", ".env.test"):
+        return False
+    if base_name.endswith((".example", ".sample", ".template", ".fixture")):
+        return False
+
+    return base_name == ".env" or base_name.startswith(".env.")
+
+
+def is_doc_or_rule_file(file_path: str) -> bool:
+    """True when file is documentation, rule, specification, architecture, or skill file."""
+    if not file_path:
+        return False
+    clean = str(file_path).replace("\\\\", "/").replace("\\", "/").lower()
+    base_name = os.path.basename(clean)
+    return clean.endswith(".md") or base_name in ("license", "gemini.md", "agents.md")
+
+
+def check_blind_doc_overwrite(
+    target_file: str,
+    tool_name: str,
+    args: dict,
+    project_root: Optional[os.PathLike] = None
+) -> Tuple[bool, str]:
+    """
+    Mechanically prevents AI agents from blindly overwriting existing documentation,
+    architecture, rule, and skill files with write_to_file(Overwrite=True).
+    Forces surgical updates via `replace_file_content` to prevent truncation and invariant loss.
+    Brand new files that do not exist on disk are permitted.
+    """
+    if tool_name.lower() not in ("write_to_file", "write"):
+        return False, ""
+
+    if not is_doc_or_rule_file(target_file):
+        return False, ""
+
+    # Check physical existence on disk
+    target_p = Path(target_file)
+    if not target_p.is_absolute() and project_root:
+        target_p = Path(project_root) / target_p
+
+    if target_p.is_file():
+        return True, (
+            f"🛑 [G4_NO_BLIND_OVERWRITE]: Mevcut dokümantasyon, mimari veya kural dosyasının "
+            f"('{target_file}') tümünü yazma aracıyla ('Write' / 'write_to_file') ezmek (Overwrite) yasaklanmıştır! "
+            f"Otonom protokollerin, kural maddelerinin ve kalıcı hafızanın silinmesini önlemek için "
+            f"lütfen yalnızca cerrahi düzenleme aracını kullanın (Claude Code: Edit; Antigravity: 'replace_file_content')."
+        )
+
+    return False, ""
 
 
 def is_placeholder(val: str) -> bool:
@@ -101,6 +164,13 @@ def check_g0_secret_leak(added_text: str) -> Tuple[bool, str, Optional[str]]:
         raw_token = legacy_match.group(0)
         if not is_placeholder(raw_token):
             return True, f"OpenAI API anahtarı (eski biçim) tespit edildi: {redact_token(raw_token)}. Ortam değişkeni kullanın.", None
+
+    # D3) Any other hyphenated sk-* secret (sk-FAKE-do-not-use-0000 style): 20+ key characters that mix a digit and an
+    # uppercase letter. Lowercase kebab slugs and short placeholders (sk-xxxx, sk-your-key-here) stay out.
+    for generic_match in re.finditer(r"\bsk-[A-Za-z0-9_\-]{20,}", added_text):
+        raw_token = generic_match.group(0)
+        if re.search(r"\d", raw_token) and re.search(r"[A-Z]", raw_token) and not is_placeholder(raw_token):
+            return True, f"API anahtarı biçiminde sk-* belirteci tespit edildi: {redact_token(raw_token)}. Ortam değişkeni kullanın.", None
 
     # E) Google / Gemini API Keys (AIza...)
     gemini_match = re.search(r"\bAIza[0-9A-Za-z\-_]{35,40}\b", added_text)
@@ -251,6 +321,21 @@ def check_g2_test_integrity(
     if re.search(r"\.only\s*\(", added_text):
         warn_reason = "Test dosyasında '.only()' kullanımı tespit edildi (Tüm diğer testleri göz ardı eder). Geçici debug sonrası kaldırmayı unutmayın."
 
+    # Always-true assertions and commented-out assertions prove nothing (WARN: low confidence, filler is common).
+    literal = r"(?:\d+(?:\.\d+)?|'[^'\n]*'|\"[^\"\n]*\")"
+    tautology = (
+        r"^\s*assert\s+True\s*(?:,.*)?$"
+        rf"|^\s*assert\s+({literal})\s*==\s*\1\s*(?:,.*)?$"
+        r"|\bassertTrue\(\s*True\s*\)"
+        rf"|\bassertEqual\(\s*({literal})\s*,\s*\2\s*\)"
+        r"|\bexpect\(\s*true\s*\)\s*\.toBe\(\s*true\s*\)"
+    )
+    commented_assert = r"^\s*(?:#|//)\s*(?:assert\s+[^\n]*(?:==|!=)|(?:self\.)?assert\w*\(|expect\()"
+    if re.search(tautology, added_text, re.MULTILINE):
+        warn_reason = "Test her zaman geçen bir doğrulama içeriyor ('assert True' / 'assert 1 == 1' / 'assertTrue(True)'); bu bir şey kanıtlamaz. Gerçek davranışı doğrulayan bir assert yazın."
+    elif re.search(commented_assert, added_text, re.MULTILINE):
+        warn_reason = "Bir assert yorum satırına alınmış. Testi zayıflatmak yerine hatayı düzeltin; assert gereksizse tümüyle silmek için kullanıcıya sorun."
+
     # G2-C: Test case deletion verification across full file
     if old_full_content.strip():
         py_tests_old = re.findall(r"^\s*def\s+(test_\w+)\s*\(", old_full_content, re.MULTILINE)
@@ -268,9 +353,17 @@ def check_g2_test_integrity(
                 if proj_qty < old_qty:
                     deleted.append(test_name)
 
+            # A pure rename removes a name and adds a new one in the same edit: not a deletion.
+            added_names = [n for n, q in proj_counts.items() if q > old_counts.get(n, 0)]
+            if deleted and len(added_names) >= len(deleted):
+                deleted = []
+
             if deleted:
                 sample_deleted = deleted[:2]
-                return True, f"Mevcut test senaryosu silindi: {', '.join(sample_deleted)}. Var olan testleri silmek yasaktır.", None
+                return True, (
+                    f"Mevcut test senaryosu silindi: {', '.join(sample_deleted)}. Var olan testleri silmek yasaktır; "
+                    f"yeniden adlandırıyorsan yeni adı aynı düzenlemede ekle, gerçekten gereksizse kullanıcıya sor."
+                ), None
 
     return False, "", warn_reason
 

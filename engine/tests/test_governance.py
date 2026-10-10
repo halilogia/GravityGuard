@@ -334,6 +334,19 @@ class TestSessionIsolation(unittest.TestCase):
         self.assertIn("engine/a.py", get_unresolved_doc_obligations(self.root, "A"))
         self.assertEqual(get_unresolved_doc_obligations(self.root, "B"), {})
 
+    def test_changelog_updated_before_the_code_still_clears_the_debt(self):
+        """Docs-first order: the CHANGELOG edit happens before the code write; the debt must not open afterwards."""
+        changelog = self.root / "CHANGELOG.md"
+        changelog.write_text("# c\n", encoding="utf-8")
+        record_resolution_intent("doc", str(changelog), self.root, "A")
+        changelog.write_text("# c\n- entry\n", encoding="utf-8")
+        reconcile_obligations_on_disk(self.root, "A")
+        record_pending_doc_obligation(str(self.root / "engine" / "a.py"), ["CHANGELOG.md"], project_root=self.root, conversation_id="A")
+        self.assertEqual(get_unresolved_doc_obligations(self.root, "A"), {})
+        # The early edit pays once: a second code change owes its own entry.
+        record_pending_doc_obligation(str(self.root / "engine" / "b.py"), ["CHANGELOG.md"], project_root=self.root, conversation_id="A")
+        self.assertEqual(len(get_unresolved_doc_obligations(self.root, "A")), 1)
+
     def test_session_that_only_has_retries_still_sees_no_foreign_debt(self):
         """B's session entry is created by its own Stop retries and has no obligation list; that must not fall back to A's."""
         record_pending_test_evidence("src/a.py", None, "test_a.py", "no test", project_root=self.root, conversation_id="A")

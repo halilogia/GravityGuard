@@ -40,6 +40,24 @@ def harden_streams_to_utf8() -> None:
             continue
 
 
+_REAL_HOME = os.path.normcase(os.path.realpath(os.path.expanduser("~")))
+
+
+def _is_project_config_dir(directory: Path) -> bool:
+    """True if `directory` holds a project .gravityguard.json. The one in the user's home is the user-level default,
+    not a project config, so it neither marks a project root nor wins the upward search."""
+    if not (directory / ".gravityguard.json").exists():
+        return False
+    try:
+        norm_dir = os.path.normcase(os.path.realpath(str(directory)))
+        expand_home = os.path.normcase(os.path.realpath(os.path.expanduser("~")))
+        if norm_dir == _REAL_HOME or norm_dir == expand_home:
+            return False
+        return True
+    except OSError:
+        return True
+
+
 def extract_project_info(target_file: str) -> Tuple[str, str]:
     """Extracts project name and project root from target_file."""
     if not target_file:
@@ -48,7 +66,7 @@ def extract_project_info(target_file: str) -> Tuple[str, str]:
         p = Path(os.path.abspath(target_file))
         curr = p.parent
         for _ in range(6):
-            if (curr / ".git").exists() or (curr / ".gravityguard.json").exists():
+            if (curr / ".git").exists() or _is_project_config_dir(curr):
                 return curr.name, str(curr)
             curr = curr.parent
         parts = p.parts
@@ -66,16 +84,13 @@ def resolve_project_root(payload: Optional[dict] = None, target_file: str = "") 
     """
     Resolves the actual project root for the active request.
     Multi-root workspace priority order:
-    1. GRAVITYGUARD_LOG_DIR override (for testing & isolated execution).
-    2. If target_file is provided, check if it belongs to any declared workspacePaths.
-    3. If target_file is provided, walk up to find .gravityguard.json or .git marker.
-    4. If workspacePaths provided without matching target_file, use first workspacePath.
-    5. Fallback to Path.cwd().
+    1. If target_file is provided, check if it belongs to any declared workspacePaths.
+    2. If target_file is provided, walk up to find .gravityguard.json or .git marker.
+    3. If workspacePaths provided without matching target_file, use first workspacePath.
+    4. Fallback to Path.cwd().
+    GRAVITYGUARD_LOG_DIR only relocates the audit log and the state files; it never changes the project root or which
+    .gravityguard.json is read.
     """
-    override_dir = os.environ.get("GRAVITYGUARD_LOG_DIR")
-    if override_dir:
-        return Path(override_dir)
-
     ws_paths = payload.get("workspacePaths", []) if isinstance(payload, dict) else []
 
     if target_file and isinstance(ws_paths, list):
@@ -98,7 +113,7 @@ def resolve_project_root(payload: Optional[dict] = None, target_file: str = "") 
             p = Path(os.path.abspath(target_file))
             curr = p.parent
             for _ in range(8):
-                if (curr / ".gravityguard.json").exists() or (curr / ".git").exists():
+                if _is_project_config_dir(curr) or (curr / ".git").exists():
                     return curr
                 if curr.parent == curr:
                     break
@@ -112,18 +127,27 @@ def resolve_project_root(payload: Optional[dict] = None, target_file: str = "") 
     return Path.cwd()
 
 
-def load_gravityguard_config(target_file: str = "", project_root: Optional[Path] = None) -> Optional[dict]:
-    """Traverse upward looking for .gravityguard.json config."""
-    override_dir = os.environ.get("GRAVITYGUARD_LOG_DIR")
-    if override_dir:
-        cfg_override = Path(override_dir) / ".gravityguard.json"
-        if cfg_override.is_file():
-            try:
-                with open(cfg_override, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, IOError):
-                return None
+def _load_user_default_config() -> Optional[dict]:
+    """User-level default (~/.gravityguard.json, or the file named by GRAVITYGUARD_USER_CONFIG).
+    Missing or invalid file -> None, same as having no config."""
+    path = os.environ.get("GRAVITYGUARD_USER_CONFIG") or os.path.join(os.path.expanduser("~"), ".gravityguard.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (ValueError, OSError):
+        return None
+    return data if isinstance(data, dict) else None
 
+
+def load_gravityguard_config(target_file: str = "", project_root: Optional[Path] = None) -> Optional[dict]:
+    """Project .gravityguard.json (walking upward); only when none exists, the user-level default.
+    A project file wins completely (no merging)."""
+    found, cfg = _load_project_config(target_file, project_root)
+    return cfg if found else _load_user_default_config()
+
+
+def _load_project_config(target_file: str, project_root: Optional[Path]) -> Tuple[bool, Optional[dict]]:
+    """(file_found, config). An unreadable project file counts as found with no config."""
     if target_file:
         try:
             p = Path(target_file).resolve()
@@ -133,27 +157,27 @@ def load_gravityguard_config(target_file: str = "", project_root: Optional[Path]
 
         for _ in range(10):  # up to 10 levels up
             cfg_file = current_dir / ".gravityguard.json"
-            if cfg_file.is_file():
+            if cfg_file.is_file() and _is_project_config_dir(current_dir):
                 try:
                     with open(cfg_file, "r", encoding="utf-8") as f:
-                        return json.load(f)
+                        return True, json.load(f)
                 except (json.JSONDecodeError, IOError):
-                    return None
-            if current_dir.parent == current_dir:
+                    return True, None
+            if (project_root and current_dir == project_root) or (current_dir / ".git").exists() or (current_dir.parent == current_dir):
                 break
             current_dir = current_dir.parent
-        return None
+        return False, None
 
     # Check project_root or cwd as fallback only when no target_file was specified
     root = project_root or Path.cwd()
     cwd_cfg = root / ".gravityguard.json"
-    if cwd_cfg.is_file():
+    if cwd_cfg.is_file() and _is_project_config_dir(root):
         try:
             with open(cwd_cfg, "r", encoding="utf-8") as f:
-                return json.load(f)
+                return True, json.load(f)
         except (json.JSONDecodeError, IOError):
-            return None
-    return None
+            return True, None
+    return False, None
 
 
 def resolve_complexity_thresholds(cfg: Optional[dict]) -> Dict[str, int]:

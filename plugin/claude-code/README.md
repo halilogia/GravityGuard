@@ -14,13 +14,15 @@ Python 3.10+ is the only requirement; the engine has no dependencies. To use an 
 | Claude Code event | What the adapter does |
 |---|---|
 | `PreToolUse` — `Write`, `Edit`, `MultiEdit` | Runs the file rules (G0 secrets, G1 silent exceptions, G2 test integrity, G3, G4, SRP, …). A BLOCK becomes a `deny` with the engine's reason; a warning is handed to the model as context and never as an `allow`, so your own permission prompt still appears. |
+| `PreToolUse` — `Read` | Only `.env`-like files reach the engine: a live `.env` / `.env.local` read is denied (`G0_ENV_PROTECTION`); `.env.example` and every other file pass silently. |
 | `Stop` | Runs the lifecycle gate. Unfinished test/doc obligations of **this session** make Claude continue (`{"decision":"block"}`). Asked on **every** stop, including the ones Claude Code flags with `stop_hook_active`, so an agent cannot leave after one extra turn: the loop ends when the obligations are cleared, when the engine's circuit breaker releases the stop (after 5 blocked retries of the session), or when Claude Code overrides a Stop hook that blocked 8 times in a row. |
 
 Each session is tracked as `claude:<session_id>`, so two Claude Code windows (or Claude Code and Antigravity) on the same project never block each other's Stop.
 
 ## What it does not do
 
-- **`Bash` is not inspected.** A shell command cannot be reduced reliably to "these lines were added to that file", so `echo > file` or `sed -i` never reach the file rules. The git pre-commit secret net and the Stop gate are the backstops.
+- **`Bash` is not inspected.** A shell command cannot be reduced reliably to "these lines were added to that file", so `echo > file` or `sed -i` never reach the file rules. The only backstop is the Stop gate (final diff guard, doc and test obligations); there is no git-level secret scanner (`.githooks/pre-commit` only runs the documentation gate).
+- **Audit log location.** Unless `GRAVITYGUARD_LOG_DIR` or `GRAVITYGUARD_AUDIT_DIR` is set, the adapter writes the audit log to `<project>/.gravityguard/logs` (not Antigravity's `~/.gemini/logs`).
 - **Fail-open.** If the engine is missing or crashes, the tool call proceeds and the reason is written to stderr (visible in Claude Code's verbose mode).
 - **Cost.** Every guarded write starts two short Python processes (the adapter, then the engine): expect a few hundred milliseconds per `Write` / `Edit`.
 - Language coverage is the engine's: GDScript and other languages get the secret rules and the generic ones, not the Python-specific ones (G1 looks for a literal `pass` in an `except`).
@@ -38,3 +40,7 @@ Some rules fire on code that is deliberate (a codebase with many intentional `ex
 ```
 
 Look at the audit log after a few sessions, then decide per rule whether to keep it in shadow, tune it, or switch it on.
+
+### One default for every project: `~/.gravityguard.json`
+
+When the adapter is enabled globally, projects without their own `.gravityguard.json` would run every rule at its strictest. Put the same `rules` / `governance` / `complexity` options in `~/.gravityguard.json` (or point `GRAVITYGUARD_USER_CONFIG` at another file) and it is used for every project that has no config of its own. A project's own `.gravityguard.json` wins completely, with no merging. A missing or invalid user file behaves as if it did not exist.

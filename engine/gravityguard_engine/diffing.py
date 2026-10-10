@@ -8,6 +8,11 @@ import os
 from typing import List, Set, Tuple
 
 
+def _text(value) -> str:
+    """Content arguments are strings; anything else (int, None, list) counts as empty."""
+    return value if isinstance(value, str) else ""
+
+
 def get_projected_and_old_content(
     target_file: str,
     tool_name: str,
@@ -26,12 +31,12 @@ def get_projected_and_old_content(
             existing_content = ""
 
     if tool_name == "write_to_file":
-        new_content = args.get("CodeContent", "")
+        new_content = _text(args.get("CodeContent"))
         return existing_content, new_content
 
     if tool_name == "replace_file_content":
-        target = args.get("TargetContent", "")
-        repl = args.get("ReplacementContent", "")
+        target = _text(args.get("TargetContent"))
+        repl = _text(args.get("ReplacementContent"))
         allow_multiple = args.get("AllowMultiple", False)
         if existing_content:
             count = -1 if allow_multiple else 1
@@ -47,21 +52,23 @@ def get_projected_and_old_content(
             return target, repl
 
     if tool_name == "multi_replace_file_content":
-        chunks = args.get("ReplacementChunks", [])
+        chunks = args.get("ReplacementChunks")
+        if not isinstance(chunks, list):
+            chunks = []
         if existing_content:
             projected = existing_content
             for chunk in chunks:
                 if isinstance(chunk, dict):
-                    t = chunk.get("TargetContent", "")
-                    r = chunk.get("ReplacementContent", "")
+                    t = _text(chunk.get("TargetContent"))
+                    r = _text(chunk.get("ReplacementContent"))
                     m = chunk.get("AllowMultiple", False)
                     if t and t in projected:
                         c = -1 if m else 1
                         projected = projected.replace(t, r, c)
             return existing_content, projected
         else:
-            old_parts = [chunk.get("TargetContent", "") for chunk in chunks if isinstance(chunk, dict)]
-            new_parts = [chunk.get("ReplacementContent", "") for chunk in chunks if isinstance(chunk, dict)]
+            old_parts = [_text(chunk.get("TargetContent")) for chunk in chunks if isinstance(chunk, dict)]
+            new_parts = [_text(chunk.get("ReplacementContent")) for chunk in chunks if isinstance(chunk, dict)]
             return "\n".join(old_parts), "\n".join(new_parts)
 
     return existing_content, existing_content

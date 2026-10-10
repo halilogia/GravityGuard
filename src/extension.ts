@@ -106,10 +106,45 @@ export function activate(context: vscode.ExtensionContext): void {
       provider.updateHtml();
       vscode.window.showInformationMessage(t('actions.langSwitched', { lang: next.toUpperCase() }));
     }),
+    vscode.commands.registerCommand('antigravityBridge.openConfig', async () => {
+      await handleOpenConfig();
+    }),
     vscode.commands.registerCommand('antigravityBridge.enhancePrompt', async () => {
       await handleEnhancePrompt();
     })
   );
+}
+
+async function handleOpenConfig(): Promise<void> {
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  let cfgFile = '';
+  if (workspaceFolders && workspaceFolders.length > 0) {
+    cfgFile = path.join(workspaceFolders[0].uri.fsPath, '.gravityguard.json');
+  } else {
+    cfgFile = path.join(os.homedir(), '.gravityguard.json');
+    vscode.window.showInformationMessage(t('actions.configNoWorkspaceNotice'));
+  }
+
+  try {
+    if (!fs.existsSync(cfgFile)) {
+      fs.writeFileSync(cfgFile, JSON.stringify({
+        "governance": { "enforceDocObligations": true },
+        "complexity": { "singleWriteLoc": 200, "totalLoc": 500 },
+        "guards": {
+          "G0_SECRET_LEAK": "block",
+          "G1_SILENT_EXCEPTION": "block",
+          "G2_TEST_INTEGRITY": "block",
+          "G3_COMPILER_BYPASS": "warn",
+          "G4_IMPORT_MATRIX": "block",
+          "T1_TEST_EVIDENCE": "warn"
+        }
+      }, null, 2), 'utf8');
+    }
+    const doc = await vscode.workspace.openTextDocument(cfgFile);
+    await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.One, preview: false });
+  } catch (e: any) {
+    vscode.window.showErrorMessage(t('actions.configOpenError', { error: e.message }));
+  }
 }
 
 async function handleEnhancePrompt(): Promise<void> {
@@ -381,6 +416,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
   private _pollInterval?: NodeJS.Timeout;
   private _clearedAfterSeq: number | null = null;
+  private _activeTab: string = 'live';
 
   constructor(private readonly _extensionUri: vscode.Uri) {}
 
@@ -391,11 +427,13 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       localResourceRoots: [this._extensionUri]
     };
 
-    webviewView.webview.onDidReceiveMessage(async (message: { command: string; path?: string; text?: string }) => {
+    webviewView.webview.onDidReceiveMessage(async (message: { command: string; path?: string; text?: string; tab?: string }) => {
       if (message.command === 'clearLogs' || message.command === 'clearView') {
         this.clearView();
       } else if (message.command === 'refresh') {
         this.updateHtml();
+      } else if (message.command === 'setTab' && message.tab) {
+        this._activeTab = message.tab;
       } else if (message.command === 'toggleLanguage') {
         const next = getCurrentLanguage() === 'tr' ? 'en' : 'tr';
         setLanguage(next);
@@ -403,35 +441,12 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       } else if (message.command === 'openFile' && message.path) {
         try {
           const doc = await vscode.workspace.openTextDocument(message.path);
-          await vscode.window.showTextDocument(doc);
+          await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.One, preview: false });
         } catch (e: any) {
           vscode.window.showErrorMessage(t('actions.fileOpenError', { path: message.path }));
         }
       } else if (message.command === 'openConfig') {
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (workspaceFolders && workspaceFolders.length > 0) {
-          const cfgFile = path.join(workspaceFolders[0].uri.fsPath, '.gravityguard.json');
-          try {
-            if (!fs.existsSync(cfgFile)) {
-              fs.writeFileSync(cfgFile, JSON.stringify({
-                "governance": { "enforceDocObligations": true },
-                "complexity": { "singleWriteLoc": 200, "totalLoc": 500 },
-                "guards": {
-                  "G0_SECRET_LEAK": "block",
-                  "G1_SILENT_EXCEPTION": "block",
-                  "G2_TEST_INTEGRITY": "block",
-                  "G3_COMPILER_BYPASS": "warn",
-                  "G4_IMPORT_MATRIX": "block",
-                  "T1_TEST_EVIDENCE": "warn"
-                }
-              }, null, 2), 'utf8');
-            }
-            const doc = await vscode.workspace.openTextDocument(cfgFile);
-            await vscode.window.showTextDocument(doc);
-          } catch (e: any) {
-            vscode.window.showErrorMessage(t('actions.configOpenError', { error: e.message }));
-          }
-        }
+        await handleOpenConfig();
       } else if (message.command === 'copyReason' && message.text) {
         await vscode.env.clipboard.writeText(message.text);
         vscode.window.showInformationMessage(t('actions.reasonCopied'));
@@ -485,6 +500,8 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
     if (!this._view) {
       return;
     }
+
+    const activeTab = this._activeTab || 'live';
 
     const logPath = path.join(os.homedir(), '.gemini', 'logs', 'srp_guardian_live.json');
     let data: GuardianData = { activeGuard: 'GravityGuard', status: 'ONLINE', events: [] };
@@ -541,12 +558,23 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
         }
       }
     }
+    if (!projectCfg) {
+      const userCfgPath = path.join(os.homedir(), '.gravityguard.json');
+      if (fs.existsSync(userCfgPath)) {
+        try {
+          projectCfg = JSON.parse(fs.readFileSync(userCfgPath, 'utf8'));
+        } catch (e) {
+          console.warn('Failed to parse user .gravityguard.json:', e);
+        }
+      }
+    }
 
     const totalObligations = Object.keys(pendingTests).length + Object.keys(pendingDocs).length;
     let eventsList = filterEventsAfterSeq(data.events || [], this._clearedAfterSeq);
     const blockedCount = eventsList.filter(e => e.status === 'BLOCKED').length;
     const warningCount = eventsList.filter(e => e.status === 'WARNING').length;
     const approvedCount = eventsList.filter(e => e.status === 'APPROVED').length;
+    const shadowCount = eventsList.filter(e => e.status === 'SHADOW_TRIGGER').length;
     const totalEvents = eventsList.length;
 
     // Agent Recovery Calculation: Did agent fix a blocked event on next turn?
@@ -943,16 +971,33 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
     }
 
     const rulesToDisplay = [
-      formatRuleStat('G0_SECRET_LEAK', 'G0 Secret Leak'),
-      formatRuleStat('G1_SILENT_EXCEPTION', 'G1 Silent Exception'),
-      formatRuleStat('G2_TEST_INTEGRITY', 'G2 Test Integrity'),
-      formatRuleStat('G4_IMPORT_MATRIX', 'G4 Import Matrix'),
-      formatRuleStat('SRP_BOUNDARY', 'SRP & Cohesion'),
-      formatRuleStat('ARCH_FILE_GROWTH', 'ARCH_FILE_GROWTH', true),
-      formatRuleStat('G3_COMPILER_BYPASS', 'G3 Compiler Bypass', true)
+      formatRuleStat('G0_SECRET_LEAK', t('rules.g0Title')),
+      formatRuleStat('G1_SILENT_EXCEPTION', t('rules.g1Title')),
+      formatRuleStat('G2_TEST_INTEGRITY', t('rules.g2Title')),
+      formatRuleStat('G4_IMPORT_MATRIX', t('rules.g4Title')),
+      formatRuleStat('SRP_BOUNDARY', t('rules.srpTitle')),
+      formatRuleStat('ARCH_FILE_GROWTH', t('rules.growthTitle'), true),
+      formatRuleStat('G3_COMPILER_BYPASS', t('rules.g3Title'), true)
     ];
 
+    const knownKeys = new Set(['G0_SECRET_LEAK', 'G1_SILENT_EXCEPTION', 'G2_TEST_INTEGRITY', 'G4_IMPORT_MATRIX', 'SRP_BOUNDARY', 'ARCH_FILE_GROWTH', 'G3_COMPILER_BYPASS']);
+    for (const k of Object.keys(ruleStats)) {
+      if (!knownKeys.has(k) && (ruleStats[k]?.blocked > 0 || ruleStats[k]?.recovered > 0)) {
+        rulesToDisplay.push(formatRuleStat(k, k));
+      }
+    }
+
+    const lastEvent = (data.events && data.events.length > 0) ? data.events[0] : null;
+    const latencyMatch = lastEvent?.reason?.match(/\((\d+(\.\d+)?ms)\)/);
+    const measuredLatency = latencyMatch ? latencyMatch[1] : '< 1 ms';
+
     const lastSeq = (data as any)?.lastAuditSeq || 0;
+
+    const growthRuleCfg = projectCfg?.rules?.['ARCH_FILE_GROWTH'];
+    const isGrowthShadow = (typeof growthRuleCfg === 'object' && growthRuleCfg?.mode === 'shadow') || growthRuleCfg === 'shadow';
+
+    const g3RuleCfg = projectCfg?.rules?.['G3_COMPILER_BYPASS'];
+    const isG3Shadow = (typeof g3RuleCfg === 'object' && g3RuleCfg?.mode === 'shadow') || g3RuleCfg === 'shadow';
 
     const insightsHtml = `
       <div class="insight-card">
@@ -996,11 +1041,11 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
         </div>
         <div class="metric-row">
           <span class="metric-lbl">${t('insights.growthLabel')}</span>
-          <span class="metric-val text-purple">${t('insights.growthValue')}</span>
+          <span class="metric-val ${isGrowthShadow ? 'text-purple' : 'text-amber'}">${isGrowthShadow ? t('insights.growthValueShadow') : t('insights.growthValueWarn')}</span>
         </div>
         <div class="metric-row">
           <span class="metric-lbl">${t('insights.g3Label')}</span>
-          <span class="metric-val text-amber">${t('insights.g3Value')}</span>
+          <span class="metric-val ${isG3Shadow ? 'text-purple' : 'text-amber'}">${isG3Shadow ? t('insights.g3ValueShadow') : t('insights.g3Value')}</span>
         </div>
       </div>
 
@@ -1031,7 +1076,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
             <div class="insight-title"><span class="icon-inline">${lucide('cpu', { size: 12 })}</span> ${t('insights.perfTitle')}</div>
             <div class="metric-row">
               <span class="metric-lbl">${t('insights.latencyFast')}:</span>
-              <span class="metric-val text-green">${t('insights.fastBudget')}</span>
+              <span class="metric-val text-green">${measuredLatency}</span>
             </div>
             <div class="metric-row">
               <span class="metric-lbl">${t('insights.latencySpawn')}:</span>
@@ -1563,38 +1608,41 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
         <div class="stat-summary-bar">
           <div class="stat-chip"><div class="chip-val text-red">${blockedCount}</div><div class="chip-lbl">${t('stats.blocked')}</div></div>
           <div class="stat-chip"><div class="chip-val text-amber">${warningCount}</div><div class="chip-lbl">${t('stats.warning')}</div></div>
+          ${shadowCount > 0 ? `<div class="stat-chip"><div class="chip-val text-purple">${shadowCount}</div><div class="chip-lbl">${t('current.statusShadow')}</div></div>` : ''}
           <div class="stat-chip"><div class="chip-val text-cyan">${totalObligations}</div><div class="chip-lbl">${totalObligations > 0 ? t('stats.pending') : t('stats.clean')}</div></div>
         </div>
 
         <!-- Tabs -->
         <div class="tabs-bar">
-          <button class="tab-btn active" id="btn-live" onclick="setTab('live')">${lucide('zap', { size: 11 })} ${t('tabs.live')}</button>
-          <button class="tab-btn" id="btn-obligations" onclick="setTab('obligations')">${lucide('clipboardList', { size: 11 })} ${t('tabs.obligations')}${totalObligations > 0 ? `<span class="badge-counter">${totalObligations}</span>` : ''}</button>
-          <button class="tab-btn" id="btn-rules" onclick="setTab('rules')">${lucide('sliders', { size: 11 })} ${t('tabs.rules')}</button>
-          <button class="tab-btn" id="btn-insights" onclick="setTab('insights')">${lucide('barChart', { size: 11 })} ${t('tabs.insights')}</button>
+          <button class="tab-btn ${activeTab === 'live' ? 'active' : ''}" id="btn-live" onclick="setTab('live')">${lucide('zap', { size: 11 })} ${t('tabs.live')}</button>
+          <button class="tab-btn ${activeTab === 'obligations' ? 'active' : ''}" id="btn-obligations" onclick="setTab('obligations')">${lucide('clipboardList', { size: 11 })} ${t('tabs.obligations')}${totalObligations > 0 ? `<span class="badge-counter">${totalObligations}</span>` : ''}</button>
+          <button class="tab-btn ${activeTab === 'rules' ? 'active' : ''}" id="btn-rules" onclick="setTab('rules')">${lucide('sliders', { size: 11 })} ${t('tabs.rules')}</button>
+          <button class="tab-btn ${activeTab === 'insights' ? 'active' : ''}" id="btn-insights" onclick="setTab('insights')">${lucide('barChart', { size: 11 })} ${t('tabs.insights')}</button>
         </div>
 
         <!-- Panes -->
-        <div id="tab-live" class="tab-pane active">
+        <div id="tab-live" class="tab-pane ${activeTab === 'live' ? 'active' : ''}">
           ${liveHtml}
         </div>
-        <div id="tab-obligations" class="tab-pane">
+        <div id="tab-obligations" class="tab-pane ${activeTab === 'obligations' ? 'active' : ''}">
           ${obligationsHtml}
         </div>
-        <div id="tab-rules" class="tab-pane">
+        <div id="tab-rules" class="tab-pane ${activeTab === 'rules' ? 'active' : ''}">
           ${rulesHtml}
         </div>
-        <div id="tab-insights" class="tab-pane">
+        <div id="tab-insights" class="tab-pane ${activeTab === 'insights' ? 'active' : ''}">
           ${insightsHtml}
         </div>
 
         <script>
           const vscode = acquireVsCodeApi();
-          let currentTab = window._lastTab || 'live';
+          const savedState = vscode.getState() || {};
+          let currentTab = savedState.currentTab || '${escapeJs(activeTab)}';
 
           function setTab(name) {
             currentTab = name;
-            window._lastTab = name;
+            vscode.setState({ ...vscode.getState(), currentTab: name });
+            vscode.postMessage({ command: 'setTab', tab: name });
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
             const btn = document.getElementById('btn-' + name);
@@ -1603,7 +1651,17 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
             if (pane) pane.classList.add('active');
           }
 
-          if (window._lastTab) { setTab(window._lastTab); }
+          if (savedState.currentTab && savedState.currentTab !== '${escapeJs(activeTab)}') {
+            setTab(savedState.currentTab);
+          }
+
+          window.addEventListener('scroll', () => {
+            vscode.setState({ ...vscode.getState(), currentTab, scrollY: window.scrollY });
+          }, { passive: true });
+
+          if (typeof savedState.scrollY === 'number' && savedState.scrollY > 0) {
+            window.scrollTo(0, savedState.scrollY);
+          }
 
           function toggleDetail(id) {
             const el = document.getElementById(id);

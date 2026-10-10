@@ -253,6 +253,9 @@ _PROJECT_ROOT_MARKERS = (
 def _has_project_marker(directory: Path) -> bool:
     """True if directory carries any recognized project-root marker."""
     for marker in _PROJECT_ROOT_MARKERS:
+        if marker == ".gravityguard.json" and os.path.normcase(os.path.abspath(directory)) == os.path.normcase(
+                os.path.abspath(os.path.expanduser("~"))):
+            continue  # the user-level default config is not a project marker
         try:
             if (directory / marker).exists():
                 return True

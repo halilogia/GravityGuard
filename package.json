@@ -64,6 +64,11 @@
     },
     "commands": [
       {
+        "command": "antigravityBridge.openConfig",
+        "title": "GravityGuard: Yapılandırmayı Aç / Open Configuration (.gravityguard.json)",
+        "icon": "$(gear)"
+      },
+      {
         "command": "antigravityBridge.enhancePrompt",
         "title": "GravityGuard: Prompt Geliştir / Enhance",
         "icon": "$(sparkle)"
