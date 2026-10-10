@@ -31,7 +31,9 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   );
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider('antigravity-guardian-view', provider)
+    vscode.window.registerWebviewViewProvider('antigravity-guardian-view', provider, {
+      webviewOptions: { retainContextWhenHidden: true }
+    })
   );
 
   // 3. Register Commands

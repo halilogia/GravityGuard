@@ -101,12 +101,8 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
       }
     });
 
-    // Initial render with micro-delay to let Chromium ServiceWorker host handshake settle
-    setTimeout(() => {
-      if (this._view) {
-        this.updateHtml(true);
-      }
-    }, 150);
+    // Initial render synchronously inside resolveWebviewView (no deferred render)
+    this.updateHtml(true);
 
     // 1. Live File Watcher (Stored in _logWatcher to prevent leak)
     const logPath = getLiveLogPath();

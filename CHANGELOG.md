@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `src/extension.ts` monolitinden komutlar (`src/commands.ts`), router istemcisi (`src/router_client.ts`) ve webview bileşenleri (`src/webview/`) ayrıştırıldı.
   - VSIX paketlemesi ve uzantı senkronizasyonu tam paket olarak standardize edildi.
 
+### Fixed & Hardened (Webview Lifecycle)
+- **ServiceWorker `InvalidStateError` Yaşam Döngüsü Düzeltmesi**:
+  - `registerWebviewViewProvider` çağrısına `{ webviewOptions: { retainContextWhenHidden: true } }` eklendi; görünüm gizlendiğinde webview bağlamı yok edilmez, yeniden oluşturma kaynaklı ServiceWorker yarışı ortadan kalkar.
+  - `resolveWebviewView` içindeki `setTimeout(..., 150)` ile geciktirilmiş ilk render kaldırıldı; ilk `updateHtml(true)` çağrısı artık seçenekler ve mesaj dinleyicisi kurulduktan hemen sonra senkron yapılır.
+
 ### Fixed & Hardened (CSP-Compliant Event Delegation)
 - **Tüm Butonların Açılışta Kilitlenmesinin Kökten Çözümü (Event Delegation)**:
   - CSP `script-src 'nonce-...'` kuralı gereğince Chromium tarafından engellenen bütün inline `onclick="..."` öznitelikleri kaldırıldı.
