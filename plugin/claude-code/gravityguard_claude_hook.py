@@ -72,7 +72,10 @@ def to_engine_pretool(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if name not in TOOL_MAP:
         return None
     tool_input = event.get("tool_input") or {}
-    target = tool_input.get("file_path", "")
+    target = str(tool_input.get("file_path", "") or "")
+    if target and not os.path.isabs(target):
+        cwd = str(event.get("cwd") or os.getcwd())
+        target = os.path.abspath(os.path.join(cwd, target))
     if name == "Read":
         # Only the live-.env check matters for a read; skip the engine process for every other file.
         if "env" not in os.path.basename(str(target)).lower():

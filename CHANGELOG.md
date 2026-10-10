@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added & Fixed (Workspace Auto-Discovery & Multi-Repo Governance)
 - **Açık Çalışma Alanı Olmadığında Otomatik Proje Tespiti**: IDE'de açık bir klasör bulunmadığında (`vscode.workspace.workspaceFolders` boş olduğunda), `state.ts` son güvenlik olaylarındaki (`data.events`) hedef dosya yollarından yukarı doğru tarama yaparak aktif projenin kök dizinini, proje adını ve `.gravityguard/runtime/governance.json` durumunu otomatik keşfeder.
 - **Yükümlülük Senkronizasyonu**: Çalışma alanı açık olmasa bile ilgili projedeki bekleyen test ve dokümantasyon yükümlülükleri Canlı İzleyici Webview panelinde kesintisiz ve doğru proje rozetiyle gösterilir.
+- **Claude Code Kanca Göreceli Yol Düzeltmesi (Path Resolution)**: `plugin/claude-code/gravityguard_claude_hook.py` kancasında, Claude veya alt ajanlar tarafından iletilen göreceli dosya yolları (`src/...`) olay çalışma dizini (`cwd`) ile birleştirilerek mutlak yola dönüştürüldü; böylece tüm alt ajan işlemleri motor ve denetim katmanında eksiksiz algılanır.
 
 ## [1.4.7] - 2026-10-10
 
