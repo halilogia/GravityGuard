@@ -45,7 +45,7 @@ test('all essential keys exist in both tr and en translation dictionaries', () =
   const enKeys = Object.keys(resources.en.translation);
   assert.deepEqual(trKeys.sort(), enKeys.sort(), 'Top-level translation keys must match in both languages');
 
-  for (const group of ['tabs', 'current', 'live', 'insights', 'stats', 'actions', 'obligations', 'rules', 'events']) {
+  for (const group of ['tabs', 'current', 'live', 'insights', 'stats', 'actions', 'obligations', 'rules', 'events', 'skills']) {
     const trGroupKeys = Object.keys(resources.tr.translation[group] || {});
     const enGroupKeys = Object.keys(resources.en.translation[group] || {});
     assert.deepEqual(

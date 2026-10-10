@@ -2,7 +2,7 @@
   "name": "gravityguard",
   "displayName": "GravityGuard — Architecture Airbag & Gatekeeper for AI Agents",
   "description": "Deterministic architectural gatekeeper, test sufficiency analyzer, and prompt engineering copilot for Antigravity IDE & AI Coding Agents.",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "publisher": "halilogia",
   "repository": {
     "type": "git",
@@ -86,6 +86,11 @@
         "command": "antigravityBridge.clearLogs",
         "title": "GravityGuard: Clear Logs",
         "icon": "$(trash)"
+      },
+      {
+        "command": "antigravityBridge.findSkills",
+        "title": "GravityGuard: Projeye Uygun Skill Bul / Find Skills for Project",
+        "icon": "$(sparkle)"
       }
     ],
     "keybindings": [

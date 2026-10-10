@@ -7,6 +7,7 @@ import { buildOfflinePrompt, buildSystemPrompt, classifyIntent, modeLabel, shoul
 import { initI18n, t, setLanguage, getCurrentLanguage } from './i18n';
 import { lucide } from './icons';
 import { filterEventsAfterSeq, resolveClearedAfterSeq } from './view_filter';
+import { scanAllSkills } from './skills';
 
 interface LogEvent {
   status?: string;
@@ -121,8 +122,27 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('antigravityBridge.enhancePrompt', async () => {
       await handleEnhancePrompt();
+    }),
+    vscode.commands.registerCommand('antigravityBridge.findSkills', async () => {
+      await handleFindSkills();
     })
   );
+}
+
+async function handleFindSkills(): Promise<void> {
+  let workspaceRoot = '';
+  if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+    workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+  }
+  const findSkillScript = path.join(os.homedir(), '.gemini', 'config', 'skills', 'find-skill', 'scripts', 'find_skill.ts');
+  if (fs.existsSync(findSkillScript)) {
+    const term = vscode.window.createTerminal({ name: 'GravityGuard: Find Skills' });
+    term.show();
+    const targetDir = workspaceRoot ? `"${workspaceRoot}"` : `"${process.cwd()}"`;
+    term.sendText(`node --experimental-strip-types "${findSkillScript}" ${targetDir}`);
+  } else {
+    vscode.window.showInformationMessage('find-skill script not found at ~/.gemini/config/skills/find-skill');
+  }
 }
 
 async function handleOpenConfig(): Promise<void> {
@@ -427,6 +447,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
   private _pollInterval?: NodeJS.Timeout;
   private _clearedAfterSeq: number | null = null;
   private _activeTab: string = 'live';
+  private _lastHtml: string = '';
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -436,18 +457,37 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
 
   public resolveWebviewView(webviewView: vscode.WebviewView): void {
     this._view = webviewView;
+    this._lastHtml = '';
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [this._extensionUri]
     };
 
+    webviewView.onDidChangeVisibility(() => {
+      if (this._view?.visible) {
+        this.updateHtml();
+      }
+    });
+
+    webviewView.onDidDispose(() => {
+      if (this._pollInterval) {
+        clearInterval(this._pollInterval);
+        this._pollInterval = undefined;
+      }
+      this._view = undefined;
+      this._lastHtml = '';
+    });
+
     webviewView.webview.onDidReceiveMessage(async (message: { command: string; path?: string; text?: string; tab?: string }) => {
       if (message.command === 'clearLogs' || message.command === 'clearView') {
         this.clearView();
       } else if (message.command === 'refresh') {
+        this._lastHtml = '';
         this.updateHtml();
       } else if (message.command === 'setTab' && message.tab) {
         this._activeTab = message.tab;
+      } else if (message.command === 'findSkills') {
+        await vscode.commands.executeCommand('antigravityBridge.findSkills');
       } else if (message.command === 'toggleLanguage') {
         const next = getCurrentLanguage() === 'tr' ? 'en' : 'tr';
         setLanguage(next);
@@ -457,6 +497,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
         if (this._onLanguageChanged) {
           this._onLanguageChanged();
         }
+        this._lastHtml = '';
         this.updateHtml();
       } else if (message.command === 'openFile' && message.path) {
         try {
@@ -505,9 +546,11 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       } else {
         this._clearedAfterSeq = 0;
       }
-    } catch {
+    } catch (parseErr) {
+      console.warn('[GravityGuard] Failed to parse live log on clearView:', parseErr);
       this._clearedAfterSeq = 0;
     }
+    this._lastHtml = '';
     this.updateHtml();
     vscode.window.showInformationMessage(t('actions.clearedNotice'));
   }
@@ -517,7 +560,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
   }
 
   public updateHtml(): void {
-    if (!this._view) {
+    if (!this._view || !this._view.visible) {
       return;
     }
 
@@ -1127,12 +1170,68 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       </details>
     `;
 
+    // --- TAB 5: SKILLS (ACTIVE WORKSPACE, GLOBAL, PLUGIN, BUILT-IN) ---
+    const skillsList = scanAllSkills(workspaceRoot);
+    let skillsHtml = '';
+    if (skillsList.length === 0) {
+      skillsHtml = `<div class="empty-state">${t('skills.empty')}</div>`;
+    } else {
+      skillsHtml = `
+        <div style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 10px; font-weight: 800; color: var(--color-cyan);">${t('skills.title')}</span>
+          <span class="project-pill">${t('skills.totalCount', { count: skillsList.length })}</span>
+        </div>
+        <div style="margin-bottom: 8px;">
+          <button class="action-btn wide" onclick="findSkills()" title="${t('skills.findSkillsTooltip')}">
+            ${lucide('sparkles', { size: 12, color: 'var(--color-cyan)' })} ${t('skills.findSkillsBtn')}
+          </button>
+        </div>
+      `;
+
+      for (const sk of skillsList) {
+        let badgeCls = 'badge-neutral';
+        let scopeLabel = t('skills.builtinScope');
+        if (sk.scope === 'workspace') {
+          badgeCls = 'badge-allowed';
+          scopeLabel = t('skills.workspaceScope');
+        } else if (sk.scope === 'global') {
+          badgeCls = 'badge-cyan';
+          scopeLabel = t('skills.globalScope');
+        } else if (sk.scope === 'plugin') {
+          badgeCls = 'badge-purple';
+          scopeLabel = t('skills.pluginScope');
+        }
+
+        const safePath = escapeJs(sk.skillFilePath);
+        skillsHtml += `
+          <div class="stream-item" style="padding: 7px 8px; margin-bottom: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
+              <div>
+                <span style="font-weight: 700; font-size: 11px; color: var(--text-main);">${escapeHtml(sk.name)}</span>
+                <span class="status-badge ${badgeCls}" style="margin-left: 5px; font-size: 8px; padding: 1px 5px;">${scopeLabel}</span>
+              </div>
+              <button class="mini-icon-btn" onclick="openFile('${safePath}')" title="${t('skills.openSkillMd')}">
+                ${lucide('fileText', { size: 12, color: 'var(--text-muted)' })}
+              </button>
+            </div>
+            <div style="font-size: 9px; color: #cbd5e1; line-height: 1.35; margin-bottom: 4px;">
+              ${escapeHtml(sk.description)}
+            </div>
+            <div style="font-size: 8px; color: rgba(255, 255, 255, 0.35); font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(sk.skillFilePath)}">
+              ${escapeHtml(sk.skillFilePath)}
+            </div>
+          </div>
+        `;
+      }
+    }
+
     // --- RENDER MAIN WEBVIEW HTML ---
-    this._view.webview.html = `
+    const htmlContent = `
       <!DOCTYPE html>
       <html lang="en">
       <head>
         <meta charset="UTF-8">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${this._view.webview.cspSource} 'unsafe-inline'; script-src ${this._view.webview.cspSource} 'unsafe-inline';">
         <style>
           :root {
             --bg-base: var(--vscode-editor-background, #0b1120);
@@ -1639,6 +1738,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
           <button class="tab-btn ${activeTab === 'obligations' ? 'active' : ''}" id="btn-obligations" onclick="setTab('obligations')">${lucide('clipboardList', { size: 11 })} ${t('tabs.obligations')}${totalObligations > 0 ? `<span class="badge-counter">${totalObligations}</span>` : ''}</button>
           <button class="tab-btn ${activeTab === 'rules' ? 'active' : ''}" id="btn-rules" onclick="setTab('rules')">${lucide('sliders', { size: 11 })} ${t('tabs.rules')}</button>
           <button class="tab-btn ${activeTab === 'insights' ? 'active' : ''}" id="btn-insights" onclick="setTab('insights')">${lucide('barChart', { size: 11 })} ${t('tabs.insights')}</button>
+          <button class="tab-btn ${activeTab === 'skills' ? 'active' : ''}" id="btn-skills" onclick="setTab('skills')">${lucide('sparkles', { size: 11 })} ${t('tabs.skills')}<span class="badge-counter" style="background: rgba(56, 189, 248, 0.25); color: #38bdf8;">${skillsList.length}</span></button>
         </div>
 
         <!-- Panes -->
@@ -1653,6 +1753,9 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
         </div>
         <div id="tab-insights" class="tab-pane ${activeTab === 'insights' ? 'active' : ''}">
           ${insightsHtml}
+        </div>
+        <div id="tab-skills" class="tab-pane ${activeTab === 'skills' ? 'active' : ''}">
+          ${skillsHtml}
         </div>
 
         <script>
@@ -1697,10 +1800,16 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
           function openFile(path) { vscode.postMessage({ command: 'openFile', path }); }
           function openConfig() { vscode.postMessage({ command: 'openConfig' }); }
           function copyReason(text) { vscode.postMessage({ command: 'copyReason', text }); }
+          function findSkills() { vscode.postMessage({ command: 'findSkills' }); }
         </script>
       </body>
       </html>
     `;
+
+    if (this._lastHtml !== htmlContent) {
+      this._lastHtml = htmlContent;
+      this._view.webview.html = htmlContent;
+    }
   }
 }
 

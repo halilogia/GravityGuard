@@ -5,6 +5,23 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-10-10
+
+### Added
+- **Skills (Beceriler) Yönetim & Keşif Sekmesi**: GravityGuard canlı monitör paneline 5. sekme olarak "Beceriler" (Skills) eklendi.
+  - Çalışma alanı (`.agent/skills/`, `.gemini/skills/`, `skills/`), Global (`~/.gemini/config/skills/`), Eklenti (`plugins/*/skills/`) ve Yerleşik Antigravity becerileri otomatik taranıp listelenir.
+  - Her beceri için kapsam etiketi (Proje / Global / Eklenti / Yerleşik), başlık, açıklama ve tek tıkla `SKILL.md` açma kısayolu sunulur.
+  - "Projeye Uygun Skill Bul" butonu ile `antigravityBridge.findSkills` komutu entegre edildi.
+- **`antigravityBridge.findSkills` Komutu**: `find-skill` becerisini ve `skills.sh` internet kataloğu tarayıcısını doğrudan terminalde çalıştıran IDE komutu eklendi.
+- **Pure TypeScript Beceriler Modülü (`src/skills.ts`)**: Sıfır bağımlılıkla YAML frontmatter ve markdown ayrıştırma yapan, SRP ve G1 sessiz hata kurallarına tam uyumlu beceri tarayıcı modülü geliştirildi.
+
+### Fixed & Stabilized
+- **Webview ServiceWorker InvalidStateError Çözümü**:
+  - Webview gizli veya pasif durumdayken (`!this._view.visible`) her 1.5 saniyede bir arayüzün yeniden çizilerek Electron/Chromium Service Worker durumunu bozması engellendi.
+  - `_lastHtml` önbellekleme mekanizması eklendi; HTML yalnızca içerik değiştiğinde DOM'a aktarılır, gereksiz iframe yeniden yüklemeleri ve servis çalışanı çökmeleri tamamen önlendi.
+  - Görünürlük dinleyicisi (`onDidChangeVisibility`) ve kaynak temizleme (`onDidDispose`) entegre edildi.
+  - Güvenli CSP (`Content-Security-Policy`) meta başlığı webview yapısına eklendi.
+
 ## [1.4.1] - 2026-10-10
 
 ### Fixed & Hardened (Audit, Reliability & Metrics Precision)

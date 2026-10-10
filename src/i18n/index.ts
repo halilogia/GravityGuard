@@ -12,7 +12,8 @@ export const resources = {
         live: 'Canlı',
         obligations: 'Yükümlülükler',
         rules: 'Kurallar',
-        insights: 'Analiz'
+        insights: 'Analiz',
+        skills: 'Beceriler'
       },
       current: {
         title: 'SON İŞLEM',
@@ -205,6 +206,19 @@ export const resources = {
       events: {
         noEvents: 'Henüz kaydedilmiş güvenlik olayı yok.',
         lastCheck: 'Son Kontrol'
+      },
+      skills: {
+        title: 'Ajan Becerileri & Yetenek Kataloğu',
+        subtitle: 'Ajanın kullanımına açık yerel ve global beceriler',
+        findSkillsBtn: 'Projeye Uygun Skill Bul',
+        findSkillsTooltip: 'skills.sh ve yerel becerileri projeye göre tara',
+        openSkillMd: 'SKILL.md Aç',
+        empty: 'Yüklü beceri bulunamadı.',
+        workspaceScope: 'Proje',
+        globalScope: 'Global',
+        pluginScope: 'Eklenti',
+        builtinScope: 'Yerleşik',
+        totalCount: 'Toplam {{count}} Beceri'
       }
     }
   },
@@ -218,7 +232,8 @@ export const resources = {
         live: 'Live',
         obligations: 'Obligations',
         rules: 'Rules',
-        insights: 'Insights'
+        insights: 'Insights',
+        skills: 'Skills'
       },
       current: {
         title: 'CURRENT ACTION',
@@ -411,6 +426,19 @@ export const resources = {
       events: {
         noEvents: 'No security events recorded yet.',
         lastCheck: 'Last Check'
+      },
+      skills: {
+        title: 'Agent Skills & Capability Catalog',
+        subtitle: 'Local and global skills available to the AI agent',
+        findSkillsBtn: 'Find Skills for Project',
+        findSkillsTooltip: 'Discover matching skills from skills.sh and local catalogs',
+        openSkillMd: 'Open SKILL.md',
+        empty: 'No skills discovered.',
+        workspaceScope: 'Workspace',
+        globalScope: 'Global',
+        pluginScope: 'Plugin',
+        builtinScope: 'Built-in',
+        totalCount: 'Total {{count}} Skills'
       }
     }
   }
