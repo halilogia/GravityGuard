@@ -89,7 +89,11 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   );
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider('antigravity-guardian-view', provider)
+    vscode.window.registerWebviewViewProvider('antigravity-guardian-view', provider, {
+      webviewOptions: {
+        retainContextWhenHidden: true
+      }
+    })
   );
 
   // 3. Register Commands
@@ -442,6 +446,15 @@ function escapeJs(str: string): string {
     .replace(/\r/g, '');
 }
 
+function getNonce(): string {
+  let text = '';
+  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  for (let i = 0; i < 32; i++) {
+    text += possible.charAt(Math.floor(Math.random() * possible.length));
+  }
+  return text;
+}
+
 class GuardianViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
   private _pollInterval?: NodeJS.Timeout;
@@ -465,7 +478,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.onDidChangeVisibility(() => {
       if (this._view?.visible) {
-        this.updateHtml();
+        this.updateHtml(true);
       }
     });
 
@@ -483,9 +496,11 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
         this.clearView();
       } else if (message.command === 'refresh') {
         this._lastHtml = '';
-        this.updateHtml();
+        this.updateHtml(true);
       } else if (message.command === 'setTab' && message.tab) {
         this._activeTab = message.tab;
+        this._lastHtml = '';
+        this.updateHtml(true);
       } else if (message.command === 'findSkills') {
         await vscode.commands.executeCommand('antigravityBridge.findSkills');
       } else if (message.command === 'toggleLanguage') {
@@ -498,7 +513,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
           this._onLanguageChanged();
         }
         this._lastHtml = '';
-        this.updateHtml();
+        this.updateHtml(true);
       } else if (message.command === 'openFile' && message.path) {
         try {
           const doc = await vscode.workspace.openTextDocument(message.path);
@@ -514,14 +529,14 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       }
     });
 
-    this.updateHtml();
+    this.updateHtml(true);
 
     // 1. Live File Watcher
     const logPath = path.join(os.homedir(), '.gemini', 'logs', 'srp_guardian_live.json');
     if (fs.existsSync(logPath)) {
       try {
         fs.watch(logPath, () => {
-          this.updateHtml();
+          this.updateHtml(false);
         });
       } catch (e) {
         console.error('Watch log error:', e);
@@ -533,7 +548,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       clearInterval(this._pollInterval);
     }
     this._pollInterval = setInterval(() => {
-      this.updateHtml();
+      this.updateHtml(false);
     }, 1500);
   }
 
@@ -551,7 +566,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       this._clearedAfterSeq = 0;
     }
     this._lastHtml = '';
-    this.updateHtml();
+    this.updateHtml(true);
     vscode.window.showInformationMessage(t('actions.clearedNotice'));
   }
 
@@ -559,8 +574,11 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
     this.clearView();
   }
 
-  public updateHtml(): void {
-    if (!this._view || !this._view.visible) {
+  public updateHtml(force: boolean = false): void {
+    if (!this._view) {
+      return;
+    }
+    if (!force && !this._view.visible) {
       return;
     }
 
@@ -1225,13 +1243,15 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       }
     }
 
+    const nonce = getNonce();
+
     // --- RENDER MAIN WEBVIEW HTML ---
     const htmlContent = `
       <!DOCTYPE html>
       <html lang="en">
       <head>
         <meta charset="UTF-8">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${this._view.webview.cspSource} 'unsafe-inline'; script-src ${this._view.webview.cspSource} 'unsafe-inline';">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${this._view.webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
         <style>
           :root {
             --bg-base: var(--vscode-editor-background, #0b1120);
@@ -1758,7 +1778,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
           ${skillsHtml}
         </div>
 
-        <script>
+        <script nonce="${nonce}">
           const vscode = acquireVsCodeApi();
           const savedState = vscode.getState() || {};
           let currentTab = savedState.currentTab || '${escapeJs(activeTab)}';

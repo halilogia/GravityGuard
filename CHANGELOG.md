@@ -5,6 +5,14 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.3] - 2026-10-10
+
+### Fixed & Hardened
+- **Webview `retainContextWhenHidden` ve Nonce CSP Standartlaştırması**:
+  - `registerWebviewViewProvider` kaydına `retainContextWhenHidden: true` seçeneği eklendi. Kullanıcı kenar çubuğunu kapattığında veya başka bir sekmeye geçtiğinde webview iframe'inin ve context'inin yok edilip tekrar kurulması önlendi; servis çalışanı yaşam döngüsü güvenceye alındı.
+  - İlk `resolveWebviewView` tetiklenmesinde HTML içeriğinin zorunlu (`force: true`) doldurulması sağlandı; boş doküman üzerine servis çalışanı kaydolma yarış durumu (race condition) ortadan kaldırıldı.
+  - Güvenli `getNonce()` üreticisi ile CSP `script-src 'nonce-...'` ve `<script nonce="...">` standartlaştırması tamamlandı.
+
 ## [1.4.2] - 2026-10-10
 
 ### Added
