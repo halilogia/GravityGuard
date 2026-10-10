@@ -15,7 +15,7 @@ _ENGINE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ENGINE_DIR not in sys.path:
     sys.path.insert(0, _ENGINE_DIR)
 
-from gravityguard_engine.audit import log_event, _resolve_log_dir
+from gravityguard_engine.audit import log_event, _resolve_log_dir, redact_secrets, redact_record
 
 
 class TestAuditSubsystem(unittest.TestCase):
@@ -591,6 +591,116 @@ class TestAuditSubsystem(unittest.TestCase):
         self.assertEqual(live_rebuilt["lastAuditSeq"], 2)
         self.assertIn(expected_key, live_rebuilt["activeViolations"])
         self.assertEqual(live_rebuilt["effectiveness"]["totalBlocked"], 1)
+
+    def test_centralized_secret_redaction_formats(self):
+        """Verifies redaction of all major API keys, tokens, URIs, and private keys."""
+        # OpenAI key
+        fake_sk = "sk-" + "123456789012345678901234567890"
+        t1 = f"Key is {fake_sk} in config"
+        self.assertEqual(redact_secrets(t1), "Key is sk-***[REDACTED]*** in config")
+
+        # Anthropic key
+        fake_ant = "sk-ant-" + "api03-abcdef12345678901234567890"
+        t2 = f"Found {fake_ant} in header"
+        self.assertEqual(redact_secrets(t2), "Found sk-ant-***[REDACTED]*** in header")
+
+        # GitHub token
+        fake_gh = "ghp_" + "123456789012345678901234567890"
+        t3 = f"Auth token: {fake_gh}"
+        self.assertEqual(redact_secrets(t3), "Auth token: ghp_***[REDACTED]***")
+
+        # AWS Access Key
+        fake_aws = "AKIA" + "1234567890ABCDEF"
+        t4 = f"AWS key {fake_aws} detected"
+        self.assertEqual(redact_secrets(t4), "AWS key AKIA***[REDACTED]*** detected")
+
+        # Bearer token
+        t5 = "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xyz123"
+        self.assertIn("Bearer ***[REDACTED]***", redact_secrets(t5))
+
+        # URI basic auth
+        t6 = "Connect to postgres://myuser:super_secret_pw@localhost:5432/mydb"
+        self.assertEqual(redact_secrets(t6), "Connect to postgres://myuser:***@localhost:5432/mydb")
+
+        # Generic key-value secret
+        t7 = "api_key='secret_key_12345678'"
+        self.assertIn("api_key='***[REDACTED]***", redact_secrets(t7))
+
+        # Private key block
+        t8 = "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----"
+        self.assertEqual(redact_secrets(t8), "[REDACTED_PRIVATE_KEY]")
+
+        # Nested record redaction
+        rec = {
+            "reason": fake_sk,
+            "metadata": [fake_gh, {"uri": "https://admin:pass123@api.com"}],
+            "count": 42
+        }
+        scrubbed = redact_record(rec)
+        self.assertEqual(scrubbed["reason"], "sk-***[REDACTED]***")
+        self.assertEqual(scrubbed["metadata"][0], "ghp_***[REDACTED]***")
+        self.assertEqual(scrubbed["metadata"][1]["uri"], "https://admin:***@api.com")
+        self.assertEqual(scrubbed["count"], 42)
+
+    def test_log_event_redacts_secrets_in_live_and_permanent_logs(self):
+        """Ensures secrets passed in reason, target, or metadata never leak into disk files."""
+        target = "src/secret_test.py"
+        fake_sk = "sk-" + "123456789012345678901234567890"
+        secret_reason = f"Found OpenAI key {fake_sk} in source"
+        eid = log_event("write", "BLOCKED", target, secret_reason, rule_id="G0_SECRET_LEAK")
+
+        # 1. Check live projection
+        live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
+        with open(live_path, "r", encoding="utf-8") as lf:
+            live = json.load(lf)
+        live_event = live["events"][0]
+        self.assertNotIn(fake_sk, live_event["reason"])
+        self.assertIn("sk-***[REDACTED]***", live_event["reason"])
+
+        # 2. Check permanent JSONL log
+        perm_path = os.path.join(self.test_dir, "gravityguard_permanent_audit.jsonl")
+        with open(perm_path, "r", encoding="utf-8") as pf:
+            content = pf.read()
+        self.assertNotIn(fake_sk, content)
+        self.assertIn("sk-***[REDACTED]***", content)
+
+    def test_lock_timeout_buffers_to_fallback_spool_and_drains_seamlessly(self):
+        """Verifies zero-drop audit guarantee: events buffered during lock timeouts are fully recovered."""
+        from unittest.mock import patch
+        from gravityguard_engine.state_lock import StateLock
+        target = "src/spool_test.py"
+
+        # 1. Simulate lock contention timeout
+        with patch.object(StateLock, "acquire", return_value=False):
+            spool_eid = log_event("write", "BLOCKED", target, "spooled lock timeout event", rule_id="G1_SILENT_EXCEPTION")
+            self.assertTrue(spool_eid.startswith("evt_"))
+
+        # Spool file should contain the buffered event
+        spool_path = os.path.join(self.test_dir, "gravityguard_audit_fallback.jsonl")
+        self.assertTrue(os.path.exists(spool_path))
+        with open(spool_path, "r", encoding="utf-8") as sf:
+            spooled_lines = [json.loads(l) for l in sf if l.strip()]
+        self.assertEqual(len(spooled_lines), 1)
+        self.assertEqual(spooled_lines[0]["eventId"], spool_eid)
+
+        # 2. On next regular event with lock acquired, the spool must be drained into permanent journal
+        next_eid = log_event("write", "APPROVED", target, "subsequent normal write", rule_id="PASS")
+
+        # Fallback spool should now be empty or removed
+        if os.path.exists(spool_path):
+            with open(spool_path, "r", encoding="utf-8") as sf:
+                self.assertEqual(sf.read().strip(), "")
+
+        # Permanent journal must contain BOTH the spooled event and the new event
+        perm_path = os.path.join(self.test_dir, "gravityguard_permanent_audit.jsonl")
+        with open(perm_path, "r", encoding="utf-8") as pf:
+            perm_events = [json.loads(l) for l in pf if l.strip()]
+
+        eids = [e["eventId"] for e in perm_events]
+        self.assertIn(spool_eid, eids)
+        self.assertIn(next_eid, eids)
+        self.assertEqual(perm_events[-2]["auditSeq"], 1)
+        self.assertEqual(perm_events[-1]["auditSeq"], 2)
 
 
 if __name__ == "__main__":

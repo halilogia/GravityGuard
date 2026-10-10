@@ -9,6 +9,7 @@ Zero external dependencies.
 """
 import json
 import os
+import re
 import sys
 import time
 import uuid
@@ -18,6 +19,74 @@ from typing import Optional, Dict, Any, List
 
 from .project_context import extract_project_info
 from .state_lock import StateLock
+
+
+# Centralized secret & sensitive credential redaction patterns
+_SECRET_PATTERNS = [
+    # Anthropic API keys (sk-ant-...) - more specific, must precede generic sk-
+    (re.compile(r"\b(sk-ant-[a-zA-Z0-9_\-]{20,})\b"), r"sk-ant-***[REDACTED]***"),
+    # OpenAI & generic sk- API keys (sk-...)
+    (re.compile(r"\b(sk-[a-zA-Z0-9_\-]{20,})\b"), r"sk-***[REDACTED]***"),
+    # GitHub Personal Access Tokens and OAuth tokens
+    (re.compile(r"\b((?:ghp|gho|ghu|ghs|ghr|github_pat)_[a-zA-Z0-9_]{20,})\b"), r"ghp_***[REDACTED]***"),
+    # AWS Access Key IDs
+    (re.compile(r"\b((?:AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16})\b"), r"AKIA***[REDACTED]***"),
+    # Bearer tokens
+    (re.compile(r"(?i)\b(bearer\s+)([a-zA-Z0-9_\-\.]{20,})\b"), r"\1***[REDACTED]***"),
+    # URL / URI basic auth credentials (user:password@)
+    (re.compile(r"://([^:\s]+):([^@\s]+)@"), r"://\1:***@"),
+    # Generic key-value credentials: api_key=..., password=..., secret=..., token=...
+    (re.compile(r"(?i)\b((?:api_?key|access_?token|auth_?token|secret_?key|password|passwd|private_?key)\s*[:=]\s*['\"]?)([a-zA-Z0-9_\-\.]{8,})(['\"]?)"), r"\1***[REDACTED]***\3"),
+    # RSA / OpenSSH / EC Private Keys
+    (re.compile(r"-----BEGIN [A-Z ]+ PRIVATE KEY-----[\s\S]*?-----END [A-Z ]+ PRIVATE KEY-----"), r"[REDACTED_PRIVATE_KEY]"),
+]
+
+
+def redact_secrets(val: str) -> str:
+    """Scans and scrubs sensitive API keys, tokens, and credentials from a text string."""
+    if not isinstance(val, str) or not val:
+        return val
+    redacted = val
+    for pattern, replacement in _SECRET_PATTERNS:
+        redacted = pattern.sub(replacement, redacted)
+    return redacted
+
+
+def redact_record(record: Any) -> Any:
+    """Recursively redacts secrets across all string fields in a dictionary, list, or primitive."""
+    if isinstance(record, dict):
+        return {k: redact_record(v) for k, v in record.items()}
+    elif isinstance(record, list):
+        return [redact_record(item) for item in record]
+    elif isinstance(record, str):
+        return redact_secrets(record)
+    return record
+
+
+def _drain_fallback_spool(fallback_spool_path: str) -> List[Dict[str, Any]]:
+    """Drains and parses any events stored in the fallback spool during lock contention."""
+    if not os.path.exists(fallback_spool_path):
+        return []
+    spool_events: List[Dict[str, Any]] = []
+    try:
+        with open(fallback_spool_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped:
+                    try:
+                        spool_events.append(json.loads(stripped))
+                    except Exception:
+                        continue
+        # Truncate / remove spool once read
+        try:
+            os.remove(fallback_spool_path)
+        except OSError:
+            with open(fallback_spool_path, "w", encoding="utf-8") as f:
+                f.write("")
+    except Exception as e:
+        sys.stderr.write(f"[GravityGuard Spool Drain Error] {e}\n")
+    return spool_events
+
 
 
 def _resolve_log_dir() -> str:
@@ -452,6 +521,7 @@ def log_event(
         os.makedirs(log_dir, exist_ok=True)
         log_path = os.path.join(log_dir, "srp_guardian_live.json")
         permanent_log_path = os.path.join(log_dir, "gravityguard_permanent_audit.jsonl")
+        fallback_spool_path = os.path.join(log_dir, "gravityguard_audit_fallback.jsonl")
         audit_lock_path = Path(log_dir) / ".audit.lock"
 
         current_data: Dict[str, Any] = {
@@ -482,12 +552,44 @@ def log_event(
             sys.stderr.write(f"[GravityGuard Audit Lock Warning] {lock_err}\n")
 
         if not lock_acquired:
-            sys.stderr.write(f"[GravityGuard Audit Lock Timeout] Could not acquire audit lock for {log_path}\n")
+            sys.stderr.write(f"[GravityGuard Audit Lock Timeout] Could not acquire audit lock for {log_path}; buffering event in fallback spool to prevent data loss\n")
+            try:
+                proj_name, proj_root = extract_project_info(target_file)
+                ext = os.path.splitext(target_file)[1].lower() if target_file else ""
+                model_id = os.environ.get("ANTIGRAVITY_MODEL", os.environ.get("MODEL_NAME", "unknown"))
+                spool_event = {
+                    "auditSeq": -1,
+                    "eventId": event_id,
+                    "timestamp": now_iso,
+                    "action": action,
+                    "status": status,
+                    "ruleId": rule_id,
+                    "resolvedRuleId": resolved_rule_id,
+                    "target": target_file,
+                    "project": proj_name,
+                    "projectRoot": proj_root,
+                    "fileExt": ext,
+                    "conversationId": conv_id,
+                    "model": model_id,
+                    "reason": reason,
+                    "outcome": outcome or status,
+                    "parentViolationId": None,
+                    "recoveryAttempts": 1,
+                    "resolutionMs": None
+                }
+                spool_event = redact_record(spool_event)
+                with open(fallback_spool_path, "a", encoding="utf-8") as sf:
+                    sf.write(json.dumps(spool_event, ensure_ascii=False) + "\n")
+                    sf.flush()
+            except Exception as spool_err:
+                sys.stderr.write(f"[GravityGuard Audit Spool Error] {spool_err}\n")
             return event_id
 
         try:
             # Repair torn tail if prior process crashed during WAL write
             _repair_journal_tail(permanent_log_path)
+            # Drain fallback spool events if any accumulated during prior lock timeouts
+            spooled_events = _drain_fallback_spool(fallback_spool_path)
 
             current_data = None
             if os.path.exists(log_path):
@@ -648,6 +750,40 @@ def log_event(
 
             # Monotonic sequence numbering for Write-Ahead Journaling
             journal_seq = current_data.get("lastAuditSeq", 0)
+
+            # Replay any fallback spool events that were buffered during previous lock timeouts
+            for sp_ev in spooled_events:
+                journal_seq += 1
+                sp_ev["auditSeq"] = journal_seq
+                sp_redacted = redact_record(sp_ev)
+                try:
+                    with open(permanent_log_path, "a", encoding="utf-8") as af:
+                        af.write(json.dumps(sp_redacted, ensure_ascii=False) + "\n")
+                        af.flush()
+                except Exception as spool_write_err:
+                    sys.stderr.write(f"[GravityGuard Spool Replay Write Error] {spool_write_err}\n")
+                sp_live = {
+                    "eventId": sp_ev.get("eventId"),
+                    "auditSeq": journal_seq,
+                    "timestamp": sp_ev.get("timestamp"),
+                    "action": sp_ev.get("action"),
+                    "status": sp_ev.get("status"),
+                    "ruleId": sp_ev.get("ruleId"),
+                    "resolvedRuleId": sp_ev.get("resolvedRuleId"),
+                    "target": sp_ev.get("target"),
+                    "reason": sp_ev.get("reason"),
+                    "outcome": sp_ev.get("outcome"),
+                    "parentViolationId": sp_ev.get("parentViolationId"),
+                    "recoveryAttempts": sp_ev.get("recoveryAttempts"),
+                    "resolutionMs": sp_ev.get("resolutionMs"),
+                }
+                ev_list = current_data.get("events", [])
+                if not isinstance(ev_list, list):
+                    ev_list = []
+                    current_data["events"] = ev_list
+                ev_list.insert(0, redact_record(sp_live))
+
+            current_data["lastAuditSeq"] = journal_seq
             next_seq = journal_seq + 1
 
             event = {
@@ -722,20 +858,37 @@ def log_event(
             final_audit_seq = curr_extra_seq
             is_durable = _is_durable_mode()
 
+            # Centralized Secret Redaction: scrub all records before writing
+            event = redact_record(event)
+            telemetry_event = redact_record(telemetry_event)
+            extra_recovery_events = [redact_record(x) for x in extra_recovery_events]
+            extra_telemetry_events = [redact_record(x) for x in extra_telemetry_events]
+
             # ---------------------------------------------------------
             # 1. WRITE-AHEAD LOGGING (JOURNAL FIRST)
             # Permanent audit stream is canonical source of truth.
             # ---------------------------------------------------------
-            with open(permanent_log_path, "a", encoding="utf-8") as af:
-                af.write(json.dumps(telemetry_event, ensure_ascii=False) + "\n")
-                for add_tel in extra_telemetry_events:
-                    af.write(json.dumps(add_tel, ensure_ascii=False) + "\n")
-                af.flush()
-                if is_durable:
-                    try:
-                        os.fsync(af.fileno())
-                    except (OSError, AttributeError) as sync_err:
-                        sys.stderr.write(f"[GravityGuard Durability Sync Warning] {sync_err}\n")
+            try:
+                with open(permanent_log_path, "a", encoding="utf-8") as af:
+                    af.write(json.dumps(telemetry_event, ensure_ascii=False) + "\n")
+                    for add_tel in extra_telemetry_events:
+                        af.write(json.dumps(add_tel, ensure_ascii=False) + "\n")
+                    af.flush()
+                    if is_durable:
+                        try:
+                            os.fsync(af.fileno())
+                        except (OSError, AttributeError) as sync_err:
+                            sys.stderr.write(f"[GravityGuard Durability Sync Warning] {sync_err}\n")
+            except OSError as perm_err:
+                sys.stderr.write(f"[GravityGuard Permanent Journal Error] {perm_err}; buffering to fallback spool\n")
+                try:
+                    with open(fallback_spool_path, "a", encoding="utf-8") as sf:
+                        sf.write(json.dumps(telemetry_event, ensure_ascii=False) + "\n")
+                        for add_tel in extra_telemetry_events:
+                            sf.write(json.dumps(add_tel, ensure_ascii=False) + "\n")
+                        sf.flush()
+                except Exception as spool_err:
+                    sys.stderr.write(f"[GravityGuard Emergency Spool Write Error] {spool_err}\n")
 
             # ---------------------------------------------------------
             # 2. UPDATE LIVE PROJECTION STATE

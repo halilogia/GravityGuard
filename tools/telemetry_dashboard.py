@@ -1,26 +1,55 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 ============================================================================
-GRAVITYGUARD TELEMETRY ANALYTICS DASHBOARD
+GRAVITYGUARD TELEMETRY ANALYTICS & AUDIT DASHBOARD
 ============================================================================
-Reads `gravityguard_permanent_audit.jsonl` and aggregates security metrics,
-violation distributions, project heatmaps, and adversarial bypass telemetry.
+Streaming analytics, multi-source log aggregation, weekly/monthly trend deltas,
+zero-memory bloat JSONL processing, log rotation, and rule candidates.
+Zero external dependencies.
 """
+from __future__ import annotations
 
-import os
-import sys
-import json
+import argparse
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+import json
+import os
 from pathlib import Path
+import shutil
+import sys
+from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple
 
-if hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 
-def resolve_permanent_log_path() -> str:
-    """Finds the permanent audit JSONL file dynamically."""
-    override = os.environ.get("GRAVITYGUARD_LOG_DIR", "").strip()
+def parse_iso_datetime(ts_str: str) -> Optional[datetime]:
+    """Parses various ISO timestamp formats safely into a datetime object."""
+    if not ts_str or not isinstance(ts_str, str):
+        return None
+    cleaned = ts_str.strip().replace("Z", "+00:00")
+    if len(cleaned) == 10 and cleaned.count("-") == 2:
+        try:
+            return datetime.fromisoformat(cleaned).replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            return None
+    try:
+        dt = datetime.fromisoformat(cleaned)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (ValueError, TypeError):
+        try:
+            dt = datetime.strptime(cleaned[:19], "%Y-%m-%dT%H:%M:%S")
+            return dt.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            return None
+
+
+def resolve_default_permanent_log_path() -> str:
+    """Finds the default active permanent audit JSONL file dynamically."""
+    override = os.environ.get("GRAVITYGUARD_LOG_DIR", "").strip() or os.environ.get("GRAVITYGUARD_AUDIT_DIR", "").strip()
     if override:
         p = Path(override) / "gravityguard_permanent_audit.jsonl"
         if p.is_file():
@@ -34,7 +63,6 @@ def resolve_permanent_log_path() -> str:
     if user_log.is_file():
         return str(user_log)
 
-    # Relative to this script's repository root
     repo_archive = Path(__file__).resolve().parent.parent / "archives" / "audit-logs" / "gravityguard_permanent_audit.jsonl"
     if repo_archive.is_file():
         return str(repo_archive)
@@ -42,23 +70,129 @@ def resolve_permanent_log_path() -> str:
     return str(user_log)
 
 
-def load_telemetry_events(log_path: str):
-    """Loads and parses JSONL records safely."""
-    events = []
-    if not os.path.exists(log_path):
-        return events
+def discover_all_log_paths(project_dir: Optional[str] = None, explicit_source: Optional[str] = None) -> List[Path]:
+    """
+    Discovers all accessible GravityGuard audit log sources:
+    - Explicit file or folder provided via CLI
+    - User Antigravity global logs (~/.gemini/logs)
+    - Claude Code / local project logs (.gravityguard/logs)
+    - Historical repository archives (archives/audit-logs)
+    """
+    found: List[Path] = []
+    seen: Set[str] = set()
 
-    with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
+    def add_if_exists(p: Path):
+        norm = str(p.resolve()) if p.exists() else str(p)
+        if p.is_file() and norm not in seen:
+            found.append(p)
+            seen.add(norm)
+        elif p.is_dir():
+            for sub in p.glob("**/*.jsonl"):
+                s_norm = str(sub.resolve())
+                if s_norm not in seen:
+                    found.append(sub)
+                    seen.add(s_norm)
+
+    if explicit_source:
+        add_if_exists(Path(explicit_source))
+
+    # Env overrides
+    for env_var in ("GRAVITYGUARD_LOG_DIR", "GRAVITYGUARD_AUDIT_DIR"):
+        v = os.environ.get(env_var, "").strip()
+        if v:
+            add_if_exists(Path(v))
+
+    # Global user locations
+    add_if_exists(Path(os.path.expanduser("~/.gemini/logs/gravityguard_permanent_audit.jsonl")))
+    add_if_exists(Path(os.path.expanduser("~/.gemini/logs/gravityguard/gravityguard_permanent_audit.jsonl")))
+
+    # Project-local locations (e.g. Claude Code or repo root)
+    if project_dir:
+        add_if_exists(Path(project_dir) / ".gravityguard" / "logs" / "gravityguard_permanent_audit.jsonl")
+    curr_proj = Path.cwd() / ".gravityguard" / "logs" / "gravityguard_permanent_audit.jsonl"
+    add_if_exists(curr_proj)
+
+    # Repository archive directory
+    repo_root = Path(__file__).resolve().parent.parent
+    archive_dir = repo_root / "archives" / "audit-logs"
+    if archive_dir.is_dir():
+        for af in archive_dir.glob("*.jsonl"):
+            add_if_exists(af)
+
+    return found
+
+
+class LogStreamReader:
+    """Streams JSONL records without holding the entire corpus in memory."""
+
+    def __init__(self, paths: List[Path]):
+        self.paths = [p for p in paths if p.is_file()]
+        self.corrupted_lines_count = 0
+        self.total_lines_scanned = 0
+
+    def stream_events(
+        self,
+        since_dt: Optional[datetime] = None,
+        until_dt: Optional[datetime] = None,
+        project_filter: Optional[str] = None,
+        rule_filter: Optional[str] = None,
+        status_filter: Optional[str] = None,
+    ) -> Generator[Dict[str, Any], None, None]:
+        seen_keys: Set[str] = set()
+
+        for path in self.paths:
             try:
-                events.append(json.loads(line))
-            except Exception as e:
-                # Malformed telemetry line, skip
-                continue
-    return events
+                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        self.total_lines_scanned += 1
+                        stripped = line.strip()
+                        if not stripped:
+                            continue
+                        try:
+                            ev = json.loads(stripped)
+                        except Exception:
+                            self.corrupted_lines_count += 1
+                            continue
+
+                        if not isinstance(ev, dict):
+                            self.corrupted_lines_count += 1
+                            continue
+
+                        # Deduplicate across merged files (composite key)
+                        eid = ev.get("eventId")
+                        ts = ev.get("timestamp")
+                        seq = ev.get("auditSeq")
+                        dedup_key = f"{eid}::{ts}::{seq}" if eid else f"{ts}::{seq}"
+                        if dedup_key in seen_keys:
+                            continue
+                        seen_keys.add(dedup_key)
+
+                        # Filter by timestamp window
+                        ev_dt = parse_iso_datetime(ev.get("timestamp", ""))
+                        if since_dt and ev_dt and ev_dt < since_dt:
+                            continue
+                        if until_dt and ev_dt and ev_dt > until_dt:
+                            continue
+
+                        # Filter by project
+                        if project_filter:
+                            p_name = (ev.get("project") or "").lower()
+                            if project_filter.lower() not in p_name:
+                                continue
+
+                        # Filter by rule
+                        if rule_filter:
+                            r_name = ev.get("ruleId") or ev.get("resolvedRuleId") or ""
+                            if rule_filter.lower() not in r_name.lower():
+                                continue
+
+                        # Filter by status
+                        if status_filter and ev.get("status") != status_filter:
+                            continue
+
+                        yield ev
+            except Exception as read_err:
+                sys.stderr.write(f"[GravityGuard Log Read Error: {path}] {read_err}\n")
 
 
 def format_bar(val: int, max_val: int, width: int = 24) -> str:
@@ -68,48 +202,97 @@ def format_bar(val: int, max_val: int, width: int = 24) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
-def render_effectiveness_analytics(events):
-    """
-    Renders deep effectiveness metrics, causal recovery rates,
-    friction delta (retries), and noise index analysis.
-    """
+class AggregatedMetrics:
+    """Aggregates metrics for a given stream of events."""
+
+    def __init__(self, events: List[Dict[str, Any]], label: str = "Tüm Zamanlar"):
+        self.label = label
+        self.events = events
+        self.total = len(events)
+        self.status_counts = Counter(e.get("status", "UNKNOWN") for e in events)
+        self.rule_counts = Counter(e.get("ruleId", "UNKNOWN") for e in events)
+        self.project_counts = Counter(e.get("project") or "Diğer / Bilinmeyen" for e in events)
+        self.ext_counts = Counter(e.get("fileExt") or "(Uzantısız)" for e in events)
+
+        self.blocked_events = [e for e in events if e.get("status") == "BLOCKED" and e.get("outcome") != "REPEATED_VIOLATION"]
+        self.recovered_events = [e for e in events if e.get("outcome") == "RECOVERED"]
+        self.repeated_events = [e for e in events if e.get("outcome") == "REPEATED_VIOLATION"]
+        self.shadow_events = [e for e in events if e.get("status") == "SHADOW_TRIGGER"]
+        self.warning_events = [e for e in events if e.get("status") == "WARNING"]
+        self.approved_events = [e for e in events if e.get("status") == "APPROVED"]
+
+        self.total_blocked = len(self.blocked_events)
+        self.total_recovered = len(self.recovered_events)
+        self.recovery_rate = (self.total_recovered / self.total_blocked * 100) if self.total_blocked > 0 else 100.0
+
+        attempts_list = [e.get("recoveryAttempts", 1) for e in self.recovered_events if isinstance(e.get("recoveryAttempts"), (int, float))]
+        self.median_attempts = sorted(attempts_list)[len(attempts_list) // 2] if attempts_list else 1.0
+
+        durations_ms = [e.get("resolutionMs") for e in self.recovered_events if isinstance(e.get("resolutionMs"), (int, float))]
+        self.avg_duration_s = (sum(durations_ms) / len(durations_ms) / 1000) if durations_ms else 0.0
+
+        self.rule_blocked = Counter(e.get("ruleId", "UNKNOWN") for e in self.blocked_events)
+        self.rule_recovered = Counter((e.get("resolvedRuleId") or e.get("ruleId", "UNKNOWN")) for e in self.recovered_events)
+        self.shadow_rules = Counter(e.get("ruleId", "UNKNOWN") for e in self.shadow_events)
+        self.warn_rules = Counter(e.get("ruleId", "UNKNOWN") for e in self.warning_events)
+
+
+def render_period_comparison(curr: AggregatedMetrics, prev: AggregatedMetrics):
+    """Renders a comparative view between the current period and previous period."""
+    print("\n📅 DÖNEMSEL TREND VE GELİŞİM KARŞILAŞTIRMASI (Period-over-Period Delta)")
+    print("-" * 80)
+    print(f"  Dönemler : [Şu An: {curr.label}] vs [Önceki: {prev.label}]")
+    print("  " + "-" * 78)
+
+    def calc_delta(c_val: float, p_val: float) -> str:
+        if p_val == 0:
+            return f"+{c_val:.0f} (Yeni)" if c_val > 0 else "0.0"
+        diff = c_val - p_val
+        pct = (diff / p_val) * 100
+        sign = "+" if pct >= 0 else ""
+        return f"{sign}{pct:.1f}% ({c_val} vs {p_val})"
+
+    print(f"  Toplam İşlem (Total Events)       : {calc_delta(curr.total, prev.total)}")
+    print(f"  Engellenenler (Blocked Violations): {calc_delta(curr.total_blocked, prev.total_blocked)}")
+    print(f"  Uyarılar (Warnings)               : {calc_delta(len(curr.warning_events), len(prev.warning_events))}")
+    print(f"  İyileşme Oranı (Recovery Rate)    : %{curr.recovery_rate:.1f} vs %{prev.recovery_rate:.1f} (Delta: {curr.recovery_rate - prev.recovery_rate:+.1f} puan)")
+
+    # Rules with notable changes
+    all_rules = set(curr.rule_counts.keys()) | set(prev.rule_counts.keys())
+    deltas = []
+    for r in all_rules:
+        c_cnt = curr.rule_counts.get(r, 0)
+        p_cnt = prev.rule_counts.get(r, 0)
+        if c_cnt > 0 or p_cnt > 0:
+            deltas.append((r, c_cnt, p_cnt, c_cnt - p_cnt))
+    deltas.sort(key=lambda x: abs(x[3]), reverse=True)
+
+    if deltas:
+        print("\n  🔍 EN ÇOK DEĞİŞİM GÖSTEREN KURALLAR:")
+        print(f"  {'Kural':<26} | {'Mevcut':<7} | {'Önceki':<7} | {'Değişim':<10}")
+        print("  " + "-" * 58)
+        for r, c, p, diff in deltas[:5]:
+            sign = "+" if diff >= 0 else ""
+            print(f"  {r:<26} | {c:>7} | {p:>7} | {sign}{diff:>8}")
+
+
+def render_effectiveness_analytics(m: AggregatedMetrics):
     print("\n🎯 ETKİNLİK VE AJAN KURTARMA ANALİZİ (EFFECTIVENESS ANALYTICS)")
     print("-" * 80)
+    print(f"  Toplam Engellenen İlk Müdahale (Blocked Root) : {m.total_blocked}")
+    print(f"  Ajan Tarafından Düzeltilen (Recovered)       : {m.total_recovered} (İyileşme Oranı: %{m.recovery_rate:.1f})")
+    print(f"  Medyan Düzeltme Denemesi (Friction Delta)     : {m.median_attempts} deneme")
+    if m.avg_duration_s > 0:
+        print(f"  Ortalama Çözümleme Süresi (Time-to-Resolve)  : {m.avg_duration_s:.1f} saniye")
 
-    blocked_events = [e for e in events if e.get("status") == "BLOCKED" and e.get("outcome") != "REPEATED_VIOLATION"]
-    recovered_events = [e for e in events if e.get("outcome") == "RECOVERED"]
-    repeated_events = [e for e in events if e.get("outcome") == "REPEATED_VIOLATION"]
-    shadow_events = [e for e in events if e.get("status") == "SHADOW_TRIGGER"]
-    warning_events = [e for e in events if e.get("status") == "WARNING"]
-
-    total_blocked = len(blocked_events)
-    total_recovered = len(recovered_events)
-    rec_rate = (total_recovered / total_blocked * 100) if total_blocked > 0 else 100.0
-
-    attempts_list = [e.get("recoveryAttempts", 1) for e in recovered_events if isinstance(e.get("recoveryAttempts"), (int, float))]
-    median_attempts = sorted(attempts_list)[len(attempts_list) // 2] if attempts_list else 1.0
-
-    durations_ms = [e.get("resolutionMs") for e in recovered_events if isinstance(e.get("resolutionMs"), (int, float))]
-    avg_duration_s = (sum(durations_ms) / len(durations_ms) / 1000) if durations_ms else 0.0
-
-    print(f"  Toplam Engellenen İlk Müdahale (Blocked Root) : {total_blocked}")
-    print(f"  Ajan Tarafından Düzeltilen (Recovered)       : {total_recovered} (İyileşme Oranı: %{rec_rate:.1f})")
-    print(f"  Medyan Düzeltme Denemesi (Friction Delta)     : {median_attempts} deneme")
-    if avg_duration_s > 0:
-        print(f"  Ortalama Çözümleme Süresi (Time-to-Resolve)  : {avg_duration_s:.1f} saniye")
-
-    # Rule-by-rule classification with resolvedRuleId recovery counter
-    rule_blocked = Counter(e.get("ruleId", "UNKNOWN") for e in blocked_events)
-    rule_recovered = Counter((e.get("resolvedRuleId") or e.get("ruleId", "UNKNOWN")) for e in recovered_events)
-
-    if rule_blocked:
+    if m.rule_blocked:
         print("\n  🛡️  KURAL BAZLI ETKİNLİK VE DEĞER TABLOSU:")
         print("  " + "-" * 82)
         print(f"  {'Kural':<24} | {'Engelleme':<9} | {'Kurtarma':<8} | {'Oran':<6} | {'Sınıf':<22}")
         print("  " + "-" * 82)
 
-        for rule, b_cnt in rule_blocked.most_common():
-            r_cnt = rule_recovered.get(rule, 0)
+        for rule, b_cnt in m.rule_blocked.most_common():
+            r_cnt = m.rule_recovered.get(rule, 0)
             rate = (r_cnt / b_cnt * 100) if b_cnt > 0 else 0.0
             if b_cnt < 10:
                 classification = f"⚪ YETERSİZ VERİ (n={b_cnt})"
@@ -124,11 +307,9 @@ def render_effectiveness_analytics(events):
             print(f"  {rule:<24} | {b_cnt:>9} | {r_cnt:>8} | %{rate:>4.1f} | {classification}")
 
     # Advisory Follow-up Rate (Temporal Action Proxy)
-    approved_events = [e for e in events if e.get("status") == "APPROVED"]
-    if warning_events:
-        warn_rules = Counter(e.get("ruleId", "UNKNOWN") for e in warning_events)
+    if m.warning_events:
         approved_map = defaultdict(list)
-        for ap in approved_events:
+        for ap in m.approved_events:
             cid = ap.get("conversationId", "default")
             tgt = (ap.get("target") or "").replace("\\", "/").lower()
             ts = ap.get("timestamp", "")
@@ -143,8 +324,8 @@ def render_effectiveness_analytics(events):
         print("  " + "-" * 82)
         print(f"  {'Kural':<24} | {'Uyarı':<6} | {'Takip Eden Onay':<15} | {'Takip Oranı':<11} | {'Durum':<18}")
         print("  " + "-" * 82)
-        for w_rule, w_cnt in warn_rules.most_common():
-            rule_warns = [w for w in warning_events if w.get("ruleId") == w_rule]
+        for w_rule, w_cnt in m.warn_rules.most_common():
+            rule_warns = [w for w in m.warning_events if w.get("ruleId") == w_rule]
             heeded = 0
             for w in rule_warns:
                 cid = w.get("conversationId", "default")
@@ -167,71 +348,75 @@ def render_effectiveness_analytics(events):
             print(f"  {w_rule:<24} | {w_cnt:>6} | {heeded:>15} | %{action_rate:>9.1f} | {status_desc}")
 
     # Shadow Mode Observations
-    if shadow_events:
+    if m.shadow_events:
         print("\n  🧪 GÖLGE MODU GÖZLEMLERİ (Shadow Observation Mode):")
         print("  " + "-" * 82)
-        shadow_rules = Counter(e.get("ruleId", "UNKNOWN") for e in shadow_events)
-        for s_rule, s_cnt in shadow_rules.most_common():
+        for s_rule, s_cnt in m.shadow_rules.most_common():
             print(f"  • {s_rule:<24} : {s_cnt} sessiz gözlem (Ajan akışı kesintiye uğramadan ölçüldü)")
 
 
-def render_dashboard(events):
+def render_dashboard(
+    m: AggregatedMetrics,
+    sources: List[Path],
+    corrupt_lines: int = 0,
+    prev_m: Optional[AggregatedMetrics] = None,
+):
     print("=" * 80)
     print("           GRAVITYGUARD GÜVENLİK VE MİMARİ TELEMETRİ MERKEZİ            ")
+    print(f"           Rapor Dönemi: {m.label}")
     print("=" * 80)
 
-    if not events:
-        print("\n[!] Henüz telemetri kaydı bulunamadı. Gardiyan aktif olarak çalışmaya başladıkça")
-        print("    tüm hook çağrıları 'gravityguard_permanent_audit.jsonl' dosyasına işlenecektir.\n")
+    if corrupt_lines > 0:
+        print(f"⚠️  DİKKAT: {corrupt_lines} bozuk/geçersiz JSONL satırı filtrelendi.")
+
+    if not m.events:
+        print("\n[!] Seçilen dönem veya filtrelerde telemetri kaydı bulunamadı.\n")
         print("=" * 80)
         return
 
-    total = len(events)
-    status_counts = Counter(e.get("status", "UNKNOWN") for e in events)
-    rule_counts = Counter(e.get("ruleId", "UNKNOWN") for e in events)
-    project_counts = Counter(e.get("project") or "Diğer / Bilinmeyen" for e in events)
-    ext_counts = Counter(e.get("fileExt") or "(Uzantısız)" for e in events)
+    blocked = m.status_counts.get("BLOCKED", 0)
+    warnings = m.status_counts.get("WARNING", 0)
+    approved = m.status_counts.get("APPROVED", 0)
 
-    blocked = status_counts.get("BLOCKED", 0)
-    warnings = status_counts.get("WARNING", 0)
-    approved = status_counts.get("APPROVED", 0)
-
-    print(f"\n📊 GENEL ÖZET (Toplam Denetlenen İşlem: {total})")
+    print(f"\n📊 GENEL ÖZET (Toplam Denetlenen İşlem: {m.total})")
     print("-" * 80)
-    print(f"  ✅ ONAYLANAN (APPROVED)  : {approved:<5} %{(approved / total * 100):.1f}")
-    print(f"  🛑 ENGELLENEN (BLOCKED)  : {blocked:<5} %{(blocked / total * 100):.1f}")
-    print(f"  ⚠️  UYARI ALAN (WARNING)  : {warnings:<5} %{(warnings / total * 100):.1f}")
+    print(f"  ✅ ONAYLANAN (APPROVED)  : {approved:<5} %{(approved / m.total * 100):.1f}")
+    print(f"  🛑 ENGELLENEN (BLOCKED)  : {blocked:<5} %{(blocked / m.total * 100):.1f}")
+    print(f"  ⚠️  UYARI ALAN (WARNING)  : {warnings:<5} %{(warnings / m.total * 100):.1f}")
 
-    render_effectiveness_analytics(events)
+    if prev_m:
+        render_period_comparison(m, prev_m)
+
+    render_effectiveness_analytics(m)
 
     print("\n🛡️  KURAL BAZLI İHLAL VE GÜVENLİK DAĞILIMI (Top Rules)")
     print("-" * 80)
-    top_rules = rule_counts.most_common(12)
+    top_rules = m.rule_counts.most_common(12)
     max_rule_cnt = top_rules[0][1] if top_rules else 1
     for rule, cnt in top_rules:
-        pct = (cnt / total) * 100
+        pct = (cnt / m.total) * 100
         bar = format_bar(cnt, max_rule_cnt, width=20)
         status_tag = "🛑" if "BLOCK" in rule or rule in {"G0_SECRET_LEAK", "G1_SILENT_EXCEPTION", "G2_TEST_INTEGRITY", "G2_SECURITY_TAMPERING", "G4_IMPORT_MATRIX", "SRP_BOUNDARY"} else "⚠️"
         print(f"  {status_tag} {rule:<25} | {cnt:>4} adet ({pct:>5.1f}%) | {bar}")
 
     print("\n📁 PROJE DAĞILIMI (Ajanın En Çok Kod Yazdığı Projeler)")
     print("-" * 80)
-    top_projects = project_counts.most_common(8)
+    top_projects = m.project_counts.most_common(8)
     max_proj_cnt = top_projects[0][1] if top_projects else 1
     for proj, cnt in top_projects:
-        pct = (cnt / total) * 100
+        pct = (cnt / m.total) * 100
         bar = format_bar(cnt, max_proj_cnt, width=16)
         print(f"  📦 {proj:<24} | {cnt:>4} işlem (%{pct:>4.1f}) | {bar}")
 
     print("\n📝 DOSYA TÜRÜ DAĞILIMI")
     print("-" * 80)
-    for ext, cnt in ext_counts.most_common(6):
-        pct = (cnt / total) * 100
+    for ext, cnt in m.ext_counts.most_common(6):
+        pct = (cnt / m.total) * 100
         print(f"  📄 {ext:<12} : {cnt:>4} (%{pct:>4.1f})")
 
     print("\n🚨 SON 5 GÜVENLİK / MİMARİ MÜDAHALESİ (Canlı Hadiseler)")
     print("-" * 80)
-    blocked_or_warned = [e for e in reversed(events) if e.get("status") in ("BLOCKED", "WARNING")][:5]
+    blocked_or_warned = [e for e in reversed(m.events) if e.get("status") in ("BLOCKED", "WARNING")][:5]
     if not blocked_or_warned:
         print("  [✓] Yakın zamanda engellenen veya uyarılan işlem yok.")
     else:
@@ -248,28 +433,26 @@ def render_dashboard(events):
             print(f"     Neden: {reason}")
 
     print("=" * 80)
-    print("Log Kaynağı: " + resolve_permanent_log_path())
+    src_display = ", ".join(str(s) for s in sources[:3])
+    if len(sources) > 3:
+        src_display += f" (+{len(sources) - 3} kaynak)"
+    print(f"Log Kaynağı ({len(sources)} adet): {src_display}")
     print("=" * 80)
 
 
-def render_rule_candidates(events):
+def render_rule_candidates(m: AggregatedMetrics):
     print("=" * 80)
     print("      GRAVITYGUARD KURAL ADAYLARI & ÖĞRENME DEFTERİ (Learning Ledger)    ")
+    print(f"      Dönem: {m.label}")
     print("=" * 80)
 
-    if not events:
-        print("\n[!] Yeterli telemetri verisi bulunamadı.\n")
-        print("=" * 80)
-        return
-
-    violations = [e for e in events if e.get("status") in ("BLOCKED", "WARNING")]
+    violations = [e for e in m.events if e.get("status") in ("BLOCKED", "WARNING")]
     if not violations:
-        print("\n[✓] Telemetri verilerinde henüz ihlal veya uyarı kaydı yok.")
+        print("\n[✓] Telemetri verilerinde bu dönemde ihlal veya uyarı kaydı yok.")
         print("    Mevcut politikalar sistemle tam uyumlu çalışıyor.\n")
         print("=" * 80)
         return
 
-    total_events = len(events)
     total_violations = len(violations)
     rule_counter = Counter(e.get("ruleId") for e in violations)
     rule_targets = defaultdict(list)
@@ -345,7 +528,7 @@ def render_rule_candidates(events):
             "session_count": len(g1_sess),
             "targets": [t[0] for t in targets],
             "diagnosis": f"Ajanın sessiz hata yutma (except: pass / catch {{}}) teşebbüsleri engellendi ({len(g1_sess)} oturum).",
-            "recommendation": "Ajan promptunda hata yakalama disiplinini (#kodla direktifi) vurgulayın veya loglama zorunluluğu getirin."
+            "recommendation": "Ajan promptunda hata yakalama disiplinini vurgulayın veya loglama zorunluluğu getirin."
         })
 
     # 5. G2 Tampering Analysis
@@ -360,7 +543,7 @@ def render_rule_candidates(events):
             "session_count": len(g2_sess),
             "targets": [t[0] for t in Counter(rule_targets.get("G2_SECURITY_TAMPERING", []) + rule_targets.get("G2_TEST_INTEGRITY", [])).most_common(3)],
             "diagnosis": f"Test silme, test atlatma veya escape-hatch enjeksiyon denemesi tespit edildi ({len(g2_sess)} oturum).",
-            "recommendation": "Kural atlatma denemelerine karşı red-teaming denetimini sıkılaştırın ve prompt kurallarını güncelleyin."
+            "recommendation": "Kural atlatma denemelerine karşı denetimi sıkılaştırın ve prompt kurallarını güncelleyin."
         })
 
     print(f"\n📋 BULUNAN KURAL ADAYLARI ({len(candidates)} Öneri - Eşik: >= {MIN_THRESHOLD} ihlal)")
@@ -378,13 +561,242 @@ def render_rule_candidates(events):
     print("=" * 80)
 
 
+def export_markdown_report(m: AggregatedMetrics, out_path: str, prev_m: Optional[AggregatedMetrics] = None):
+    """Exports structured markdown report for documentation and team digests."""
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        f"# 🛡️ GravityGuard Telemetri ve Denetim Raporu",
+        f"",
+        f"- **Rapor Dönemi**: {m.label}",
+        f"- **Oluşturulma Tarihi**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"- **Toplam Denetlenen İşlem**: {m.total}",
+        f"",
+        f"## 📊 Genel Metrikler",
+        f"",
+        f"| Durum | Adet | Oran |",
+        f"| :--- | :--- | :--- |",
+    ]
+    if m.total > 0:
+        app_cnt = m.status_counts.get('APPROVED', 0)
+        blk_cnt = m.status_counts.get('BLOCKED', 0)
+        wrn_cnt = m.status_counts.get('WARNING', 0)
+        lines.append(f"| ✅ Onaylanan (APPROVED) | {app_cnt} | %{(app_cnt / m.total * 100):.1f} |")
+        lines.append(f"| 🛑 Engellenen (BLOCKED) | {blk_cnt} | %{(blk_cnt / m.total * 100):.1f} |")
+        lines.append(f"| ⚠️ Uyarı Alan (WARNING) | {wrn_cnt} | %{(wrn_cnt / m.total * 100):.1f} |")
+
+    lines.extend([
+        f"",
+        f"## 🎯 Etkinlik ve Kurtarma",
+        f"",
+        f"- **Engellenen Kök İhlaller**: {m.total_blocked}",
+        f"- **Ajan Tarafından Düzeltilen**: {m.total_recovered} (İyileşme Oranı: %{m.recovery_rate:.1f})",
+        f"- **Medyan Düzeltme Denemesi**: {m.median_attempts}",
+        f"- **Ortalama Çözüm Süresi**: {m.avg_duration_s:.1f} sn",
+        f"",
+    ])
+
+    if m.rule_blocked:
+        lines.extend([
+            f"### Kural Bazlı Engelleme ve İyileşme",
+            f"",
+            f"| Kural | Engelleme | Kurtarma | Oran |",
+            f"| :--- | :--- | :--- | :--- |",
+        ])
+        for r, b in m.rule_blocked.most_common():
+            rec = m.rule_recovered.get(r, 0)
+            rate = (rec / b * 100) if b > 0 else 0.0
+            lines.append(f"| `{r}` | {b} | {rec} | %{rate:.1f} |")
+        lines.append("")
+
+    if prev_m:
+        lines.extend([
+            f"## 📅 Dönemsel Karşılaştırma",
+            f"",
+            f"- **Önceki Dönem**: {prev_m.label}",
+            f"- **Olay Sayısı Değişimi**: {m.total} vs {prev_m.total}",
+            f"- **Engelleme Oranı Değişimi**: %{m.recovery_rate:.1f} vs %{prev_m.recovery_rate:.1f}",
+            f"",
+        ])
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    print(f"✅ Markdown raporu kaydedildi: {out_path}")
+
+
+def export_json_report(m: AggregatedMetrics, out_path: str):
+    """Exports structured machine-readable JSON metrics."""
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "reportPeriod": m.label,
+        "generatedAt": datetime.now().isoformat(),
+        "totalEvents": m.total,
+        "statusCounts": dict(m.status_counts),
+        "ruleCounts": dict(m.rule_counts),
+        "projectCounts": dict(m.project_counts),
+        "fileExtCounts": dict(m.ext_counts),
+        "effectiveness": {
+            "totalBlocked": m.total_blocked,
+            "totalRecovered": m.total_recovered,
+            "recoveryRate": m.recovery_rate,
+            "medianAttempts": m.median_attempts,
+            "avgDurationSeconds": m.avg_duration_s,
+            "ruleBlocked": dict(m.rule_blocked),
+            "ruleRecovered": dict(m.rule_recovered),
+        },
+        "shadowRules": dict(m.shadow_rules),
+        "warningRules": dict(m.warn_rules),
+    }
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+    print(f"✅ JSON raporu kaydedildi: {out_path}")
+
+
+def perform_log_rotation(threshold_mb: float = 10.0) -> None:
+    """
+    Checks active log file size and rotates to archives if it exceeds threshold.
+    Preserves active file availability while freeing active space.
+    """
+    active_path = Path(resolve_default_permanent_log_path())
+    if not active_path.is_file():
+        print(f"[i] Rotasyon yapılacak aktif log bulunamadı: {active_path}")
+        return
+
+    size_mb = active_path.stat().st_size / (1024 * 1024)
+    print(f"Aktif Log: {active_path} ({size_mb:.2f} MB - Eşik: {threshold_mb:.2f} MB)")
+
+    if size_mb < threshold_mb:
+        print(f"✅ Dosya boyutu eşik değerin ({threshold_mb:.1f} MB) altında. Rotasyona gerek yok.")
+        return
+
+    archive_dir = Path(__file__).resolve().parent.parent / "archives" / "audit-logs"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    archive_name = f"gravityguard_permanent_audit_{timestamp}.jsonl"
+    target_archive = archive_dir / archive_name
+
+    # Copy to archive, then truncate active file
+    shutil.copy2(active_path, target_archive)
+    with open(active_path, "w", encoding="utf-8") as f:
+        f.write("")
+
+    print(f"🎉 Rotasyon başarıyla tamamlandı:")
+    print(f"   Arşivlenen dosya: {target_archive} ({size_mb:.2f} MB)")
+    print(f"   Aktif dosya sıfırlandı: {active_path}")
+
+
 def main():
-    log_path = resolve_permanent_log_path()
-    events = load_telemetry_events(log_path)
-    if "--candidates" in sys.argv:
-        render_rule_candidates(events)
+    parser = argparse.ArgumentParser(description="GravityGuard Telemetri ve Güvenlik Denetim Merkezi")
+    parser.add_argument("--all", action="store_true", help="Tüm keşfedilen log kaynaklarını birleştir (Antigravity + Claude Code + arşivler)")
+    parser.add_argument("--source", type=str, default="", help="Özel log dosyası veya klasörü yolu")
+    parser.add_argument("--project", type=str, default="", help="Yalnızca belirli projeyi filtrele")
+    parser.add_argument("--rule", type=str, default="", help="Yalnızca belirli kuralı filtrele")
+    parser.add_argument("--status", type=str, default="", help="Duruma göre filtrele (APPROVED, BLOCKED, WARNING)")
+    parser.add_argument("--since", type=str, default="", help="Başlangıç tarihi (YYYY-MM-DD veya ISO)")
+    parser.add_argument("--until", type=str, default="", help="Bitiş tarihi (YYYY-MM-DD veya ISO)")
+    parser.add_argument("--days", type=int, default=0, help="Son N günü filtrele")
+    parser.add_argument("--weekly", "-w", action="store_true", help="Son 7 gün ve önceki 7 günle karşılaştırmalı analiz")
+    parser.add_argument("--monthly", "-m", action="store_true", help="Son 30 gün ve önceki 30 günle karşılaştırmalı analiz")
+    parser.add_argument("--candidates", action="store_true", help="Kural geliştirme ve optimizasyon önerilerini göster")
+    parser.add_argument("--export-md", type=str, default="", help="Markdown raporunu belirtilen dosyaya kaydet")
+    parser.add_argument("--export-json", type=str, default="", help="JSON raporunu belirtilen dosyaya kaydet")
+    parser.add_argument("--rotate", action="store_true", help="Log rotasyonu yap (büyük logları arşivle)")
+    parser.add_argument("--threshold-mb", type=float, default=10.0, help="Log rotasyon eşiği MB (varsayılan: 10.0)")
+
+    args = parser.parse_args()
+
+    if args.rotate:
+        perform_log_rotation(threshold_mb=args.threshold_mb)
+        return
+
+    # Determine log sources
+    if args.all:
+        sources = discover_all_log_paths(explicit_source=args.source)
+    elif args.source:
+        p = Path(args.source)
+        sources = [p] if p.is_file() else list(p.glob("**/*.jsonl"))
     else:
-        render_dashboard(events)
+        sources = [Path(resolve_default_permanent_log_path())]
+
+    reader = LogStreamReader(sources)
+
+    now = datetime.now(timezone.utc)
+    since_dt: Optional[datetime] = None
+    until_dt: Optional[datetime] = None
+    label = "Tüm Zamanlar"
+
+    prev_since_dt: Optional[datetime] = None
+    prev_until_dt: Optional[datetime] = None
+    prev_label = ""
+
+    if args.weekly:
+        since_dt = now - timedelta(days=7)
+        until_dt = now
+        label = "Son 7 Gün"
+        prev_since_dt = now - timedelta(days=14)
+        prev_until_dt = now - timedelta(days=7)
+        prev_label = "Önceki 7 Gün"
+    elif args.monthly:
+        since_dt = now - timedelta(days=30)
+        until_dt = now
+        label = "Son 30 Gün"
+        prev_since_dt = now - timedelta(days=60)
+        prev_until_dt = now - timedelta(days=30)
+        prev_label = "Önceki 30 Gün"
+    elif args.days > 0:
+        since_dt = now - timedelta(days=args.days)
+        until_dt = now
+        label = f"Son {args.days} Gün"
+    else:
+        if args.since:
+            since_dt = parse_iso_datetime(args.since)
+            label = f">= {args.since}"
+        if args.until:
+            until_dt = parse_iso_datetime(args.until)
+            label += f" <= {args.until}"
+
+    # Load current period events
+    curr_events = list(
+        reader.stream_events(
+            since_dt=since_dt,
+            until_dt=until_dt,
+            project_filter=args.project,
+            rule_filter=args.rule,
+            status_filter=args.status,
+        )
+    )
+    curr_metrics = AggregatedMetrics(curr_events, label=label)
+
+    # Load previous period if comparative
+    prev_metrics: Optional[AggregatedMetrics] = None
+    if prev_since_dt and prev_until_dt:
+        prev_events = list(
+            reader.stream_events(
+                since_dt=prev_since_dt,
+                until_dt=prev_until_dt,
+                project_filter=args.project,
+                rule_filter=args.rule,
+                status_filter=args.status,
+            )
+        )
+        prev_metrics = AggregatedMetrics(prev_events, label=prev_label)
+
+    # Render view
+    if args.candidates:
+        render_rule_candidates(curr_metrics)
+    else:
+        render_dashboard(
+            curr_metrics,
+            sources=sources,
+            corrupt_lines=reader.corrupted_lines_count,
+            prev_m=prev_metrics,
+        )
+
+    # Exports
+    if args.export_md:
+        export_markdown_report(curr_metrics, args.export_md, prev_m=prev_metrics)
+    if args.export_json:
+        export_json_report(curr_metrics, args.export_json)
 
 
 if __name__ == "__main__":

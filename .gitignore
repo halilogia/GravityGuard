@@ -39,3 +39,4 @@ Thumbs.db
 # Agent Internal Brain & Scratch
 brain/
 tests/sandbox/
+reports/
