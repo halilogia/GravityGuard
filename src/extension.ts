@@ -62,16 +62,12 @@ const CONNECTION_ERROR_CODES = new Set([
 ]);
 
 export function activate(context: vscode.ExtensionContext): void {
-  initI18n(vscode.env.language);
-  console.log('[GravityGuard] Extension activated successfully!');
+  const savedLang = context.globalState.get<string>('gravityguard.language');
+  const initialLang = savedLang || (vscode.env.language && vscode.env.language.toLowerCase().startsWith('tr') ? 'tr' : 'en');
+  initI18n(initialLang);
+  console.log(`[GravityGuard] Extension activated successfully! Language: ${initialLang}`);
 
-  // 1. Register Webview Provider for GravityGuard Live Monitor
-  const provider = new GuardianViewProvider(context.extensionUri);
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider('antigravity-guardian-view', provider)
-  );
-
-  // 2. Register Status Bar Item for Prompt Enhancement
+  // 1. Register Status Bar Item for Prompt Enhancement
   const promptStatusBarItem = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,
     100
@@ -81,6 +77,19 @@ export function activate(context: vscode.ExtensionContext): void {
   promptStatusBarItem.tooltip = t('actions.statusBarTooltip');
   promptStatusBarItem.show();
   context.subscriptions.push(promptStatusBarItem);
+
+  // 2. Register Webview Provider for GravityGuard Live Monitor
+  const provider = new GuardianViewProvider(
+    context.extensionUri,
+    context,
+    () => {
+      promptStatusBarItem.text = `$(sparkle) ${t('actions.enhancePrompt')}`;
+      promptStatusBarItem.tooltip = t('actions.statusBarTooltip');
+    }
+  );
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider('antigravity-guardian-view', provider)
+  );
 
   // 3. Register Commands
   context.subscriptions.push(
@@ -98,9 +107,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('antigravityBridge.clearLogs', () => {
       provider.clearLogs();
     }),
-    vscode.commands.registerCommand('antigravityBridge.toggleLanguage', () => {
+    vscode.commands.registerCommand('antigravityBridge.toggleLanguage', async () => {
       const next = getCurrentLanguage() === 'tr' ? 'en' : 'tr';
       setLanguage(next);
+      await context.globalState.update('gravityguard.language', next);
       promptStatusBarItem.text = `$(sparkle) ${t('actions.enhancePrompt')}`;
       promptStatusBarItem.tooltip = t('actions.statusBarTooltip');
       provider.updateHtml();
@@ -140,8 +150,8 @@ async function handleOpenConfig(): Promise<void> {
         }
       }, null, 2), 'utf8');
     }
-    const doc = await vscode.workspace.openTextDocument(cfgFile);
-    await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.One, preview: false });
+    const uri = vscode.Uri.file(cfgFile);
+    await vscode.commands.executeCommand('vscode.open', uri);
   } catch (e: any) {
     vscode.window.showErrorMessage(t('actions.configOpenError', { error: e.message }));
   }
@@ -418,7 +428,11 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
   private _clearedAfterSeq: number | null = null;
   private _activeTab: string = 'live';
 
-  constructor(private readonly _extensionUri: vscode.Uri) {}
+  constructor(
+    private readonly _extensionUri: vscode.Uri,
+    private readonly _context?: vscode.ExtensionContext,
+    private readonly _onLanguageChanged?: () => void
+  ) {}
 
   public resolveWebviewView(webviewView: vscode.WebviewView): void {
     this._view = webviewView;
@@ -437,6 +451,12 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
       } else if (message.command === 'toggleLanguage') {
         const next = getCurrentLanguage() === 'tr' ? 'en' : 'tr';
         setLanguage(next);
+        if (this._context) {
+          await this._context.globalState.update('gravityguard.language', next);
+        }
+        if (this._onLanguageChanged) {
+          this._onLanguageChanged();
+        }
         this.updateHtml();
       } else if (message.command === 'openFile' && message.path) {
         try {
@@ -1273,7 +1293,7 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
           /* Stat Row */
           .stat-summary-bar {
             display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
+            grid-template-columns: repeat(auto-fit, minmax(55px, 1fr));
             gap: 4px;
             margin-bottom: 8px;
           }
@@ -1608,8 +1628,9 @@ class GuardianViewProvider implements vscode.WebviewViewProvider {
         <div class="stat-summary-bar">
           <div class="stat-chip"><div class="chip-val text-red">${blockedCount}</div><div class="chip-lbl">${t('stats.blocked')}</div></div>
           <div class="stat-chip"><div class="chip-val text-amber">${warningCount}</div><div class="chip-lbl">${t('stats.warning')}</div></div>
+          <div class="stat-chip"><div class="chip-val text-green">${approvedCount}</div><div class="chip-lbl">${t('stats.approved')}</div></div>
           ${shadowCount > 0 ? `<div class="stat-chip"><div class="chip-val text-purple">${shadowCount}</div><div class="chip-lbl">${t('current.statusShadow')}</div></div>` : ''}
-          <div class="stat-chip"><div class="chip-val text-cyan">${totalObligations}</div><div class="chip-lbl">${totalObligations > 0 ? t('stats.pending') : t('stats.clean')}</div></div>
+          <div class="stat-chip" title="${t('obligations.title')}"><div class="chip-val ${totalObligations > 0 ? 'text-cyan' : 'text-muted'}">${totalObligations}</div><div class="chip-lbl">${t('stats.pending')}</div></div>
         </div>
 
         <!-- Tabs -->
