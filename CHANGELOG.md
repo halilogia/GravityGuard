@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.4.6] - 2026-10-10
 
+### Added & Modularized (Architecture & Triad Attribution)
+- **Claude Code ve Antigravity Ajan Rozeti (Visual Attribution)**:
+  - `engine/gravityguard_engine/audit.py` üzerinde olayların hangi ajan tarafından gerçekleştirildiği (`Claude Code` vs `Antigravity`) kaydedilmeye başlandı.
+  - Webview Canlı Akış sekmesinde her olay için ajan rozeti (`🟠 Claude Code` veya `🔵 Antigravity`) eklendi.
+- **SRP Webview Mimarisi Modülerleştirmesi**:
+  - `src/extension.ts` monolitinden komutlar (`src/commands.ts`), router istemcisi (`src/router_client.ts`) ve webview bileşenleri (`src/webview/`) ayrıştırıldı.
+  - VSIX paketlemesi ve uzantı senkronizasyonu tam paket olarak standardize edildi.
+
 ### Fixed & Hardened (CSP-Compliant Event Delegation)
 - **Tüm Butonların Açılışta Kilitlenmesinin Kökten Çözümü (Event Delegation)**:
   - CSP `script-src 'nonce-...'` kuralı gereğince Chromium tarafından engellenen bütün inline `onclick="..."` öznitelikleri kaldırıldı.

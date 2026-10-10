@@ -615,6 +615,7 @@ def log_event(
         or os.environ.get("CONVERSATION_ID")
         or "default"
     )
+    agent_name = "Claude Code" if str(conv_id).startswith("claude:") else "Antigravity"
     norm_target = target_file.replace("\\\\", "/").replace("\\", "/").lower() if target_file else ""
     target_prefix = f"{conv_id}::{norm_target}::"
     tracking_key = f"{conv_id}::{norm_target}::{rule_id}" if norm_target else ""
@@ -672,6 +673,7 @@ def log_event(
                     "projectRoot": proj_root,
                     "fileExt": ext,
                     "conversationId": conv_id,
+                    "agent": agent_name,
                     "model": model_id,
                     "reason": reason,
                     "outcome": outcome or status,
@@ -826,6 +828,8 @@ def log_event(
                                     "target": target_file,
                                     "reason": f"Multi-rule resolution: {add_r_id} cleared by approved edit",
                                     "outcome": "RECOVERED",
+                                    "agent": agent_name,
+                                    "conversationId": conv_id,
                                     "parentViolationId": additional.get("eventId"),
                                     "recoveryAttempts": add_attempts,
                                     "resolutionMs": add_res_ms
@@ -931,6 +935,8 @@ def log_event(
                 "target": target_file,
                 "reason": reason,
                 "outcome": outcome,
+                "agent": agent_name,
+                "conversationId": conv_id,
                 "parentViolationId": parent_violation_id,
                 "recoveryAttempts": recovery_attempts,
                 "resolutionMs": resolution_ms
@@ -954,6 +960,7 @@ def log_event(
                 "projectRoot": proj_root,
                 "fileExt": ext,
                 "conversationId": conv_id,
+                "agent": agent_name,
                 "model": model_id,
                 "reason": reason,
                 "outcome": outcome,
@@ -980,6 +987,7 @@ def log_event(
                     "projectRoot": proj_root,
                     "fileExt": ext,
                     "conversationId": conv_id,
+                    "agent": agent_name,
                     "model": model_id,
                     "reason": add_ev["reason"],
                     "outcome": "RECOVERED",
