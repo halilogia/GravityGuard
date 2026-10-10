@@ -23,26 +23,43 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
+_ENGINE_DIR = str(Path(__file__).resolve().parent.parent / "engine")
+if _ENGINE_DIR not in sys.path:
+    sys.path.insert(0, _ENGINE_DIR)
+try:
+    from gravityguard_engine.state_lock import StateLock
+except ImportError:
+    class StateLock:  # type: ignore
+        def __init__(self, *args, **kwargs):
+            pass
+        def acquire(self):
+            return True
+        def release(self):
+            pass
+
 
 def parse_iso_datetime(ts_str: str) -> Optional[datetime]:
-    """Parses various ISO timestamp formats safely into a datetime object."""
+    """Parses various ISO timestamp formats safely into a datetime object normalized to UTC."""
     if not ts_str or not isinstance(ts_str, str):
         return None
     cleaned = ts_str.strip().replace("Z", "+00:00")
+    local_tz = datetime.now().astimezone().tzinfo
     if len(cleaned) == 10 and cleaned.count("-") == 2:
         try:
-            return datetime.fromisoformat(cleaned).replace(tzinfo=timezone.utc)
+            return datetime.fromisoformat(cleaned).replace(tzinfo=local_tz).astimezone(timezone.utc)
         except (ValueError, TypeError):
             return None
     try:
         dt = datetime.fromisoformat(cleaned)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=local_tz).astimezone(timezone.utc)
+        else:
+            dt = dt.astimezone(timezone.utc)
         return dt
     except (ValueError, TypeError):
         try:
             dt = datetime.strptime(cleaned[:19], "%Y-%m-%dT%H:%M:%S")
-            return dt.replace(tzinfo=timezone.utc)
+            return dt.replace(tzinfo=local_tz).astimezone(timezone.utc)
         except (ValueError, TypeError):
             return None
 
@@ -70,12 +87,17 @@ def resolve_default_permanent_log_path() -> str:
     return str(user_log)
 
 
-def discover_all_log_paths(project_dir: Optional[str] = None, explicit_source: Optional[str] = None) -> List[Path]:
+def discover_all_log_paths(
+    project_dir: Optional[str] = None,
+    explicit_source: Optional[str] = None,
+    projects_root: Optional[str] = None
+) -> List[Path]:
     """
     Discovers all accessible GravityGuard audit log sources:
     - Explicit file or folder provided via CLI
     - User Antigravity global logs (~/.gemini/logs)
     - Claude Code / local project logs (.gravityguard/logs)
+    - Projects under projects_root
     - Historical repository archives (archives/audit-logs)
     """
     found: List[Path] = []
@@ -112,6 +134,12 @@ def discover_all_log_paths(project_dir: Optional[str] = None, explicit_source: O
     curr_proj = Path.cwd() / ".gravityguard" / "logs" / "gravityguard_permanent_audit.jsonl"
     add_if_exists(curr_proj)
 
+    # Scan projects_root for multi-project logs
+    if projects_root and os.path.isdir(projects_root):
+        pr_path = Path(projects_root)
+        for sub_log in pr_path.glob("**/.gravityguard/logs/*.jsonl"):
+            add_if_exists(sub_log)
+
     # Repository archive directory
     repo_root = Path(__file__).resolve().parent.parent
     archive_dir = repo_root / "archives" / "audit-logs"
@@ -138,7 +166,9 @@ class LogStreamReader:
         rule_filter: Optional[str] = None,
         status_filter: Optional[str] = None,
     ) -> Generator[Dict[str, Any], None, None]:
+        needs_dedup = len(self.paths) > 1
         seen_keys: Set[str] = set()
+        MAX_SEEN_KEYS = 50000
 
         for path in self.paths:
             try:
@@ -158,14 +188,17 @@ class LogStreamReader:
                             self.corrupted_lines_count += 1
                             continue
 
-                        # Deduplicate across merged files (composite key)
-                        eid = ev.get("eventId")
-                        ts = ev.get("timestamp")
-                        seq = ev.get("auditSeq")
-                        dedup_key = f"{eid}::{ts}::{seq}" if eid else f"{ts}::{seq}"
-                        if dedup_key in seen_keys:
-                            continue
-                        seen_keys.add(dedup_key)
+                        # Deduplicate across merged files (composite key) only if multiple sources
+                        if needs_dedup:
+                            eid = ev.get("eventId")
+                            ts = ev.get("timestamp")
+                            seq = ev.get("auditSeq")
+                            dedup_key = f"{eid}::{ts}::{seq}" if eid else f"{ts}::{seq}"
+                            if dedup_key in seen_keys:
+                                continue
+                            if len(seen_keys) >= MAX_SEEN_KEYS:
+                                seen_keys.clear()
+                            seen_keys.add(dedup_key)
 
                         # Filter by timestamp window
                         ev_dt = parse_iso_datetime(ev.get("timestamp", ""))
@@ -203,38 +236,126 @@ def format_bar(val: int, max_val: int, width: int = 24) -> str:
 
 
 class AggregatedMetrics:
-    """Aggregates metrics for a given stream of events."""
+    """Aggregates metrics directly from an event stream with O(1) memory footprint."""
 
-    def __init__(self, events: List[Dict[str, Any]], label: str = "Tüm Zamanlar"):
+    def __init__(self, events_or_stream: Any, label: str = "Tüm Zamanlar"):
         self.label = label
-        self.events = events
-        self.total = len(events)
-        self.status_counts = Counter(e.get("status", "UNKNOWN") for e in events)
-        self.rule_counts = Counter(e.get("ruleId", "UNKNOWN") for e in events)
-        self.project_counts = Counter(e.get("project") or "Diğer / Bilinmeyen" for e in events)
-        self.ext_counts = Counter(e.get("fileExt") or "(Uzantısız)" for e in events)
+        self.total = 0
+        self.status_counts: Counter[str] = Counter()
+        self.rule_counts: Counter[str] = Counter()
+        self.project_counts: Counter[str] = Counter()
+        self.ext_counts: Counter[str] = Counter()
 
-        self.blocked_events = [e for e in events if e.get("status") == "BLOCKED" and e.get("outcome") != "REPEATED_VIOLATION"]
-        self.recovered_events = [e for e in events if e.get("outcome") == "RECOVERED"]
-        self.repeated_events = [e for e in events if e.get("outcome") == "REPEATED_VIOLATION"]
-        self.shadow_events = [e for e in events if e.get("status") == "SHADOW_TRIGGER"]
-        self.warning_events = [e for e in events if e.get("status") == "WARNING"]
-        self.approved_events = [e for e in events if e.get("status") == "APPROVED"]
+        self.total_blocked = 0
+        self.total_recovered = 0
+        self.total_repeated = 0
+        self.total_shadow = 0
+        self.total_warning = 0
+        self.total_approved = 0
 
-        self.total_blocked = len(self.blocked_events)
-        self.total_recovered = len(self.recovered_events)
+        self.rule_blocked: Counter[str] = Counter()
+        self.rule_recovered: Counter[str] = Counter()
+        self.shadow_rules: Counter[str] = Counter()
+        self.warn_rules: Counter[str] = Counter()
+
+        self._attempts_counter: Counter[int] = Counter()
+        self._total_duration_ms: float = 0.0
+        self._duration_count: int = 0
+
+        self.recent_interventions: List[Dict[str, Any]] = []
+        self._max_recent = 10
+
+        # Advisory Follow-up Rate tracking
+        self._pending_warnings: Dict[Tuple[str, str], List[Tuple[str, str]]] = defaultdict(list)
+        self.advisory_heeded: Counter[str] = Counter()
+
+        # Learning Ledger Candidates
+        self.candidate_rule_counts: Counter[str] = Counter()
+        self.candidate_targets: Dict[str, Counter[str]] = defaultdict(Counter)
+        self.candidate_sessions: Dict[str, Set[str]] = defaultdict(set)
+
+        self._consume(events_or_stream)
+
+    def _consume(self, stream: Any) -> None:
+        for ev in stream:
+            self.total += 1
+            st = ev.get("status", "UNKNOWN")
+            out = ev.get("outcome")
+            r_id = ev.get("ruleId") or "UNKNOWN"
+            res_id = ev.get("resolvedRuleId") or r_id
+            proj = ev.get("project") or "Diğer / Bilinmeyen"
+            ext = ev.get("fileExt") or "(Uzantısız)"
+
+            self.status_counts[st] += 1
+            self.rule_counts[r_id] += 1
+            self.project_counts[proj] += 1
+            self.ext_counts[ext] += 1
+
+            cid = ev.get("conversationId") or ev.get("session_id") or "default"
+            tgt = (ev.get("target") or "").replace("\\", "/").lower()
+            ts = ev.get("timestamp", "")
+
+            if st == "BLOCKED" and out != "REPEATED_VIOLATION":
+                self.total_blocked += 1
+                self.rule_blocked[r_id] += 1
+            elif out == "REPEATED_VIOLATION":
+                self.total_repeated += 1
+            elif out == "RECOVERED":
+                self.total_recovered += 1
+                self.rule_recovered[res_id] += 1
+                att = ev.get("recoveryAttempts")
+                if isinstance(att, (int, float)):
+                    self._attempts_counter[int(att)] += 1
+                dur = ev.get("resolutionMs")
+                if isinstance(dur, (int, float)):
+                    self._total_duration_ms += float(dur)
+                    self._duration_count += 1
+            elif st == "SHADOW_TRIGGER":
+                self.total_shadow += 1
+                self.shadow_rules[r_id] += 1
+            elif st == "WARNING":
+                self.total_warning += 1
+                self.warn_rules[r_id] += 1
+                if tgt and len(self._pending_warnings[(cid, tgt)]) < 20:
+                    self._pending_warnings[(cid, tgt)].append((r_id, ts))
+            elif st == "APPROVED":
+                self.total_approved += 1
+                if tgt and (cid, tgt) in self._pending_warnings:
+                    pending = self._pending_warnings.pop((cid, tgt))
+                    for w_rule, w_ts in pending:
+                        if ts >= w_ts:
+                            self.advisory_heeded[w_rule] += 1
+
+            if st in ("BLOCKED", "WARNING"):
+                if len(self.recent_interventions) < self._max_recent:
+                    self.recent_interventions.append(ev)
+                else:
+                    self.recent_interventions.pop(0)
+                    self.recent_interventions.append(ev)
+
+                self.candidate_rule_counts[r_id] += 1
+                t_base = os.path.basename(ev.get("target") or "bilinmeyen")
+                self.candidate_targets[r_id][t_base] += 1
+                if len(self.candidate_sessions[r_id]) < 500:
+                    self.candidate_sessions[r_id].add(cid)
+
         self.recovery_rate = (self.total_recovered / self.total_blocked * 100) if self.total_blocked > 0 else 100.0
 
-        attempts_list = [e.get("recoveryAttempts", 1) for e in self.recovered_events if isinstance(e.get("recoveryAttempts"), (int, float))]
-        self.median_attempts = sorted(attempts_list)[len(attempts_list) // 2] if attempts_list else 1.0
+        if self._attempts_counter:
+            tot_atts = sum(self._attempts_counter.values())
+            half = tot_atts // 2
+            running = 0
+            med = 1.0
+            for att_val in sorted(self._attempts_counter.keys()):
+                running += self._attempts_counter[att_val]
+                if running >= half:
+                    med = float(att_val)
+                    break
+            self.median_attempts = med
+        else:
+            self.median_attempts = 1.0
 
-        durations_ms = [e.get("resolutionMs") for e in self.recovered_events if isinstance(e.get("resolutionMs"), (int, float))]
-        self.avg_duration_s = (sum(durations_ms) / len(durations_ms) / 1000) if durations_ms else 0.0
-
-        self.rule_blocked = Counter(e.get("ruleId", "UNKNOWN") for e in self.blocked_events)
-        self.rule_recovered = Counter((e.get("resolvedRuleId") or e.get("ruleId", "UNKNOWN")) for e in self.recovered_events)
-        self.shadow_rules = Counter(e.get("ruleId", "UNKNOWN") for e in self.shadow_events)
-        self.warn_rules = Counter(e.get("ruleId", "UNKNOWN") for e in self.warning_events)
+        self.avg_duration_s = (self._total_duration_ms / self._duration_count / 1000) if self._duration_count > 0 else 0.0
 
 
 def render_period_comparison(curr: AggregatedMetrics, prev: AggregatedMetrics):
@@ -254,7 +375,7 @@ def render_period_comparison(curr: AggregatedMetrics, prev: AggregatedMetrics):
 
     print(f"  Toplam İşlem (Total Events)       : {calc_delta(curr.total, prev.total)}")
     print(f"  Engellenenler (Blocked Violations): {calc_delta(curr.total_blocked, prev.total_blocked)}")
-    print(f"  Uyarılar (Warnings)               : {calc_delta(len(curr.warning_events), len(prev.warning_events))}")
+    print(f"  Uyarılar (Warnings)               : {calc_delta(curr.total_warning, prev.total_warning)}")
     print(f"  İyileşme Oranı (Recovery Rate)    : %{curr.recovery_rate:.1f} vs %{prev.recovery_rate:.1f} (Delta: {curr.recovery_rate - prev.recovery_rate:+.1f} puan)")
 
     # Rules with notable changes
@@ -307,15 +428,7 @@ def render_effectiveness_analytics(m: AggregatedMetrics):
             print(f"  {rule:<24} | {b_cnt:>9} | {r_cnt:>8} | %{rate:>4.1f} | {classification}")
 
     # Advisory Follow-up Rate (Temporal Action Proxy)
-    if m.warning_events:
-        approved_map = defaultdict(list)
-        for ap in m.approved_events:
-            cid = ap.get("conversationId", "default")
-            tgt = (ap.get("target") or "").replace("\\", "/").lower()
-            ts = ap.get("timestamp", "")
-            if tgt:
-                approved_map[(cid, tgt)].append(ts)
-
+    if m.total_warning > 0:
         print("\n  ⚠️  TAVSİYE KURALLARI VE DÜZENLEME TAKİP ORANI (Advisory Follow-up Rate):")
         print("  " + "-" * 82)
         print("  Not: Bu metrik doğrudan nedensellik kanıtı değil, zamansal bir vekildir")
@@ -325,15 +438,7 @@ def render_effectiveness_analytics(m: AggregatedMetrics):
         print(f"  {'Kural':<24} | {'Uyarı':<6} | {'Takip Eden Onay':<15} | {'Takip Oranı':<11} | {'Durum':<18}")
         print("  " + "-" * 82)
         for w_rule, w_cnt in m.warn_rules.most_common():
-            rule_warns = [w for w in m.warning_events if w.get("ruleId") == w_rule]
-            heeded = 0
-            for w in rule_warns:
-                cid = w.get("conversationId", "default")
-                tgt = (w.get("target") or "").replace("\\", "/").lower()
-                w_ts = w.get("timestamp", "")
-                subsequent = [ats for ats in approved_map.get((cid, tgt), []) if ats >= w_ts]
-                if subsequent:
-                    heeded += 1
+            heeded = m.advisory_heeded.get(w_rule, 0)
             action_rate = (heeded / w_cnt * 100) if w_cnt > 0 else 0.0
             if w_cnt < 10:
                 status_desc = f"⚪ Yetersiz Veri (n={w_cnt})"
@@ -348,7 +453,7 @@ def render_effectiveness_analytics(m: AggregatedMetrics):
             print(f"  {w_rule:<24} | {w_cnt:>6} | {heeded:>15} | %{action_rate:>9.1f} | {status_desc}")
 
     # Shadow Mode Observations
-    if m.shadow_events:
+    if m.total_shadow > 0:
         print("\n  🧪 GÖLGE MODU GÖZLEMLERİ (Shadow Observation Mode):")
         print("  " + "-" * 82)
         for s_rule, s_cnt in m.shadow_rules.most_common():
@@ -369,7 +474,7 @@ def render_dashboard(
     if corrupt_lines > 0:
         print(f"⚠️  DİKKAT: {corrupt_lines} bozuk/geçersiz JSONL satırı filtrelendi.")
 
-    if not m.events:
+    if m.total == 0:
         print("\n[!] Seçilen dönem veya filtrelerde telemetri kaydı bulunamadı.\n")
         print("=" * 80)
         return
@@ -416,7 +521,7 @@ def render_dashboard(
 
     print("\n🚨 SON 5 GÜVENLİK / MİMARİ MÜDAHALESİ (Canlı Hadiseler)")
     print("-" * 80)
-    blocked_or_warned = [e for e in reversed(m.events) if e.get("status") in ("BLOCKED", "WARNING")][:5]
+    blocked_or_warned = list(reversed(m.recent_interventions))[:5]
     if not blocked_or_warned:
         print("  [✓] Yakın zamanda engellenen veya uyarılan işlem yok.")
     else:
@@ -446,23 +551,16 @@ def render_rule_candidates(m: AggregatedMetrics):
     print(f"      Dönem: {m.label}")
     print("=" * 80)
 
-    violations = [e for e in m.events if e.get("status") in ("BLOCKED", "WARNING")]
-    if not violations:
+    total_violations = sum(m.candidate_rule_counts.values())
+    if total_violations == 0:
         print("\n[✓] Telemetri verilerinde bu dönemde ihlal veya uyarı kaydı yok.")
         print("    Mevcut politikalar sistemle tam uyumlu çalışıyor.\n")
         print("=" * 80)
         return
 
-    total_violations = len(violations)
-    rule_counter = Counter(e.get("ruleId") for e in violations)
-    rule_targets = defaultdict(list)
-    rule_sessions = defaultdict(set)
-    for e in violations:
-        r_id = e.get("ruleId", "UNKNOWN")
-        target = os.path.basename(e.get("target", "bilinmeyen"))
-        rule_targets[r_id].append(target)
-        sid = e.get("conversationId") or e.get("session_id") or "sess_default"
-        rule_sessions[r_id].add(sid)
+    rule_counter = m.candidate_rule_counts
+    rule_targets = m.candidate_targets
+    rule_sessions = m.candidate_sessions
 
     MIN_THRESHOLD = 3
     candidates = []
@@ -470,7 +568,7 @@ def render_rule_candidates(m: AggregatedMetrics):
     # 1. G4 Import Matrix Analysis
     g4_count = rule_counter.get("G4_IMPORT_MATRIX", 0)
     if g4_count >= MIN_THRESHOLD:
-        targets = Counter(rule_targets["G4_IMPORT_MATRIX"]).most_common(3)
+        targets = rule_targets["G4_IMPORT_MATRIX"].most_common(3)
         sessions = rule_sessions["G4_IMPORT_MATRIX"]
         candidates.append({
             "id": "CAND-G4-BOUNDARY-REFINEMENT",
@@ -486,7 +584,7 @@ def render_rule_candidates(m: AggregatedMetrics):
     # 2. T1 Test Evidence Analysis
     t1_count = rule_counter.get("T1_MISSING_RELATED_TEST", 0) + rule_counter.get("T1_FINAL_UNRESOLVED", 0)
     if t1_count >= MIN_THRESHOLD:
-        targets = Counter(rule_targets.get("T1_MISSING_RELATED_TEST", []) + rule_targets.get("T1_FINAL_UNRESOLVED", [])).most_common(3)
+        t1_targets = (rule_targets.get("T1_MISSING_RELATED_TEST", Counter()) + rule_targets.get("T1_FINAL_UNRESOLVED", Counter())).most_common(3)
         t1_sess = rule_sessions["T1_MISSING_RELATED_TEST"] | rule_sessions["T1_FINAL_UNRESOLVED"]
         candidates.append({
             "id": "CAND-T1-EXEMPTION-EXPANSION",
@@ -494,7 +592,7 @@ def render_rule_candidates(m: AggregatedMetrics):
             "count": t1_count,
             "rate": (t1_count / total_violations) * 100 if total_violations else 0,
             "session_count": len(t1_sess),
-            "targets": [t[0] for t in targets],
+            "targets": [t[0] for t in t1_targets],
             "diagnosis": f"Üretim dosyaları için test dosyası bulunamadı ({len(t1_sess)} oturumda tekrarlandı).",
             "recommendation": "Bu dosyalar konfigürasyon/şema niteliğindeyse 'exemptPatterns' listesine ekleyin; iş mantığı içeriyorsa test süitine dahil edin."
         })
@@ -502,7 +600,7 @@ def render_rule_candidates(m: AggregatedMetrics):
     # 3. Growth / Monolith Analysis
     growth_count = rule_counter.get("ARCH_FILE_GROWTH", 0)
     if growth_count >= MIN_THRESHOLD:
-        targets = Counter(rule_targets["ARCH_FILE_GROWTH"]).most_common(3)
+        targets = rule_targets["ARCH_FILE_GROWTH"].most_common(3)
         g_sess = rule_sessions["ARCH_FILE_GROWTH"]
         candidates.append({
             "id": "CAND-SRP-MODULARIZATION",
@@ -518,7 +616,7 @@ def render_rule_candidates(m: AggregatedMetrics):
     # 4. G1 Silent Exception Analysis
     g1_count = rule_counter.get("G1_SILENT_EXCEPTION", 0)
     if g1_count >= MIN_THRESHOLD:
-        targets = Counter(rule_targets["G1_SILENT_EXCEPTION"]).most_common(3)
+        targets = rule_targets["G1_SILENT_EXCEPTION"].most_common(3)
         g1_sess = rule_sessions["G1_SILENT_EXCEPTION"]
         candidates.append({
             "id": "CAND-G1-EXCEPTION-STANDARDS",
@@ -534,6 +632,7 @@ def render_rule_candidates(m: AggregatedMetrics):
     # 5. G2 Tampering Analysis
     g2_count = rule_counter.get("G2_SECURITY_TAMPERING", 0) + rule_counter.get("G2_TEST_INTEGRITY", 0)
     if g2_count >= MIN_THRESHOLD:
+        g2_targets = (rule_targets.get("G2_SECURITY_TAMPERING", Counter()) + rule_targets.get("G2_TEST_INTEGRITY", Counter())).most_common(3)
         g2_sess = rule_sessions["G2_SECURITY_TAMPERING"] | rule_sessions["G2_TEST_INTEGRITY"]
         candidates.append({
             "id": "CAND-G2-TAMPERING-ALERT",
@@ -541,7 +640,7 @@ def render_rule_candidates(m: AggregatedMetrics):
             "count": g2_count,
             "rate": (g2_count / total_violations) * 100 if total_violations else 0,
             "session_count": len(g2_sess),
-            "targets": [t[0] for t in Counter(rule_targets.get("G2_SECURITY_TAMPERING", []) + rule_targets.get("G2_TEST_INTEGRITY", [])).most_common(3)],
+            "targets": [t[0] for t in g2_targets],
             "diagnosis": f"Test silme, test atlatma veya escape-hatch enjeksiyon denemesi tespit edildi ({len(g2_sess)} oturum).",
             "recommendation": "Kural atlatma denemelerine karşı denetimi sıkılaştırın ve prompt kurallarını güncelleyin."
         })
@@ -653,8 +752,8 @@ def export_json_report(m: AggregatedMetrics, out_path: str):
 
 def perform_log_rotation(threshold_mb: float = 10.0) -> None:
     """
-    Checks active log file size and rotates to archives if it exceeds threshold.
-    Preserves active file availability while freeing active space.
+    Checks active log file size and snapshots to archives if it exceeds threshold.
+    Guards sequence continuity (lastAuditSeq) and live projection state.
     """
     active_path = Path(resolve_default_permanent_log_path())
     if not active_path.is_file():
@@ -675,20 +774,26 @@ def perform_log_rotation(threshold_mb: float = 10.0) -> None:
     archive_name = f"gravityguard_permanent_audit_{timestamp}.jsonl"
     target_archive = archive_dir / archive_name
 
-    # Copy to archive, then truncate active file
-    shutil.copy2(active_path, target_archive)
-    with open(active_path, "w", encoding="utf-8") as f:
-        f.write("")
+    # Safe snapshot under StateLock: Never wipe or truncate active journal!
+    lock = StateLock(str(active_path.parent), timeout=5.0)
+    lock_acquired = lock.acquire()
+    try:
+        shutil.copy2(active_path, target_archive)
+    finally:
+        if lock_acquired:
+            lock.release()
 
-    print(f"🎉 Rotasyon başarıyla tamamlandı:")
-    print(f"   Arşivlenen dosya: {target_archive} ({size_mb:.2f} MB)")
-    print(f"   Aktif dosya sıfırlandı: {active_path}")
+    print(f"🎉 Arşivleme başarıyla tamamlandı (StateLock korumalı):")
+    print(f"   Arşivlenen dosya : {target_archive} ({size_mb:.2f} MB)")
+    print(f"   Aktif dosya      : {active_path} (Sıra numarası ve canlı projeksiyon güvenliği için korundu)")
+    print(f"   [Güvenlik Notu] Kalıcı denetim günlüğü, auditSeq bütünlüğünü korumak için sıfırlanmaz.")
 
 
 def main():
     parser = argparse.ArgumentParser(description="GravityGuard Telemetri ve Güvenlik Denetim Merkezi")
     parser.add_argument("--all", action="store_true", help="Tüm keşfedilen log kaynaklarını birleştir (Antigravity + Claude Code + arşivler)")
     parser.add_argument("--source", type=str, default="", help="Özel log dosyası veya klasörü yolu")
+    parser.add_argument("--projects-root", type=str, default="", help="Birden fazla projeyi keşfetmek için ana çalışma alanı kök dizini")
     parser.add_argument("--project", type=str, default="", help="Yalnızca belirli projeyi filtrele")
     parser.add_argument("--rule", type=str, default="", help="Yalnızca belirli kuralı filtrele")
     parser.add_argument("--status", type=str, default="", help="Duruma göre filtrele (APPROVED, BLOCKED, WARNING)")
@@ -711,7 +816,7 @@ def main():
 
     # Determine log sources
     if args.all:
-        sources = discover_all_log_paths(explicit_source=args.source)
+        sources = discover_all_log_paths(explicit_source=args.source, projects_root=args.projects_root)
     elif args.source:
         p = Path(args.source)
         sources = [p] if p.is_file() else list(p.glob("**/*.jsonl"))
@@ -755,31 +860,31 @@ def main():
             until_dt = parse_iso_datetime(args.until)
             label += f" <= {args.until}"
 
-    # Load current period events
-    curr_events = list(
+    # Stream current period events without list buffering (O(1) memory)
+    curr_metrics = AggregatedMetrics(
         reader.stream_events(
             since_dt=since_dt,
             until_dt=until_dt,
             project_filter=args.project,
             rule_filter=args.rule,
             status_filter=args.status,
-        )
+        ),
+        label=label,
     )
-    curr_metrics = AggregatedMetrics(curr_events, label=label)
 
-    # Load previous period if comparative
+    # Stream previous period if comparative
     prev_metrics: Optional[AggregatedMetrics] = None
     if prev_since_dt and prev_until_dt:
-        prev_events = list(
+        prev_metrics = AggregatedMetrics(
             reader.stream_events(
                 since_dt=prev_since_dt,
                 until_dt=prev_until_dt,
                 project_filter=args.project,
                 rule_filter=args.rule,
                 status_filter=args.status,
-            )
+            ),
+            label=prev_label,
         )
-        prev_metrics = AggregatedMetrics(prev_events, label=prev_label)
 
     # Render view
     if args.candidates:
