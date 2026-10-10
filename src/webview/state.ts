@@ -56,6 +56,37 @@ export function loadGuardianState(clearedAfterSeq: number | null): GuardianViewM
   let sessionId = 'active';
 
   let govPath = workspaceRoot ? path.join(workspaceRoot, '.gravityguard', 'runtime', 'governance.json') : '';
+
+  // No workspace folder open: auto-discover the project root from recent event targets
+  if (!workspaceRoot) {
+    const recentEvents: any[] = Array.isArray(data.events) ? data.events : [];
+    discovery:
+    for (let i = recentEvents.length - 1; i >= 0; i--) {
+      const target = recentEvents[i]?.target;
+      if (typeof target !== 'string' || !path.isAbsolute(target)) {
+        continue;
+      }
+      let curr = target;
+      for (let depth = 0; depth < 6; depth++) {
+        const govCandidate = path.join(curr, '.gravityguard', 'runtime', 'governance.json');
+        const cfgCandidate = path.join(curr, '.gravityguard.json');
+        if (fs.existsSync(govCandidate) || fs.existsSync(cfgCandidate)) {
+          workspaceRoot = curr;
+          projectName = path.basename(curr);
+          if (fs.existsSync(govCandidate)) {
+            govPath = govCandidate;
+          }
+          break discovery;
+        }
+        const parent = path.dirname(curr);
+        if (parent === curr) {
+          break;
+        }
+        curr = parent;
+      }
+    }
+  }
+
   if (!govPath || !fs.existsSync(govPath)) {
     const pluginGovPath = path.join(os.homedir(), '.gemini', 'config', 'plugins', 'gravityguard', '.gravityguard', 'runtime', 'governance.json');
     if (fs.existsSync(pluginGovPath)) {

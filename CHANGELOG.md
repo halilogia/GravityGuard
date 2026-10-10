@@ -5,7 +5,14 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.8] - 2026-10-10
+
+### Added & Fixed (Workspace Auto-Discovery & Multi-Repo Governance)
+- **Açık Çalışma Alanı Olmadığında Otomatik Proje Tespiti**: IDE'de açık bir klasör bulunmadığında (`vscode.workspace.workspaceFolders` boş olduğunda), `state.ts` son güvenlik olaylarındaki (`data.events`) hedef dosya yollarından yukarı doğru tarama yaparak aktif projenin kök dizinini, proje adını ve `.gravityguard/runtime/governance.json` durumunu otomatik keşfeder.
+- **Yükümlülük Senkronizasyonu**: Çalışma alanı açık olmasa bile ilgili projedeki bekleyen test ve dokümantasyon yükümlülükleri Canlı İzleyici Webview panelinde kesintisiz ve doğru proje rozetiyle gösterilir.
+
 ## [1.4.7] - 2026-10-10
+
 
 ### Fixed (Claude Code Live Monitor Visibility & Webview Auto-Recovery)
 - **Webview ServiceWorker InvalidStateError Kalıcı Çözümü (Watchdog & Auto-Recovery)**:
