@@ -92,6 +92,26 @@ class TestGovernanceDomain(unittest.TestCase):
         self.assertIn("engine/core.py", resolved)
         self.assertEqual(len(get_unresolved_doc_obligations(root, cid)), 0)
 
+    def test_agent_attribution_recorded_in_obligations(self):
+        root = Path(self.temp_dir)
+        # 1. Codex agent via prefix
+        record_pending_test_evidence(
+            "src/codex_feat.ts", "tests/codex_feat.test.ts", "codex_feat.test.ts", "missing test",
+            project_root=root, conversation_id="codex:sess-1"
+        )
+        # 2. Claude Code agent via prefix
+        record_pending_doc_obligation(
+            "src/claude_feat.ts", ["CHANGELOG.md"], "Feature updated",
+            project_root=root, conversation_id="claude:sess-2"
+        )
+        gov_file = get_governance_file_path(root)
+        data = json.loads(gov_file.read_text(encoding="utf-8"))
+        test_entry = data["test_obligations"]["pending"]["src/codex_feat.ts"]
+        self.assertEqual(test_entry.get("agent"), "Codex")
+
+        doc_entry = data["doc_obligations"]["pending"]["src/claude_feat.ts"]
+        self.assertEqual(doc_entry.get("agent"), "Claude Code")
+
     def test_reconcile_obligations_on_disk(self):
         root = Path(self.temp_dir)
         cid = "sess-disk"

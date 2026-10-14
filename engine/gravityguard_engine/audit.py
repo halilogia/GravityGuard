@@ -587,6 +587,24 @@ def _replay_missing_journal_events(
     return latest_seq
 
 
+def detect_agent_name(conv_id: Any = None) -> str:
+    cid = str(
+        conv_id
+        or os.environ.get("ANTIGRAVITY_CONVERSATION_ID")
+        or os.environ.get("CONVERSATION_ID")
+        or ""
+    )
+    if cid.startswith("claude:"):
+        return "Claude Code"
+    elif cid.startswith("codex:"):
+        return "Codex"
+    elif cid.startswith("cli:") or cid.startswith("agy-cli:") or os.environ.get("AGY_CLI") or os.environ.get("ANTIGRAVITY_CLI"):
+        return "Antigravity CLI"
+    elif cid.startswith("sdk:") or cid.startswith("agy-sdk:") or os.environ.get("ANTIGRAVITY_SDK") or os.environ.get("AGY_SDK"):
+        return "Antigravity SDK"
+    return "Antigravity IDE"
+
+
 def log_event(
     action: str,
     status: str,
@@ -615,17 +633,7 @@ def log_event(
         or os.environ.get("CONVERSATION_ID")
         or "default"
     )
-    conv_id_str = str(conv_id)
-    if conv_id_str.startswith("claude:"):
-        agent_name = "Claude Code"
-    elif conv_id_str.startswith("codex:"):
-        agent_name = "Codex"
-    elif conv_id_str.startswith("cli:") or conv_id_str.startswith("agy-cli:") or os.environ.get("AGY_CLI") or os.environ.get("ANTIGRAVITY_CLI"):
-        agent_name = "Antigravity CLI"
-    elif conv_id_str.startswith("sdk:") or conv_id_str.startswith("agy-sdk:") or os.environ.get("ANTIGRAVITY_SDK") or os.environ.get("AGY_SDK"):
-        agent_name = "Antigravity SDK"
-    else:
-        agent_name = "Antigravity IDE"
+    agent_name = detect_agent_name(conv_id)
     norm_target = target_file.replace("\\\\", "/").replace("\\", "/").lower() if target_file else ""
     target_prefix = f"{conv_id}::{norm_target}::"
     tracking_key = f"{conv_id}::{norm_target}::{rule_id}" if norm_target else ""

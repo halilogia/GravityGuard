@@ -88,11 +88,11 @@ ${WEBVIEW_STYLES}
         <!-- Tabs -->
         <div class="tabs-bar">
           <button class="tab-btn ${activeTab === 'live' ? 'active' : ''}" id="btn-live" data-action="setTab" data-tab="live">${lucide('zap', { size: 11 })} ${t('tabs.live')}</button>
+          <button class="tab-btn ${activeTab === 'tasks' ? 'active' : ''}" id="btn-tasks" data-action="setTab" data-tab="tasks">${lucide('listChecks', { size: 11 })} ${t('tabs.tasks')}${openTasks > 0 ? `<span class="badge-counter" style="background: rgba(16, 185, 129, 0.25); color: #10b981;">${openTasks}</span>` : ''}</button>
           <button class="tab-btn ${activeTab === 'obligations' ? 'active' : ''}" id="btn-obligations" data-action="setTab" data-tab="obligations">${lucide('clipboardList', { size: 11 })} ${t('tabs.obligations')}${totalObligations > 0 ? `<span class="badge-counter">${totalObligations}</span>` : ''}</button>
+          <button class="tab-btn ${activeTab === 'skills' ? 'active' : ''}" id="btn-skills" data-action="setTab" data-tab="skills">${lucide('sparkles', { size: 11 })} ${t('tabs.skills')}<span class="badge-counter" style="background: rgba(56, 189, 248, 0.25); color: #38bdf8;">${skillsList.length}</span></button>
           <button class="tab-btn ${activeTab === 'rules' ? 'active' : ''}" id="btn-rules" data-action="setTab" data-tab="rules">${lucide('sliders', { size: 11 })} ${t('tabs.rules')}</button>
           <button class="tab-btn ${activeTab === 'insights' ? 'active' : ''}" id="btn-insights" data-action="setTab" data-tab="insights">${lucide('barChart', { size: 11 })} ${t('tabs.insights')}</button>
-          <button class="tab-btn ${activeTab === 'skills' ? 'active' : ''}" id="btn-skills" data-action="setTab" data-tab="skills">${lucide('sparkles', { size: 11 })} ${t('tabs.skills')}<span class="badge-counter" style="background: rgba(56, 189, 248, 0.25); color: #38bdf8;">${skillsList.length}</span></button>
-          <button class="tab-btn ${activeTab === 'tasks' ? 'active' : ''}" id="btn-tasks" data-action="setTab" data-tab="tasks">${lucide('listChecks', { size: 11 })} ${t('tabs.tasks')}${openTasks > 0 ? `<span class="badge-counter" style="background: rgba(16, 185, 129, 0.25); color: #10b981;">${openTasks}</span>` : ''}</button>
         </div>
 
         <!-- Panes -->

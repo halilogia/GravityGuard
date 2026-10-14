@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import { t, setLanguage, getCurrentLanguage } from '../i18n';
 import { resolveClearedAfterSeq } from '../view_filter';
 import { scanAllSkills } from '../skills';
@@ -128,6 +130,10 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
       } else if (message.command === 'copyReason' && message.text) {
         await vscode.env.clipboard.writeText(message.text);
         vscode.window.showInformationMessage(t('actions.reasonCopied'));
+      } else if (message.command === 'dismissObligation' && message.path) {
+        this.dismissObligation(message.path);
+      } else if (message.command === 'clearAllObligations') {
+        this.clearAllObligations();
       }
     });
 
@@ -311,4 +317,106 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
       });
     }
   }
+
+  private dismissObligation(targetPath: string): void {
+    const candidatePaths: string[] = [];
+    const wsFolders = vscode.workspace.workspaceFolders;
+    if (wsFolders && wsFolders.length > 0) {
+      candidatePaths.push(path.join(wsFolders[0].uri.fsPath, '.gravityguard', 'runtime', 'governance.json'));
+    }
+    candidatePaths.push(path.join(os.homedir(), '.gravityguard', 'runtime', 'governance.json'));
+    candidatePaths.push(path.join(os.homedir(), '.gemini', 'config', 'plugins', 'gravityguard', '.gravityguard', 'runtime', 'governance.json'));
+
+    const normTarget = targetPath.replace(/\\/g, '/').toLowerCase();
+    let modified = false;
+
+    for (const govFile of candidatePaths) {
+      if (!fs.existsSync(govFile)) {
+        continue;
+      }
+      try {
+        const raw = fs.readFileSync(govFile, 'utf8');
+        const data = JSON.parse(raw);
+        let changed = false;
+
+        if (data.test_obligations?.pending) {
+          for (const key of Object.keys(data.test_obligations.pending)) {
+            if (key.replace(/\\/g, '/').toLowerCase() === normTarget) {
+              delete data.test_obligations.pending[key];
+              changed = true;
+            }
+          }
+        }
+        if (data.doc_obligations?.pending) {
+          for (const key of Object.keys(data.doc_obligations.pending)) {
+            if (key.replace(/\\/g, '/').toLowerCase() === normTarget) {
+              delete data.doc_obligations.pending[key];
+              changed = true;
+            }
+          }
+        }
+        if (changed) {
+          fs.writeFileSync(govFile, JSON.stringify(data, null, 2), 'utf8');
+          modified = true;
+        }
+      } catch (e) {
+        console.warn('[GravityGuard] Failed to dismiss obligation in:', govFile, e);
+      }
+    }
+
+    if (modified) {
+      this._lastHtml = '';
+      this._lastDataSig = '';
+      this.updateHtml(true);
+      vscode.window.showInformationMessage('Yükümlülük kaldırıldı: ' + path.basename(targetPath));
+    }
+  }
+
+  private clearAllObligations(): void {
+    const candidatePaths: string[] = [];
+    const wsFolders = vscode.workspace.workspaceFolders;
+    if (wsFolders && wsFolders.length > 0) {
+      candidatePaths.push(path.join(wsFolders[0].uri.fsPath, '.gravityguard', 'runtime', 'governance.json'));
+    }
+    candidatePaths.push(path.join(os.homedir(), '.gravityguard', 'runtime', 'governance.json'));
+    candidatePaths.push(path.join(os.homedir(), '.gemini', 'config', 'plugins', 'gravityguard', '.gravityguard', 'runtime', 'governance.json'));
+
+    let count = 0;
+    for (const govFile of candidatePaths) {
+      if (!fs.existsSync(govFile)) {
+        continue;
+      }
+      try {
+        const raw = fs.readFileSync(govFile, 'utf8');
+        const data = JSON.parse(raw);
+        let changed = false;
+
+        if (data.test_obligations?.pending && Object.keys(data.test_obligations.pending).length > 0) {
+          count += Object.keys(data.test_obligations.pending).length;
+          data.test_obligations.pending = {};
+          changed = true;
+        }
+        if (data.doc_obligations?.pending && Object.keys(data.doc_obligations.pending).length > 0) {
+          count += Object.keys(data.doc_obligations.pending).length;
+          data.doc_obligations.pending = {};
+          changed = true;
+        }
+        if (data.stop_retries) {
+          data.stop_retries = 0;
+          changed = true;
+        }
+        if (changed) {
+          fs.writeFileSync(govFile, JSON.stringify(data, null, 2), 'utf8');
+        }
+      } catch (e) {
+        console.warn('[GravityGuard] Failed to clear obligations in:', govFile, e);
+      }
+    }
+
+    this._lastHtml = '';
+    this._lastDataSig = '';
+    this.updateHtml(true);
+    vscode.window.showInformationMessage(`Tüm bekleyen yükümlülükler temizlendi (${count} adet).`);
+  }
 }
+

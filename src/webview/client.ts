@@ -89,6 +89,11 @@ export function buildClientScript(nonce: string, activeTab: string): string {
             } else if (action === 'copyReason') {
               const text = target.getAttribute('data-text');
               if (text) vscode.postMessage({ command: 'copyReason', text });
+            } else if (action === 'dismissObligation') {
+              const filePath = target.getAttribute('data-path');
+              if (filePath) vscode.postMessage({ command: 'dismissObligation', path: filePath });
+            } else if (action === 'clearAllObligations') {
+              vscode.postMessage({ command: 'clearAllObligations' });
             } else if (action === 'toggleDetail') {
               const elId = target.getAttribute('data-target');
               if (elId) toggleDetail(elId);

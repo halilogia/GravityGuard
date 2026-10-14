@@ -58,3 +58,24 @@ test('renderObligationsTab renders pending doc obligations with reason and CHANG
   assert.match(html, /CHANGELOG\.md/);
   assert.match(html, /docs\/KNOWLEDGE\.md §6/);
 });
+
+test('renderObligationsTab renders agent badge, project badge, and dismiss buttons', () => {
+  const vm = makeMockVM({
+    pendingTests: {
+      'C:/Users/Halil Emre/Desktop/GitHub/Public/AgentObservatory/src/core/event_store.js': {
+        expected_name: 'event_store.test.js',
+        agent: 'Codex',
+        timestamp: 1791612853,
+        reason: 'Test eksik'
+      }
+    }
+  });
+
+  const html = renderObligationsTab(vm);
+  assert.match(html, /AgentObservatory/, 'Project badge should be rendered');
+  assert.match(html, /Codex/, 'Codex agent name should be rendered');
+  assert.match(html, /agent-codex/, 'Codex grey badge class should be rendered');
+  assert.match(html, /data-action="dismissObligation"/, 'Dismiss button should be rendered');
+  assert.match(html, /data-action="clearAllObligations"/, 'Clear All button should be rendered');
+});
+

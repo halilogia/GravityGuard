@@ -5,6 +5,19 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.10] - 2026-10-14
+
+### Added & Enhanced (Obligation Dismissal, Agent Attribution Persistence, Prominent Tasks Tab)
+- **Görevler (Tasks) Sekmesi Önceliği**: Arayüz sekme sıralaması güncellenerek `[📋 Görevler]` sekmesi doğrudan `[⚡ Canlı]` sekmesinin yanına (2. sıraya) taşındı.
+- **Yükümlülük Yönetimi & Tek Tıkla Temizleme**:
+  - Her yükümlülük kartına bireysel çözüm/temizleme butonu (`check` ikonu) eklendi (`dismissObligation`).
+  - Yükümlülükler başlığına "Tümünü Temizle" butonu (`clearAllObligations`) eklendi; eski/artık projelerden kalan yükümlülüklerin ve devre kesici kilitlerinin tek tıkla sıfırlanabilmesi sağlandı.
+  - İstemci (`client.ts`) ve sağlayıcı (`provider.ts`) kancaları entegre edildi.
+- **Detaylı Ajan & Proje Şeffaflığı**:
+  - Yükümlülük kayıtlarına hangi ajanın (Claude Code, Codex, Antigravity IDE/CLI/SDK) neden olduğu ve hangi projeye (`[📁 ProjeAdı]`) ait olduğu görsel rozetlerle eklendi.
+  - Python yönetişim motorunda (`governance.py`) yeni yükümlülükler oluşturulurken `agent` alanı otomatik olarak tespit edilip `governance.json` durumuna kalıcı olarak kaydedilmeye başlandı.
+  - Göreceli dosya yolları ve insan tarafından okunabilir tarih/saat damgaları (`DD.MM HH:mm`) eklendi.
+
 ## [1.4.9] - 2026-10-14
 
 ### Added & Hardened (Tasks Tab, Agent Identity Separation, Codex Adapter & Obligation Transparency)

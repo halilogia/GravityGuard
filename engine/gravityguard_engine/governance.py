@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .state_lock import StateLock, StateLockTimeout
 from .test_evidence import is_exempt_from_test_evidence, resolve_candidate_test_file
+from .audit import detect_agent_name
 
 
 def get_governance_file_path(project_root: Optional[Path] = None) -> Path:
@@ -300,7 +301,8 @@ def record_pending_test_evidence(
     expected_name: str,
     reason: str,
     project_root: Optional[Path] = None,
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = None,
+    agent: Optional[str] = None
 ) -> None:
     norm = target_file.replace("\\", "/")
     root = project_root or Path.cwd()
@@ -311,13 +313,15 @@ def record_pending_test_evidence(
             cand_p = root / cand_p
         cand_h, _, _ = compute_file_digest(cand_p)
 
+    agent_name = agent or detect_agent_name(conversation_id)
     with governance_transaction(project_root) as state:
         entry = {
             "candidate_path": candidate_path.replace("\\", "/") if candidate_path else None,
             "baseline_hash": cand_h,
             "expected_name": expected_name,
             "timestamp": time.time(),
-            "reason": reason
+            "reason": reason,
+            "agent": agent_name
         }
         state.setdefault("test_obligations", {}).setdefault("pending", {})[norm] = entry
         cid = conversation_id or "default"
@@ -443,7 +447,8 @@ def record_pending_doc_obligation(
     required_docs: Optional[List[str]] = None,
     reason: Optional[str] = None,
     project_root: Optional[Path] = None,
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = None,
+    agent: Optional[str] = None
 ) -> None:
     norm = target_file.replace("\\", "/")
     if required_docs is None:
@@ -471,11 +476,13 @@ def record_pending_doc_obligation(
         if not still_required:
             return
         required_docs = still_required
+        agent_name = agent or detect_agent_name(conversation_id)
         entry = {
             "required_docs": required_docs,
             "baseline_hashes": baseline_hashes,
             "timestamp": time.time(),
-            "reason": reason
+            "reason": reason,
+            "agent": agent_name
         }
         state.setdefault("doc_obligations", {}).setdefault("pending", {})[norm] = entry
         cid = conversation_id or "default"
