@@ -5,6 +5,19 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.9] - 2026-10-14
+
+### Added & Hardened (Tasks Tab, Agent Identity Separation, Codex Adapter & Obligation Transparency)
+- **Ajan Kimlik Ayrımı (Visual Attribution & Distinct Badges)**:
+  - Antigravity ekosistemindeki tüm bileşenler ayrıştırıldı: `Antigravity IDE` (camgöbeği/mavi), `Antigravity SDK` (zümrüt yeşili), `Antigravity CLI` (mor) olarak netleşti.
+  - OpenAI Codex için özel **gri renkli** (`#94a3b8`) rozet (`⚪ Codex`, `.agent-codex`) tanımlandı.
+  - Claude Code için turuncu (`🟠 Claude Code`, `.agent-claude`) rozet korundu.
+  - `engine/gravityguard_engine/audit.py`, `src/webview/styles/stream.ts` ve `src/webview/tabs/live.ts` güncellendi ve `tests/agent_identity.test.mjs` ile doğrulandı.
+- **Görevler (Tasks) Sekmesi Entegrasyonu**: Antigravity 2.0 ve GravityGuard Live Monitor için `src/tasks.ts`, `src/webview/tabs/tasks.ts` ve `layout.ts` bileşenleri eklendi. Aktif oturumun `tasks.md` dosyası okunarak açık ve tamamlanmış görevler canlı sayaç rozetiyle webview'de listelenir.
+- **Yükümlülük Kartlarında Ajan & Zaman Şeffaflığı ve Test Kapsamı**: `src/webview/tabs/obligations.ts` içinde yükümlülük kartlarına işlemi tetikleyen ajan rozeti (`🟠 Claude Code`, `🔵 IDE`, `🟣 CLI`, `🟢 SDK`, `⚪ Codex`) ve işlem zaman damgası eklendi; `tests/obligations.test.mjs` test paketi yazıldı ve doğrulandı.
+- **OpenAI Codex GravityGuard Kanca Adaptörü**: `plugin/codex/gravityguard_codex_hook.py` adaptörü eklendi. Codex CLI araç çağrıları (`write_file`, `apply_diff`, `read_file`) ve `--stop` kancası GravityGuard anayasal denetimine bağlandı; fail-open mimarisi uygulandı (`tests/codex_adapter.test.mjs`).
+- **ESM Test Tanıma ve Çözümleme**: GravityGuard motorunun test eşleştiricisi modern ESM `.test.mjs` dosyalarını tanıyacak şekilde güçlendirildi.
+
 ## [1.4.8] - 2026-10-10
 
 ### Added & Fixed (Workspace Auto-Discovery & Multi-Repo Governance)

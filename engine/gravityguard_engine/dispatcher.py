@@ -338,8 +338,9 @@ def validate_gravityguard() -> None:
     ))
 
     # Fast-pass for pure binary assets
+    # Benign asset writes are silent by default to prevent log pollution (like read tools)
     if is_binary_asset:
-        if target_file:
+        if target_file and os.environ.get("GRAVITYGUARD_LOG_EXEMPTS", "").strip().lower() in ("1", "true", "yes"):
             _log("APPROVED", target_file, "Exempt file (Binary Asset)", rule_id="EXEMPT")
         print(json.dumps({"decision": "allow"}))
         sys.exit(0)
@@ -439,7 +440,9 @@ def validate_gravityguard() -> None:
                     "reason": f"🛑 [STATE_LOCK_TIMEOUT]: Durum dosyası kilit zaman aşımı ({lock_err}). Kayıp güncelleme riskini önlemek için işlem güvenli kilit alınana kadar reddedildi."
                 }))
                 sys.exit(0)
-        if target_file:
+        # Benign exempt files (Vendor/Cache/Asset/Docs) are silent by default (like read tools)
+        # to prevent log pollution and keep the Live Monitor focused on actual guards, warnings, and code changes.
+        if target_file and (all_warnings or os.environ.get("GRAVITYGUARD_LOG_EXEMPTS", "").strip().lower() in ("1", "true", "yes")):
             _log("APPROVED", target_file, "Exempt file (Vendor/Cache/Asset)", rule_id="EXEMPT")
         if all_warnings:
             warn_parts = [f"[{wid}] {wmsg}" for wid, wmsg in all_warnings]

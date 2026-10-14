@@ -1,3 +1,5 @@
+import type { TaskFile } from '../tasks';
+
 export interface LogEvent {
   status?: string;
   timestamp?: string;
@@ -37,4 +39,5 @@ export interface GuardianViewModel {
   sessionId: string;
   projectCfg: any;
   totalObligations: number;
+  tasks: TaskFile[]; // checkbox task files discovered for the project roots / active conversation
 }

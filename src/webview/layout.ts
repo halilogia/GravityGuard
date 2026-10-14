@@ -1,6 +1,7 @@
 import { t, getCurrentLanguage } from '../i18n';
 import { lucide } from '../icons';
 import { SkillItem } from '../skills';
+import { countOpenTasks } from '../tasks';
 import { GuardianViewModel } from './types';
 import { escapeHtml } from './html_utils';
 import { WEBVIEW_STYLES } from './styles';
@@ -11,7 +12,8 @@ import {
   renderObligationsTab,
   renderRulesTab,
   renderInsightsTab,
-  renderSkillsTab
+  renderSkillsTab,
+  renderTasksTab
 } from './tabs';
 
 export interface LayoutParams {
@@ -41,6 +43,8 @@ export function buildHtmlDocument(p: LayoutParams): string {
   const rulesHtml = renderRulesTab(vm);
   const insightsHtml = renderInsightsTab(vm);
   const skillsHtml = renderSkillsTab(skillsList);
+  const tasksHtml = renderTasksTab(vm);
+  const openTasks = countOpenTasks(vm.tasks || []);
 
   // --- RENDER MAIN WEBVIEW HTML ---
   const htmlContent = `
@@ -88,6 +92,7 @@ ${WEBVIEW_STYLES}
           <button class="tab-btn ${activeTab === 'rules' ? 'active' : ''}" id="btn-rules" data-action="setTab" data-tab="rules">${lucide('sliders', { size: 11 })} ${t('tabs.rules')}</button>
           <button class="tab-btn ${activeTab === 'insights' ? 'active' : ''}" id="btn-insights" data-action="setTab" data-tab="insights">${lucide('barChart', { size: 11 })} ${t('tabs.insights')}</button>
           <button class="tab-btn ${activeTab === 'skills' ? 'active' : ''}" id="btn-skills" data-action="setTab" data-tab="skills">${lucide('sparkles', { size: 11 })} ${t('tabs.skills')}<span class="badge-counter" style="background: rgba(56, 189, 248, 0.25); color: #38bdf8;">${skillsList.length}</span></button>
+          <button class="tab-btn ${activeTab === 'tasks' ? 'active' : ''}" id="btn-tasks" data-action="setTab" data-tab="tasks">${lucide('listChecks', { size: 11 })} ${t('tabs.tasks')}${openTasks > 0 ? `<span class="badge-counter" style="background: rgba(16, 185, 129, 0.25); color: #10b981;">${openTasks}</span>` : ''}</button>
         </div>
 
         <!-- Panes -->
@@ -105,6 +110,9 @@ ${WEBVIEW_STYLES}
         </div>
         <div id="tab-skills" class="tab-pane ${activeTab === 'skills' ? 'active' : ''}">
           ${skillsHtml}
+        </div>
+        <div id="tab-tasks" class="tab-pane ${activeTab === 'tasks' ? 'active' : ''}">
+          ${tasksHtml}
         </div>
         </div>
 

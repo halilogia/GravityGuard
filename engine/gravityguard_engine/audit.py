@@ -615,7 +615,17 @@ def log_event(
         or os.environ.get("CONVERSATION_ID")
         or "default"
     )
-    agent_name = "Claude Code" if str(conv_id).startswith("claude:") else "Antigravity"
+    conv_id_str = str(conv_id)
+    if conv_id_str.startswith("claude:"):
+        agent_name = "Claude Code"
+    elif conv_id_str.startswith("codex:"):
+        agent_name = "Codex"
+    elif conv_id_str.startswith("cli:") or conv_id_str.startswith("agy-cli:") or os.environ.get("AGY_CLI") or os.environ.get("ANTIGRAVITY_CLI"):
+        agent_name = "Antigravity CLI"
+    elif conv_id_str.startswith("sdk:") or conv_id_str.startswith("agy-sdk:") or os.environ.get("ANTIGRAVITY_SDK") or os.environ.get("AGY_SDK"):
+        agent_name = "Antigravity SDK"
+    else:
+        agent_name = "Antigravity IDE"
     norm_target = target_file.replace("\\\\", "/").replace("\\", "/").lower() if target_file else ""
     target_prefix = f"{conv_id}::{norm_target}::"
     tracking_key = f"{conv_id}::{norm_target}::{rule_id}" if norm_target else ""

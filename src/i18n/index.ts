@@ -13,7 +13,8 @@ export const resources = {
         obligations: 'Yükümlülükler',
         rules: 'Kurallar',
         insights: 'Analiz',
-        skills: 'Beceriler'
+        skills: 'Beceriler',
+        tasks: 'Görevler'
       },
       current: {
         title: 'SON İŞLEM',
@@ -161,7 +162,10 @@ export const resources = {
         hintTestIntent: 'İki fazlı taahhüt alındı; diske yazım doğrulanması bekleniyor',
         hintTestPending: 'Ajanın test dosyasını oluşturması/düzenlemesi bekleniyor',
         hintDocIntent: 'Dokümantasyon taahhüdü alındı; diske yazım doğrulanması bekleniyor',
-        hintDocPending: 'docs/KNOWLEDGE.md §6 uyarınca CHANGELOG güncellenmeli'
+        hintDocPending: 'docs/KNOWLEDGE.md §6 uyarınca CHANGELOG güncellenmeli',
+        agentLabel: 'Ajan',
+        stopGuardTitle: 'Hop Hemşerim!',
+        stopGuardDesc: 'Bekleyen yükümlülükler çözülmeden ajan oturumu kapatamaz; önce testleri ve dokümanları tamamla.'
       },
       rules: {
         title: 'Aktif Konfigürasyon (.gravityguard.json)',
@@ -220,6 +224,20 @@ export const resources = {
         pluginScope: 'Eklenti',
         builtinScope: 'Yerleşik',
         totalCount: 'Toplam {{count}} Beceri'
+      },
+      tasks: {
+        title: 'Görev Listeleri',
+        cleanState: 'Görev dosyası bulunamadı. tasks.md veya task.md oluşturulduğunda burada görünür.',
+        empty: 'Bu dosyada görev yok.',
+        total: 'Toplam {{count}} Görev',
+        done: 'Tamamlandı',
+        open: 'Açık',
+        inProgress: 'Devam Ediyor',
+        openFile: 'Görev Dosyasını Aç',
+        governanceTitle: 'Governance Görevleri',
+        sourceRepo: 'Repo',
+        sourceBrain: 'Brain',
+        sourceGovernance: 'Governance'
       }
     }
   },
@@ -234,7 +252,8 @@ export const resources = {
         obligations: 'Obligations',
         rules: 'Rules',
         insights: 'Insights',
-        skills: 'Skills'
+        skills: 'Skills',
+        tasks: 'Tasks'
       },
       current: {
         title: 'CURRENT ACTION',
@@ -382,7 +401,10 @@ export const resources = {
         hintTestIntent: 'Two-phase intent recorded; awaiting disk verification',
         hintTestPending: 'Awaiting agent to create/modify test file',
         hintDocIntent: 'Documentation intent recorded; awaiting disk verification',
-        hintDocPending: 'CHANGELOG must be updated per docs/KNOWLEDGE.md §6'
+        hintDocPending: 'CHANGELOG must be updated per docs/KNOWLEDGE.md §6',
+        agentLabel: 'Agent',
+        stopGuardTitle: 'Hold on, buddy!',
+        stopGuardDesc: 'The agent cannot end the session while obligations are pending; finish the tests and docs first.'
       },
       rules: {
         title: 'Active Configuration (.gravityguard.json)',
@@ -441,6 +463,20 @@ export const resources = {
         pluginScope: 'Plugin',
         builtinScope: 'Built-in',
         totalCount: 'Total {{count}} Skills'
+      },
+      tasks: {
+        title: 'Task Lists',
+        cleanState: 'No task file found. It will appear here once a tasks.md or task.md exists.',
+        empty: 'No tasks in this file.',
+        total: 'Total {{count}} Tasks',
+        done: 'Done',
+        open: 'Open',
+        inProgress: 'In Progress',
+        openFile: 'Open Task File',
+        governanceTitle: 'Governance Tasks',
+        sourceRepo: 'Repo',
+        sourceBrain: 'Brain',
+        sourceGovernance: 'Governance'
       }
     }
   }

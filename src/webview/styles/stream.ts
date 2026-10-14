@@ -46,10 +46,26 @@ export const STREAM_STYLES = `\
             border-color: rgba(217, 119, 87, 0.55);
             color: #e8956f;
           }
-          .agent-antigravity {
+          .agent-codex {
+            background: rgba(148, 163, 184, 0.15);
+            border-color: rgba(148, 163, 184, 0.55);
+            color: #94a3b8;
+          }
+          .agent-antigravity,
+          .agent-antigravity-ide {
             background: rgba(34, 211, 238, 0.12);
             border-color: rgba(34, 211, 238, 0.5);
             color: #5ccfe6;
+          }
+          .agent-antigravity-cli {
+            background: rgba(168, 85, 247, 0.15);
+            border-color: rgba(168, 85, 247, 0.55);
+            color: #c084fc;
+          }
+          .agent-antigravity-sdk {
+            background: rgba(16, 185, 129, 0.15);
+            border-color: rgba(16, 185, 129, 0.55);
+            color: #34d399;
           }
 
           /* Drawer Accordion */

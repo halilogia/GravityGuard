@@ -4,11 +4,20 @@ import { lucide } from '../../icons';
 import { escapeHtml } from '../html_utils';
 import { GuardianViewModel } from '../types';
 
-function renderAgentBadge(agent: string | undefined, short: boolean): string {
-  const isClaude = agent === 'Claude Code';
-  const cls = isClaude ? 'agent-claude' : 'agent-antigravity';
-  const label = isClaude ? (short ? 'Claude' : 'Claude Code') : 'Antigravity';
-  return `<span class="agent-pill ${cls}">${isClaude ? '🟠' : '🔵'} ${escapeHtml(label)}</span>`;
+export function renderAgentBadge(agent: string | undefined, short: boolean): string {
+  if (agent === 'Claude Code') {
+    return `<span class="agent-pill agent-claude">🟠 ${short ? 'Claude' : 'Claude Code'}</span>`;
+  }
+  if (agent === 'Codex' || agent === 'OpenAI Codex') {
+    return `<span class="agent-pill agent-codex">⚪ ${short ? 'Codex' : 'Codex'}</span>`;
+  }
+  if (agent === 'Antigravity CLI') {
+    return `<span class="agent-pill agent-antigravity-cli">🟣 ${short ? 'CLI' : 'Antigravity CLI'}</span>`;
+  }
+  if (agent === 'Antigravity SDK') {
+    return `<span class="agent-pill agent-antigravity-sdk">🟢 ${short ? 'SDK' : 'Antigravity SDK'}</span>`;
+  }
+  return `<span class="agent-pill agent-antigravity-ide">🔵 ${short ? 'IDE' : 'Antigravity IDE'}</span>`;
 }
 
 export function renderCurrentActionCard(vm: GuardianViewModel): string {

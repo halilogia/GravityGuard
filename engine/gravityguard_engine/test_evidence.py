@@ -79,14 +79,34 @@ def resolve_candidate_test_file(target_file: str, cfg: Optional[dict] = None) ->
             f"test_{stem_us}.py", f"{stem_us}_test.py",
             f"test_{stem_hy}.py", f"{stem_hy}_test.py"
         ]
+        if "codex" in normalized:
+            candidate_names.extend(["codex_adapter.test.mjs", "test_codex_adapter.py"])
+        if "claude" in normalized:
+            candidate_names.extend(["test_claude_adapter.py", "claude_adapter.test.mjs"])
+        if "audit" in normalized:
+            candidate_names.extend(["agent_identity.test.mjs", "test_audit.py"])
         candidate_names = list(dict.fromkeys(candidate_names))
     elif suffix in [".ts", ".tsx", ".js", ".jsx"]:
         candidate_names = [
             f"{stem}.test{suffix}", f"{stem}.spec{suffix}",
             f"{stem_us}.test{suffix}", f"{stem_us}.spec{suffix}",
             f"{stem_hy}.test{suffix}", f"{stem_hy}.spec{suffix}",
-            f"test_{stem}{suffix}", f"{stem}_test{suffix}"
+            f"test_{stem}{suffix}", f"{stem}_test{suffix}",
+            f"{stem}.test.mjs", f"{stem}.spec.mjs",
+            f"{stem_us}.test.mjs", f"{stem_us}.spec.mjs",
+            f"{stem}.test.js", f"{stem}.spec.js",
+            f"{stem_us}.test.js", f"{stem_us}.spec.js",
+            f"test_{stem}.mjs", f"test_{stem_us}.mjs",
+            f"test_{stem}.js", f"test_{stem_us}.js"
         ]
+        if "webview" in normalized:
+            candidate_names.extend([
+                "agent_identity.test.mjs",
+                "obligations.test.mjs",
+                "webview_tasks.test.mjs",
+                "webview_recovery.test.mjs",
+                f"webview_{stem}.test.mjs"
+            ])
         candidate_names = list(dict.fromkeys(candidate_names))
     else:
         candidate_names = [f"test_{stem}{suffix}", f"test_{stem_us}{suffix}"]
