@@ -237,7 +237,11 @@ export const resources = {
         governanceTitle: 'Governance Görevleri',
         sourceRepo: 'Repo',
         sourceBrain: 'Brain',
-        sourceGovernance: 'Governance'
+        sourceGovernance: 'Governance',
+        deleteTask: 'Görevi Sil',
+        addTask: 'Ekle',
+        addTaskPlaceholder: 'Yeni görev yazın... (Enter ile ekleyin)',
+        cycleStatus: 'Durumu Değiştir'
       }
     }
   },
@@ -476,7 +480,11 @@ export const resources = {
         governanceTitle: 'Governance Tasks',
         sourceRepo: 'Repo',
         sourceBrain: 'Brain',
-        sourceGovernance: 'Governance'
+        sourceGovernance: 'Governance',
+        deleteTask: 'Delete Task',
+        addTask: 'Add',
+        addTaskPlaceholder: 'Type a new task... (press Enter to add)',
+        cycleStatus: 'Cycle Status'
       }
     }
   }

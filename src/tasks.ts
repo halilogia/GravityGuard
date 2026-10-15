@@ -36,6 +36,10 @@ export interface DiscoverTaskOptions {
 export const TASK_FILE_RELATIVE_PATHS: readonly string[] = [
   'tasks.md',
   'task.md',
+  'TASKS.md',
+  'TASK.md',
+  'docs/tasks.md',
+  'docs/TASKS.md',
   '.gravityguard/tasks.md',
   '.gravityguard/runtime/tasks.md'
 ];
@@ -301,6 +305,7 @@ export function taskFileCandidates(
   }
 
   if (isUsableConversationId(conversationId) && homeDir) {
+    add(path.join(homeDir, '.gemini', 'antigravity', 'brain', conversationId.trim(), 'tasks.md'));
     add(path.join(homeDir, '.gemini', 'antigravity', 'brain', conversationId.trim(), 'task.md'));
   }
   return result;
@@ -398,4 +403,91 @@ export function tasksSignature(files: readonly TaskFile[]): string {
     }
   }
   return `${files.length}.${(hash >>> 0).toString(36)}`;
+}
+
+/**
+ * Updates the checkbox marker on the specified 1-based line of a markdown task file.
+ * Preserves line endings (CRLF / LF).
+ */
+export function updateTaskItemStatus(filePath: string, line: number, nextStatus: TaskStatus): boolean {
+  try {
+    if (!fs.existsSync(filePath)) {
+      return false;
+    }
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const isCrlf = raw.includes('\r\n');
+    const lines = raw.split(/\r?\n/);
+    const idx = line - 1;
+    if (idx < 0 || idx >= lines.length) {
+      return false;
+    }
+    const currentLine = lines[idx];
+    const marker = nextStatus === 'done' ? 'x' : nextStatus === 'in_progress' ? '/' : ' ';
+    const updatedLine = currentLine.replace(/^(\s*(?:[-*+]|\d+\.)\s*\[)(?: |\/|x|X)(\]\s+.*)$/, `$1${marker}$2`);
+    if (updatedLine === currentLine) {
+      return false;
+    }
+    lines[idx] = updatedLine;
+    fs.writeFileSync(filePath, lines.join(isCrlf ? '\r\n' : '\n'), 'utf8');
+    return true;
+  } catch (err) {
+    console.error(`[GravityGuard] Failed to update task status in ${filePath}:`, err);
+    return false;
+  }
+}
+
+/**
+ * Deletes the specified 1-based line from a markdown task file.
+ * Preserves line endings.
+ */
+export function deleteTaskItem(filePath: string, line: number): boolean {
+  try {
+    if (!fs.existsSync(filePath)) {
+      return false;
+    }
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const isCrlf = raw.includes('\r\n');
+    const lines = raw.split(/\r?\n/);
+    const idx = line - 1;
+    if (idx < 0 || idx >= lines.length) {
+      return false;
+    }
+    lines.splice(idx, 1);
+    fs.writeFileSync(filePath, lines.join(isCrlf ? '\r\n' : '\n'), 'utf8');
+    return true;
+  } catch (err) {
+    console.error(`[GravityGuard] Failed to delete task in ${filePath}:`, err);
+    return false;
+  }
+}
+
+/**
+ * Appends a new open task item to a markdown task file.
+ */
+export function addTaskItem(filePath: string, title: string): boolean {
+  try {
+    const trimmed = title.trim();
+    if (!trimmed) {
+      return false;
+    }
+    let raw = '';
+    let isCrlf = false;
+    if (fs.existsSync(filePath)) {
+      raw = fs.readFileSync(filePath, 'utf8');
+      isCrlf = raw.includes('\r\n');
+    } else {
+      const dir = path.dirname(filePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+    }
+    const newline = isCrlf ? '\r\n' : '\n';
+    const cleanRaw = raw.endsWith('\n') ? raw : (raw ? raw + newline : '');
+    const newLineContent = `- [ ] ${trimmed}${newline}`;
+    fs.writeFileSync(filePath, cleanRaw + newLineContent, 'utf8');
+    return true;
+  } catch (err) {
+    console.error(`[GravityGuard] Failed to add task in ${filePath}:`, err);
+    return false;
+  }
 }

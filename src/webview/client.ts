@@ -97,6 +97,40 @@ export function buildClientScript(nonce: string, activeTab: string): string {
             } else if (action === 'toggleDetail') {
               const elId = target.getAttribute('data-target');
               if (elId) toggleDetail(elId);
+            } else if (action === 'cycleTaskStatus') {
+              const filePath = target.getAttribute('data-path');
+              const line = parseInt(target.getAttribute('data-line') || '0', 10);
+              const nextStatus = target.getAttribute('data-next');
+              if (filePath && line > 0 && nextStatus) {
+                vscode.postMessage({ command: 'updateTaskStatus', path: filePath, line, status: nextStatus });
+              }
+            } else if (action === 'deleteTaskItem') {
+              const filePath = target.getAttribute('data-path');
+              const line = parseInt(target.getAttribute('data-line') || '0', 10);
+              if (filePath && line > 0) {
+                vscode.postMessage({ command: 'deleteTaskItem', path: filePath, line });
+              }
+            } else if (action === 'addTaskItem') {
+              const filePath = target.getAttribute('data-path');
+              const inputId = target.getAttribute('data-input-id');
+              const input = inputId ? document.getElementById(inputId) : null;
+              const text = input && input.value ? input.value.trim() : '';
+              if (filePath && text) {
+                vscode.postMessage({ command: 'addTaskItem', path: filePath, title: text });
+                input.value = '';
+              }
+            }
+          });
+
+          document.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && event.target && event.target.classList && event.target.classList.contains('task-add-input')) {
+              const input = event.target;
+              const text = input.value ? input.value.trim() : '';
+              const filePath = input.getAttribute('data-path');
+              if (filePath && text) {
+                vscode.postMessage({ command: 'addTaskItem', path: filePath, title: text });
+                input.value = '';
+              }
             }
           });
         </script>`;

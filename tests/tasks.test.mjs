@@ -12,7 +12,10 @@ import {
   discoverTaskFiles,
   collectTasks,
   countOpenTasks,
-  tasksSignature
+  tasksSignature,
+  updateTaskItemStatus,
+  deleteTaskItem,
+  addTaskItem
 } from '../dist/tasks.js';
 
 function tmpDir() {
@@ -165,3 +168,78 @@ test('tasksSignature changes when items change and is stable otherwise', () => {
   assert.notEqual(tasksSignature([a]), tasksSignature([changed]));
   assert.match(tasksSignature([]), /^0\./);
 });
+
+test('updateTaskItemStatus cycles status between open, in_progress, and done', () => {
+  const root = tmpDir();
+  try {
+    const p = write(root, 'tasks.md', '- [ ] first task\n* [/] second task\n1. [x] third task\n');
+
+    // Cycle first: open -> in_progress
+    assert.equal(updateTaskItemStatus(p, 1, 'in_progress'), true);
+    let items = parseTaskMarkdown(fs.readFileSync(p, 'utf8'));
+    assert.equal(items[0].status, 'in_progress');
+
+    // Cycle first: in_progress -> done
+    assert.equal(updateTaskItemStatus(p, 1, 'done'), true);
+    items = parseTaskMarkdown(fs.readFileSync(p, 'utf8'));
+    assert.equal(items[0].status, 'done');
+
+    // Cycle first: done -> open
+    assert.equal(updateTaskItemStatus(p, 1, 'open'), true);
+    items = parseTaskMarkdown(fs.readFileSync(p, 'utf8'));
+    assert.equal(items[0].status, 'open');
+
+    // Bad line or missing file
+    assert.equal(updateTaskItemStatus(p, 99, 'done'), false);
+    assert.equal(updateTaskItemStatus(path.join(root, 'missing.md'), 1, 'done'), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('deleteTaskItem removes line and preserves other tasks', () => {
+  const root = tmpDir();
+  try {
+    const p = write(root, 'tasks.md', '- [ ] keep first\n- [x] delete second\n- [/] keep third\n');
+    assert.equal(deleteTaskItem(p, 2), true);
+    const items = parseTaskMarkdown(fs.readFileSync(p, 'utf8'));
+    assert.equal(items.length, 2);
+    assert.equal(items[0].title, 'keep first');
+    assert.equal(items[1].title, 'keep third');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('addTaskItem appends open task to markdown file', () => {
+  const root = tmpDir();
+  try {
+    const p = write(root, 'tasks.md', '- [x] existing\n');
+    assert.equal(addTaskItem(p, 'newly added task'), true);
+    const items = parseTaskMarkdown(fs.readFileSync(p, 'utf8'));
+    assert.equal(items.length, 2);
+    assert.equal(items[1].title, 'newly added task');
+    assert.equal(items[1].status, 'open');
+
+    // Empty or whitespace title is rejected
+    assert.equal(addTaskItem(p, '   '), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('discoverTaskFiles discovers both tasks.md and task.md in brain folder', () => {
+  const root = tmpDir();
+  const home = tmpDir();
+  try {
+    write(home, '.gemini/antigravity/brain/conv-plural/tasks.md', '- [x] plural task\n');
+    const files = discoverTaskFiles([root], { conversationId: 'conv-plural', homeDir: home });
+    assert.equal(files.length, 1);
+    assert.equal(files[0].items[0].title, 'plural task');
+    assert.equal(files[0].done, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+

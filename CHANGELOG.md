@@ -5,6 +5,20 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.11] - 2026-10-15
+
+### Added & Enhanced (Interactive Task Management & Universal task.md / tasks.md Discovery)
+- **Evrensel Görev Dosyası Keşfi (tasks.md & task.md)**:
+  - Antigravity brain klasörlerinde hem `tasks.md` (çoğul) hem de `task.md` (tekil) dosyalarını arayacak çift yönlü tarama eklendi; daha önce sadece `task.md` arandığı için boş gözüken Antigravity sohbet görevleri (`brain/<conversationId>/tasks.md`) anında görünür hale getirildi.
+  - Proje kök dizinlerinde standart `TASKS.md`, `TASK.md`, `docs/tasks.md` ve `docs/TASKS.md` konumları otomatik keşfe dahil edildi.
+- **İnteraktif Görev Durum Döngüsü (Tamamlandı / Devam Ediyor / Açık)**:
+  - Görev onay kutularına ve durum simgelerine tek tıkla döngüsel geçiş eklendi (`Açık [ ]` -> `Devam Ediyor [/]` -> `Tamamlandı [x]` -> `Açık [ ]`).
+  - Webview üzerinden yapılan durum değişiklikleri doğrudan diskteki markdown dosyasını satır satır günceller ve paneli anında yeniler.
+- **Görev Silme & Yeni Görev Ekleme**:
+  - Her görev satırına cerrahi satır silme butonu (`trash2` ikonu) eklendi (`deleteTaskItem`).
+  - Her görev kartının altına anlık görev ekleme çubuğu (`+ Ekle` butonu ve `Enter` tuşu desteği) eklendi (`addTaskItem`).
+- **Kapsamlı Test Kapsamı**: `tests/tasks.test.mjs` dosyasına durum döngüsü, satır silme, görev ekleme ve brain `tasks.md` keşfi için 4 yeni birim test eklendi (toplam 84/84 test %100 başarıyla geçti).
+
 ## [1.4.10] - 2026-10-14
 
 ### Added & Enhanced (Obligation Dismissal, Agent Attribution Persistence, Prominent Tasks Tab)

@@ -9,6 +9,7 @@ import { handleOpenConfig } from '../commands';
 import { getNonce } from './html_utils';
 import { loadGuardianState, getLiveLogPath } from './state';
 import { buildHtmlDocument, extractRootInnerHtml } from './layout';
+import { updateTaskItemStatus, deleteTaskItem, addTaskItem, TaskStatus } from '../tasks';
 
 export class GuardianViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
@@ -86,7 +87,7 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
       this._isHtmlInitialized = false;
     });
 
-    webviewView.webview.onDidReceiveMessage(async (message: { command: string; path?: string; text?: string; tab?: string }) => {
+    webviewView.webview.onDidReceiveMessage(async (message: { command: string; path?: string; text?: string; tab?: string; line?: number; status?: string; title?: string }) => {
       if (message.command === 'ready') {
         this._isWebviewReady = true;
         this._recoveryAttempts = 0;
@@ -134,6 +135,21 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
         this.dismissObligation(message.path);
       } else if (message.command === 'clearAllObligations') {
         this.clearAllObligations();
+      } else if (message.command === 'updateTaskStatus' && message.path && typeof message.line === 'number' && message.status) {
+        if (updateTaskItemStatus(message.path, message.line, message.status as TaskStatus)) {
+          this._lastDataSig = '';
+          this.updateHtml(true);
+        }
+      } else if (message.command === 'deleteTaskItem' && message.path && typeof message.line === 'number') {
+        if (deleteTaskItem(message.path, message.line)) {
+          this._lastDataSig = '';
+          this.updateHtml(true);
+        }
+      } else if (message.command === 'addTaskItem' && message.path && message.title) {
+        if (addTaskItem(message.path, message.title)) {
+          this._lastDataSig = '';
+          this.updateHtml(true);
+        }
       }
     });
 

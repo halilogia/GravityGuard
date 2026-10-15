@@ -37,7 +37,8 @@ export type LucideIconName =
   | 'listChecks'
   | 'check'
   | 'bot'
-  | 'hash';
+  | 'hash'
+  | 'plus';
 
 export interface IconOptions {
   size?: number;
@@ -82,7 +83,8 @@ const ICON_PATHS: Record<LucideIconName, string> = {
   listChecks: '<path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/>',
   check: '<polyline points="20 6 9 17 4 12"/>',
   bot: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
-  hash: '<line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>'
+  hash: '<line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>',
+  plus: '<path d="M5 12h14"/><path d="M12 5v14"/>'
 };
 
 /**
