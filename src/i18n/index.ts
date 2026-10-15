@@ -228,6 +228,7 @@ export const resources = {
       tasks: {
         title: 'Görev Listeleri',
         cleanState: 'Görev dosyası bulunamadı. tasks.md veya task.md oluşturulduğunda burada görünür.',
+        startByAdding: 'Aşağıya görev yazıp Enter\'a basarak veya "Ekle" butonuna tıklayarak hemen başlayabilirsiniz.',
         empty: 'Bu dosyada görev yok.',
         total: 'Toplam {{count}} Görev',
         done: 'Tamamlandı',
@@ -471,6 +472,7 @@ export const resources = {
       tasks: {
         title: 'Task Lists',
         cleanState: 'No task file found. It will appear here once a tasks.md or task.md exists.',
+        startByAdding: 'Type a new task below and press Enter or click "Add" to get started.',
         empty: 'No tasks in this file.',
         total: 'Total {{count}} Tasks',
         done: 'Done',

@@ -15,7 +15,9 @@ import {
   tasksSignature,
   updateTaskItemStatus,
   deleteTaskItem,
-  addTaskItem
+  addTaskItem,
+  findRecentBrainTaskFiles,
+  resolveDefaultTaskFilePath
 } from '../dist/tasks.js';
 
 function tmpDir() {
@@ -242,4 +244,56 @@ test('discoverTaskFiles discovers both tasks.md and task.md in brain folder', ()
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+test('findRecentBrainTaskFiles sorts by mtime descending and filters non-directories', () => {
+  const home = tmpDir();
+  try {
+    const p1 = write(home, '.gemini/antigravity/brain/older/tasks.md', '- [ ] older\n');
+    const p2 = write(home, '.gemini/antigravity/brain/newer/tasks.md', '- [ ] newer\n');
+    // Ensure mtime difference
+    fs.utimesSync(p1, new Date('2026-01-01'), new Date('2026-01-01'));
+    fs.utimesSync(p2, new Date('2026-06-01'), new Date('2026-06-01'));
+
+    const found = findRecentBrainTaskFiles(home, 2);
+    assert.equal(found.length, 2);
+    assert.equal(found[0], p2);
+    assert.equal(found[1], p1);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('resolveDefaultTaskFilePath prioritizes workspace, then session brain, then fallback', () => {
+  const root = tmpDir();
+  const home = tmpDir();
+  try {
+    assert.equal(resolveDefaultTaskFilePath(root, 'sess-1', home), path.join(root, 'tasks.md'));
+    assert.equal(resolveDefaultTaskFilePath('', 'sess-1', home), path.join(home, '.gemini', 'antigravity', 'brain', 'sess-1', 'tasks.md'));
+    assert.equal(resolveDefaultTaskFilePath('', 'default', home), path.join(home, 'tasks.md'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('collectTasks with allowBrainFallback discovers active brain tasks when workspace has no tasks', () => {
+  const root = tmpDir();
+  const home = tmpDir();
+  try {
+    write(home, '.gemini/antigravity/brain/active-sess/tasks.md', '- [ ] active brain task\n');
+    const files = collectTasks({
+      workspaceRoot: root,
+      events: [{ conversationId: 'non-existent-conv' }],
+      sessionId: 'another-non-existent',
+      homeDir: home,
+      allowBrainFallback: true
+    });
+    assert.equal(files.length, 1);
+    assert.equal(files[0].items[0].title, 'active brain task');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 

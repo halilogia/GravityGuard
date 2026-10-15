@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { filterEventsAfterSeq } from '../view_filter';
-import { TaskFile, collectTasks } from '../tasks';
+import { TaskFile, collectTasks, resolveDefaultTaskFilePath } from '../tasks';
 import { GuardianData, GuardianViewModel } from './types';
 
 /**
@@ -143,6 +143,10 @@ export function loadGuardianState(clearedAfterSeq: number | null): GuardianViewM
   // Task checklists: markdown task files of the project roots / active Antigravity brain folder
   // plus governance.json tasks (read errors are swallowed inside collectTasks)
   let tasks: TaskFile[] = [];
+  const activeEditorPath = vscode.window.activeTextEditor?.document.fileName;
+  const normalizedSessionId = sessionId === 'active' ? null : sessionId;
+  const defaultTaskPath = resolveDefaultTaskFilePath(workspaceRoot, normalizedSessionId);
+
   try {
     tasks = collectTasks({
       workspaceRoot,
@@ -150,7 +154,9 @@ export function loadGuardianState(clearedAfterSeq: number | null): GuardianViewM
       govData,
       events: Array.isArray(data.events) ? data.events : [],
       // 'active' is only the placeholder used when governance has no recorded session
-      sessionId: sessionId === 'active' ? null : sessionId
+      sessionId: normalizedSessionId,
+      activeEditorPath,
+      allowBrainFallback: true
     });
   } catch (e) {
     console.debug('[GravityGuard] Task discovery failed:', e);
@@ -169,6 +175,7 @@ export function loadGuardianState(clearedAfterSeq: number | null): GuardianViewM
     sessionId,
     projectCfg,
     totalObligations,
-    tasks
+    tasks,
+    defaultTaskPath
   };
 }

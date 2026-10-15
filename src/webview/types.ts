@@ -40,4 +40,5 @@ export interface GuardianViewModel {
   projectCfg: any;
   totalObligations: number;
   tasks: TaskFile[]; // checkbox task files discovered for the project roots / active conversation
+  defaultTaskPath?: string; // fallback path to create/append tasks when no file exists or for quick-add
 }

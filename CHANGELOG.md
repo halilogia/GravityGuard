@@ -5,6 +5,21 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.12] - 2026-10-15
+
+### Added & Enhanced (Active Brain Session Auto-Discovery & Prominent Quick-Add Task Bar)
+- **Aktif Oturum Görevlerinin Otomatik Keşfi (Active Brain Session Auto-Discovery)**:
+  - Antigravity IDE'de açık bir proje klasörü (workspace) bulunmadığında veya tek dosya modunda çalışıldığında, `~/.gemini/antigravity/brain/` dizini taranarak en son güncellenen aktif oturumun `tasks.md` dosyası otomatik olarak tespit edilir ve listelenir.
+  - Canlı loglarda eski/geçersiz oturum ID'leri bulunsa dahi, diskte geçerli bir brain klasörü olup olmadığı doğrulanır; bulunamazsa en son oturuma geri dönülür (`allowBrainFallback`).
+  - IDE editöründe açık olan `tasks.md` veya `task.md` dosyaları (`activeEditorPath`) otomatik olarak birinci öncelikli aday olarak tanınır.
+- **Her Zaman Erişilebilir Üst Hızlı Görev Ekleme Çubuğu (Top Quick-Add Bar)**:
+  - Görevler sekmesinin en üstüne doğrudan görünür bir hızlı görev ekleme kutusu (`#task-top-quick-add`) yerleştirildi. Artık 50+ maddeli uzun listelerde bile en alta kaydırmaya gerek kalmadan anında görev eklenebilir.
+  - `Enter` tuşuna basıldığında veya `+ Ekle` butonuna tıklandığında görev derhal kaydedilir ve arayüz anında güncellenir.
+- **Boş Durumda (Clean State) Anında Görev Oluşturma Girişi**:
+  - Henüz hiçbir görev dosyası bulunmadığında paneli boş bırakmak yerine, doğrudan görev yazılıp başlatılabilecek giriş alanı ve `+ Ekle` butonu eklendi.
+  - İlk görev yazıldığında, aktif oturumun brain dizinine veya çalışma alanına otomatik olarak `tasks.md` oluşturulur.
+- **Kapsamlı Birim Testleri**: `tests/tasks.test.mjs` dosyasına `findRecentBrainTaskFiles`, `resolveDefaultTaskFilePath` ve `allowBrainFallback` için 3 yeni test eklendi (toplam 87/87 test %100 geçti).
+
 ## [1.4.11] - 2026-10-15
 
 ### Added & Enhanced (Interactive Task Management & Universal task.md / tasks.md Discovery)

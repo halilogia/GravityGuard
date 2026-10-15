@@ -101,19 +101,46 @@ function renderTaskFile(file: TaskFile, fileIdx: number): string {
 export function renderTasksTab(vm: GuardianViewModel): string {
   const files = vm.tasks || [];
   if (files.length === 0) {
+    const targetPath = vm.defaultTaskPath || '';
     return `
-        <div class="clean-state-box">
+        <div style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 10px; font-weight: 800; color: var(--color-cyan);">${t('tasks.title')}</span>
+          <span class="project-pill">${t('tasks.total', { count: 0 })}</span>
+        </div>
+
+        <div class="clean-state-box" style="margin-bottom: 12px; padding: 16px 12px; text-align: center;">
           ${lucide('listChecks', { size: 28, color: '#10b981', strokeWidth: 1.75 })}
-          <div class="clean-state-title">${t('tasks.cleanState')}</div>
+          <div class="clean-state-title" style="margin-bottom: 4px;">${t('tasks.cleanState')}</div>
+          <div style="font-size: 9px; color: var(--text-muted); opacity: 0.85; margin-bottom: 10px;">
+            ${t('tasks.startByAdding')}
+          </div>
+          <div style="display: flex; gap: 4px; width: 100%; max-width: 320px; align-items: center; margin: 0 auto;">
+            <input type="text" id="task-add-input-empty" class="task-add-input" placeholder="${escapeHtml(t('tasks.addTaskPlaceholder'))}" style="flex: 1; font-size: 10px; background: rgba(0,0,0,0.3); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 4px; color: var(--text-main); padding: 5px 8px; outline: none;" data-path="${escapeHtml(targetPath)}" />
+            <button class="mini-btn btn-cyan" data-action="addTaskItem" data-input-id="task-add-input-empty" data-path="${escapeHtml(targetPath)}" style="font-size: 10px; padding: 5px 10px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; font-weight: 600;">${lucide('plus', { size: 11 })} ${escapeHtml(t('tasks.addTask'))}</button>
+          </div>
         </div>
       `;
   }
+
   const total = files.reduce((sum, f) => sum + f.total, 0);
+  const primaryFile = files.find(f => f.source === 'file') || files[0];
+  const primaryPath = primaryFile?.path || vm.defaultTaskPath || '';
+  const isGovOnly = !files.some(f => f.source === 'file');
+
+  const topQuickAdd = isGovOnly && !primaryPath
+    ? ''
+    : `
+        <div style="display: flex; gap: 4px; margin-bottom: 8px; padding: 6px; background: rgba(0, 0, 0, 0.2); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; align-items: center;">
+          <input type="text" id="task-top-quick-add" class="task-add-input" placeholder="${escapeHtml(t('tasks.addTaskPlaceholder'))}" style="flex: 1; font-size: 10px; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; color: var(--text-main); padding: 4px 7px; outline: none;" data-path="${escapeHtml(primaryPath)}" />
+          <button class="mini-btn btn-cyan" data-action="addTaskItem" data-input-id="task-top-quick-add" data-path="${escapeHtml(primaryPath)}" style="font-size: 9px; padding: 4px 9px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 3px; font-weight: 600;">${lucide('plus', { size: 10 })} ${escapeHtml(t('tasks.addTask'))}</button>
+        </div>`;
+
   return `
         <div style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
           <span style="font-size: 10px; font-weight: 800; color: var(--color-cyan);">${t('tasks.title')}</span>
           <span class="project-pill">${t('tasks.total', { count: total })}</span>
         </div>
+        ${topQuickAdd}
         ${files.map((file, idx) => renderTaskFile(file, idx)).join('')}
       `;
 }

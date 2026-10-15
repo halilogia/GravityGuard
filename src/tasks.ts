@@ -30,6 +30,8 @@ export interface DiscoverTaskOptions {
   conversationId?: string | null;
   /** Home directory override (tests); defaults to os.homedir(). */
   homeDir?: string;
+  /** Active editor file path in the IDE, if any. */
+  activeEditorPath?: string | null;
 }
 
 /** Task file locations probed for every project root, in priority order. */
@@ -135,21 +137,36 @@ export function isUsableConversationId(id: unknown): id is string {
  */
 export function pickConversationId(
   events: ReadonlyArray<{ conversationId?: unknown } | null | undefined> | null | undefined,
-  sessionId?: string | null
+  sessionId?: string | null,
+  homeDir?: string
 ): string | null {
+  const brainExists = (id: string): boolean => {
+    if (!homeDir) {
+      return true;
+    }
+    try {
+      return fs.existsSync(path.join(homeDir, '.gemini', 'antigravity', 'brain', id));
+    } catch {
+      return false;
+    }
+  };
+
   if (Array.isArray(events)) {
     for (const ev of events) {
       const id = ev?.conversationId;
       if (typeof id === 'string' && id.trim() !== '') {
-        if (isUsableConversationId(id)) {
-          return id.trim();
+        const trimmed = id.trim();
+        if (isUsableConversationId(trimmed) && brainExists(trimmed)) {
+          return trimmed;
         }
-        break;
       }
     }
   }
   if (isUsableConversationId(sessionId)) {
-    return sessionId.trim();
+    const trimmed = sessionId.trim();
+    if (brainExists(trimmed)) {
+      return trimmed;
+    }
   }
   return null;
 }
@@ -279,11 +296,90 @@ function normalizeKey(p: string): string {
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
+/**
+ * Scans ~/.gemini/antigravity/brain/ for directories containing tasks.md or task.md,
+ * sorted by modification time (newest first).
+ */
+export function findRecentBrainTaskFiles(homeDir: string = os.homedir(), limit: number = 3): string[] {
+  const brainDir = path.join(homeDir, '.gemini', 'antigravity', 'brain');
+  if (!fs.existsSync(brainDir)) {
+    return [];
+  }
+  try {
+    const entries = fs.readdirSync(brainDir, { withFileTypes: true });
+    const candidates: Array<{ path: string; mtime: number }> = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !isUsableConversationId(entry.name)) {
+        continue;
+      }
+      for (const taskName of ['tasks.md', 'task.md', 'TASKS.md']) {
+        const fullPath = path.join(brainDir, entry.name, taskName);
+        try {
+          const stat = fs.statSync(fullPath);
+          if (stat.isFile() && stat.size <= MAX_TASK_FILE_BYTES) {
+            candidates.push({ path: fullPath, mtime: stat.mtimeMs });
+            break;
+          }
+        } catch {
+          // ignore unreadable
+        }
+      }
+    }
+    candidates.sort((a, b) => b.mtime - a.mtime);
+    return candidates.slice(0, limit).map(c => c.path);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Resolves the default target file path to create/append tasks when creating the first task.
+ */
+export function resolveDefaultTaskFilePath(
+  workspaceRoot?: string,
+  sessionId?: string | null,
+  homeDir: string = os.homedir()
+): string {
+  if (workspaceRoot && typeof workspaceRoot === 'string' && workspaceRoot.trim() !== '') {
+    return path.join(workspaceRoot.trim(), 'tasks.md');
+  }
+  if (isUsableConversationId(sessionId) && homeDir) {
+    const brainFolder = path.join(homeDir, '.gemini', 'antigravity', 'brain', sessionId.trim());
+    return path.join(brainFolder, 'tasks.md');
+  }
+  if (homeDir) {
+    const recent = findRecentBrainTaskFiles(homeDir, 1);
+    if (recent.length > 0) {
+      return recent[0];
+    }
+    const brainDir = path.join(homeDir, '.gemini', 'antigravity', 'brain');
+    try {
+      if (fs.existsSync(brainDir)) {
+        const dirs = fs.readdirSync(brainDir, { withFileTypes: true })
+          .filter(d => d.isDirectory() && isUsableConversationId(d.name))
+          .map(d => ({
+            name: d.name,
+            mtime: fs.statSync(path.join(brainDir, d.name)).mtimeMs
+          }))
+          .sort((a, b) => b.mtime - a.mtime);
+        if (dirs.length > 0) {
+          return path.join(brainDir, dirs[0].name, 'tasks.md');
+        }
+      }
+    } catch {
+      // fallback
+    }
+    return path.join(homeDir, 'tasks.md');
+  }
+  return path.resolve('tasks.md');
+}
+
 /** Ordered, de-duplicated list of task file paths that may exist for the given roots / conversation. */
 export function taskFileCandidates(
   projectRoots: readonly string[],
   conversationId?: string | null,
-  homeDir: string = os.homedir()
+  homeDir: string = os.homedir(),
+  activeEditorPath?: string | null
 ): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -294,6 +390,16 @@ export function taskFileCandidates(
       result.push(candidate);
     }
   };
+
+  if (activeEditorPath && typeof activeEditorPath === 'string' && activeEditorPath.trim() !== '') {
+    const lower = activeEditorPath.toLowerCase();
+    if (lower.endsWith('.md')) {
+      const base = path.basename(lower);
+      if (base === 'tasks.md' || base === 'task.md' || lower.includes('brain')) {
+        add(activeEditorPath.trim());
+      }
+    }
+  }
 
   for (const root of projectRoots) {
     if (typeof root !== 'string' || root.trim() === '') {
@@ -331,7 +437,7 @@ export function readTaskFile(filePath: string): TaskFile | null {
  */
 export function discoverTaskFiles(projectRoots: readonly string[], options: DiscoverTaskOptions = {}): TaskFile[] {
   const files: TaskFile[] = [];
-  for (const candidate of taskFileCandidates(projectRoots, options.conversationId, options.homeDir)) {
+  for (const candidate of taskFileCandidates(projectRoots, options.conversationId, options.homeDir, options.activeEditorPath)) {
     const file = readTaskFile(candidate);
     if (file) {
       files.push(file);
@@ -353,6 +459,10 @@ export interface CollectTasksInput {
   sessionId?: string | null;
   /** Home directory override (tests). */
   homeDir?: string;
+  /** Active editor file path in the IDE, if any. */
+  activeEditorPath?: string | null;
+  /** When true, scans ~/.gemini/antigravity/brain/ for the newest task file if no files found. */
+  allowBrainFallback?: boolean;
 }
 
 /**
@@ -361,10 +471,27 @@ export interface CollectTasksInput {
  */
 export function collectTasks(input: CollectTasksInput): TaskFile[] {
   const sources: TaskFile[] = [];
+  const home = input.homeDir ?? os.homedir();
   try {
     const roots = collectTaskRoots(input.workspaceRoot, input.obligationMaps ?? []);
-    const brainConversation = pickConversationId(input.events, input.sessionId);
-    sources.push(...discoverTaskFiles(roots, { conversationId: brainConversation, homeDir: input.homeDir }));
+    const brainConversation = pickConversationId(input.events, input.sessionId, home);
+    sources.push(...discoverTaskFiles(roots, {
+      conversationId: brainConversation,
+      homeDir: home,
+      activeEditorPath: input.activeEditorPath
+    }));
+
+    // Fallback: If no markdown task files were found from roots or brainConversation,
+    // look for the most recently modified brain task file in ~/.gemini/antigravity/brain/*/
+    if (input.allowBrainFallback && sources.filter(f => f.source === 'file').length === 0 && home) {
+      const recentBrainFiles = findRecentBrainTaskFiles(home, 1);
+      for (const candidate of recentBrainFiles) {
+        const file = readTaskFile(candidate);
+        if (file) {
+          sources.push(file);
+        }
+      }
+    }
   } catch {
     // unreadable task files must never break the monitor
   }
