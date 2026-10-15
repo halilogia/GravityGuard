@@ -38,6 +38,9 @@ export type LucideIconName =
   | 'check'
   | 'bot'
   | 'hash'
+  | 'bookOpen'
+  | 'chevronRight'
+  | 'tag'
   | 'plus';
 
 export interface IconOptions {
@@ -84,6 +87,9 @@ const ICON_PATHS: Record<LucideIconName, string> = {
   check: '<polyline points="20 6 9 17 4 12"/>',
   bot: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
   hash: '<line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>',
+  bookOpen: '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>',
+  chevronRight: '<path d="m9 18 6-6-6-6"/>',
+  tag: '<path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z"/><circle cx="7" cy="7" r=".5" fill="currentColor"/>',
   plus: '<path d="M5 12h14"/><path d="M12 5v14"/>'
 };
 

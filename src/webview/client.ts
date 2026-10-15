@@ -122,14 +122,77 @@ export function buildClientScript(nonce: string, activeTab: string): string {
             }
           });
 
-          document.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter' && event.target && event.target.classList && event.target.classList.contains('task-add-input')) {
-              const input = event.target;
-              const text = input.value ? input.value.trim() : '';
-              const filePath = input.getAttribute('data-path');
+          // Knowledge Hub Event Handlers (ADR Accordion, Drawer, Quick-add)
+          document.addEventListener('click', (event) => {
+            const adrHeader = event.target instanceof Element ? event.target.closest('.adr-card-header') : null;
+            if (adrHeader && !event.target.closest('button')) {
+              const card = adrHeader.closest('.adr-card');
+              const body = card ? card.querySelector('.adr-card-body') : null;
+              const chevron = card ? card.querySelector('.adr-chevron') : null;
+              if (body) {
+                const isOpen = body.style.display === 'block';
+                body.style.display = isOpen ? 'none' : 'block';
+                if (chevron) {
+                  chevron.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(90deg)';
+                }
+              }
+              return;
+            }
+
+            const target = event.target instanceof Element ? event.target.closest('button') : null;
+            if (!target) return;
+
+            if (target.id === 'btn-toggle-add-adr' || target.id === 'btn-cancel-adr') {
+              const drawer = document.getElementById('add-adr-drawer');
+              if (drawer) {
+                drawer.style.display = drawer.style.display === 'none' ? 'block' : 'none';
+                if (drawer.style.display === 'block') {
+                  const titleInput = document.getElementById('new-adr-title');
+                  if (titleInput) titleInput.focus();
+                }
+              }
+            } else if (target.id === 'btn-save-adr') {
+              const filePath = target.getAttribute('data-path');
+              const titleInput = document.getElementById('new-adr-title');
+              const decisionInput = document.getElementById('new-adr-decision');
+              const title = titleInput && titleInput.value ? titleInput.value.trim() : '';
+              const decision = decisionInput && decisionInput.value ? decisionInput.value.trim() : '';
+              if (filePath && title && decision) {
+                vscode.postMessage({ command: 'addAdr', path: filePath, title, decision });
+                titleInput.value = '';
+                decisionInput.value = '';
+                const drawer = document.getElementById('add-adr-drawer');
+                if (drawer) drawer.style.display = 'none';
+              }
+            } else if (target.id === 'btn-save-changelog') {
+              const filePath = target.getAttribute('data-path');
+              const input = document.getElementById('changelog-add-input');
+              const text = input && input.value ? input.value.trim() : '';
               if (filePath && text) {
-                vscode.postMessage({ command: 'addTaskItem', path: filePath, title: text });
+                vscode.postMessage({ command: 'addChangelogItem', path: filePath, text });
                 input.value = '';
+              }
+            }
+          });
+
+          document.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+              if (event.target && event.target.classList && event.target.classList.contains('task-add-input')) {
+                const input = event.target;
+                const text = input.value ? input.value.trim() : '';
+                const filePath = input.getAttribute('data-path');
+                if (filePath && text) {
+                  vscode.postMessage({ command: 'addTaskItem', path: filePath, title: text });
+                  input.value = '';
+                }
+              } else if (event.target && event.target.id === 'changelog-add-input') {
+                const input = event.target;
+                const text = input.value ? input.value.trim() : '';
+                const filePath = input.getAttribute('data-path');
+                if (filePath && text) {
+                  vscode.postMessage({ command: 'addChangelogItem', path: filePath, text });
+                  input.value = '';
+                }
               }
             }
           });

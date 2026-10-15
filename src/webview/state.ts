@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { filterEventsAfterSeq } from '../view_filter';
 import { TaskFile, collectTasks, resolveDefaultTaskFilePath } from '../tasks';
+import { MemoryHubData, collectMemoryHubData } from '../knowledge';
 import { GuardianData, GuardianViewModel } from './types';
 
 /**
@@ -162,6 +163,14 @@ export function loadGuardianState(clearedAfterSeq: number | null): GuardianViewM
     console.debug('[GravityGuard] Task discovery failed:', e);
   }
 
+  // Knowledge Hub: KNOWLEDGE.md (ADRs, Gotchas) and CHANGELOG.md (Unreleased, Latest Release)
+  let memory: MemoryHubData = {};
+  try {
+    memory = collectMemoryHubData({ workspaceRoot });
+  } catch (e) {
+    console.debug('[GravityGuard] Memory hub discovery failed:', e);
+  }
+
   return {
     data,
     eventsList,
@@ -176,6 +185,7 @@ export function loadGuardianState(clearedAfterSeq: number | null): GuardianViewM
     projectCfg,
     totalObligations,
     tasks,
-    defaultTaskPath
+    defaultTaskPath,
+    memory
   };
 }

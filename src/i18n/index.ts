@@ -14,7 +14,8 @@ export const resources = {
         rules: 'Kurallar',
         insights: 'Analiz',
         skills: 'Beceriler',
-        tasks: 'Görevler'
+        tasks: 'Görevler',
+        knowledge: 'Hafıza'
       },
       current: {
         title: 'SON İŞLEM',
@@ -243,6 +244,33 @@ export const resources = {
         addTask: 'Ekle',
         addTaskPlaceholder: 'Yeni görev yazın... (Enter ile ekleyin)',
         cycleStatus: 'Durumu Değiştir'
+      },
+      knowledge: {
+        hubTitle: 'Hafıza & Karar Merkezi',
+        noKnowledgeFile: 'KNOWLEDGE.md bulunamadı',
+        adrsHeader: 'Mimari Kararlar (ADR)',
+        newAdr: 'Yeni ADR',
+        newAdrTitle: 'Yeni Mimari Karar (ADR) Ekle',
+        adrTitlePlaceholder: 'Karar Başlığı (Örn: SQLite FTS5 Hafıza Motoru)',
+        adrDecisionPlaceholder: 'Alınan karar ve teknik gerekçesi...',
+        decision: 'Karar',
+        context: 'Bağlam / Gerekçe',
+        consequences: 'Sonuçlar',
+        openLine: 'Dosyada Aç',
+        emptyAdrs: 'Henüz kayıtlı mimari karar (ADR) yok.',
+        gotchasHeader: 'Kör Noktalar & Yasaklar',
+        noGotchas: 'Kayıtlı kör nokta veya yasak bulunmuyor.',
+        changelogHeader: 'Sürüm & CHANGELOG Takibi',
+        pendingItems: 'Bekleyen',
+        unreleasedEmptyNotice: 'Bekleyen değişiklik yok. Kod değiştiğinde CHANGELOG güncelleyin (§6).',
+        addChangePlaceholder: 'Örn: Added: Yeni hafıza sekmesi entegre edildi',
+        addChange: 'Değişiklik Ekle',
+        totalReleasesCount: 'geçmiş sürüm',
+        statusAccepted: 'KABUL EDİLDİ',
+        statusProposed: 'DEĞERLENDİRİLİYOR',
+        statusSuperseded: 'GEÇERSİZ KILINDI',
+        statusRejected: 'REDDEDİLDİ',
+        statusDeprecated: 'KULLANIM DIŞI'
       }
     }
   },
@@ -258,7 +286,8 @@ export const resources = {
         rules: 'Rules',
         insights: 'Insights',
         skills: 'Skills',
-        tasks: 'Tasks'
+        tasks: 'Tasks',
+        knowledge: 'Memory'
       },
       current: {
         title: 'CURRENT ACTION',
@@ -487,6 +516,33 @@ export const resources = {
         addTask: 'Add',
         addTaskPlaceholder: 'Type a new task... (press Enter to add)',
         cycleStatus: 'Cycle Status'
+      },
+      knowledge: {
+        hubTitle: 'Knowledge & Decision Hub',
+        noKnowledgeFile: 'No KNOWLEDGE.md found',
+        adrsHeader: 'Architecture Decisions (ADR)',
+        newAdr: 'New ADR',
+        newAdrTitle: 'Add New Architecture Decision (ADR)',
+        adrTitlePlaceholder: 'Decision Title (e.g. SQLite FTS5 Memory Engine)',
+        adrDecisionPlaceholder: 'The decision and its technical rationale...',
+        decision: 'Decision',
+        context: 'Context / Rationale',
+        consequences: 'Consequences',
+        openLine: 'Open in File',
+        emptyAdrs: 'No architecture decisions (ADR) recorded yet.',
+        gotchasHeader: 'Gotchas & Constraints',
+        noGotchas: 'No recorded gotchas or constraints.',
+        changelogHeader: 'Releases & CHANGELOG Tracking',
+        pendingItems: 'Pending',
+        unreleasedEmptyNotice: 'No pending changes recorded. Update CHANGELOG when code changes (§6).',
+        addChangePlaceholder: 'e.g. Added: New memory tab integrated',
+        addChange: 'Add Change',
+        totalReleasesCount: 'past releases',
+        statusAccepted: 'ACCEPTED',
+        statusProposed: 'PROPOSED',
+        statusSuperseded: 'SUPERSEDED',
+        statusRejected: 'REJECTED',
+        statusDeprecated: 'DEPRECATED'
       }
     }
   }

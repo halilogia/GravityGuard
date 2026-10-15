@@ -5,6 +5,25 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.13] - 2026-10-16
+
+### Added & Enhanced (Core Docs & Memory Tab: Knowledge, ADR & Changelog Hub)
+- **Yeni [📚 Hafıza] (Knowledge & ADR) Sekmesi**:
+  - `[Canlı]`, `[Görevler]` yanına 3. sekme olarak `[📚 Hafıza]` (Knowledge Hub) entegre edildi.
+  - Projenin `KNOWLEDGE.md` ve `CHANGELOG.md` dosyalarını otomatik tespit ederek akıllı hibrit kartlara dönüştürür.
+- **Akıllı ADR Kartları (Architecture Decision Records)**:
+  - `ADR-001`, `ADR-002` mimari kararlarını durum rozetiyle (`[KABUL EDİLDİ]`, `[DEĞERLENDİRİLİYOR]`, `[REDDEDİLDİ]`, `[GEÇERSİZ KILINDI]`) listeler.
+  - Tıklandığında akordeon gibi genişleyerek Karar, Bağlam/Gerekçe ve Sonuçlar özetini gösterir.
+  - Panelden tek tıkla `+ Yeni ADR` ekleme çekmecesi sunar ve sonraki numarayı otomatik hesaplar.
+- **Kör Noktalar & Yasaklar (Gotchas & Constraints)**:
+  - `- [!]`, `> [!WARNING]` ve `## Kör Noktalar` maddelerini sarı uyarı çipleri olarak listeler, ajanların tekrarlayan mimari hatalar yapmasını önler.
+- **Canlı Sürüm & CHANGELOG Takipçisi**:
+  - `[Unreleased]` bekleyen değişiklikleri anlık izler; kod değiştiğinde boşsa §6 Doküman Yükümlülüğü uyarısı verir.
+  - Tek tıkla `+ Değişiklik Ekle` çubuğuyla commit öncesi anında `[Unreleased]` maddesi düşülmesini sağlar.
+  - Son yayınlanan sürümün özetini ve geçmiş sürüm sayısını kompakt rozetle gösterir.
+- **Yeni Vektör İkonları**: `src/icons.ts` SVG sistemine `bookOpen`, `chevronRight` ve `tag` ikonları eklendi.
+- **Kapsamlı Test Kapsamı**: `tests/knowledge.test.mjs` ile 8 yeni birim testi eklendi (toplam 95/95 test %100 geçti).
+
 ## [1.4.12] - 2026-10-15
 
 ### Added & Enhanced (Active Brain Session Auto-Discovery & Prominent Quick-Add Task Bar)

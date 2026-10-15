@@ -13,7 +13,8 @@ import {
   renderRulesTab,
   renderInsightsTab,
   renderSkillsTab,
-  renderTasksTab
+  renderTasksTab,
+  renderKnowledgeTab
 } from './tabs';
 
 export interface LayoutParams {
@@ -45,6 +46,8 @@ export function buildHtmlDocument(p: LayoutParams): string {
   const skillsHtml = renderSkillsTab(skillsList);
   const tasksHtml = renderTasksTab(vm);
   const openTasks = countOpenTasks(vm.tasks || []);
+  const knowledgeHtml = renderKnowledgeTab(vm);
+  const memoryAdrsCount = vm.memory?.knowledge?.totalAdrs || 0;
 
   // --- RENDER MAIN WEBVIEW HTML ---
   const htmlContent = `
@@ -89,6 +92,7 @@ ${WEBVIEW_STYLES}
         <div class="tabs-bar">
           <button class="tab-btn ${activeTab === 'live' ? 'active' : ''}" id="btn-live" data-action="setTab" data-tab="live">${lucide('zap', { size: 11 })} ${t('tabs.live')}</button>
           <button class="tab-btn ${activeTab === 'tasks' ? 'active' : ''}" id="btn-tasks" data-action="setTab" data-tab="tasks">${lucide('listChecks', { size: 11 })} ${t('tabs.tasks')}${openTasks > 0 ? `<span class="badge-counter" style="background: rgba(16, 185, 129, 0.25); color: #10b981;">${openTasks}</span>` : ''}</button>
+          <button class="tab-btn ${activeTab === 'knowledge' ? 'active' : ''}" id="btn-knowledge" data-action="setTab" data-tab="knowledge">${lucide('bookOpen', { size: 11 })} ${t('tabs.knowledge')}${memoryAdrsCount > 0 ? `<span class="badge-counter" style="background: rgba(56, 189, 248, 0.25); color: #38bdf8;">${memoryAdrsCount}</span>` : ''}</button>
           <button class="tab-btn ${activeTab === 'obligations' ? 'active' : ''}" id="btn-obligations" data-action="setTab" data-tab="obligations">${lucide('clipboardList', { size: 11 })} ${t('tabs.obligations')}${totalObligations > 0 ? `<span class="badge-counter">${totalObligations}</span>` : ''}</button>
           <button class="tab-btn ${activeTab === 'skills' ? 'active' : ''}" id="btn-skills" data-action="setTab" data-tab="skills">${lucide('sparkles', { size: 11 })} ${t('tabs.skills')}<span class="badge-counter" style="background: rgba(56, 189, 248, 0.25); color: #38bdf8;">${skillsList.length}</span></button>
           <button class="tab-btn ${activeTab === 'rules' ? 'active' : ''}" id="btn-rules" data-action="setTab" data-tab="rules">${lucide('sliders', { size: 11 })} ${t('tabs.rules')}</button>
@@ -98,6 +102,12 @@ ${WEBVIEW_STYLES}
         <!-- Panes -->
         <div id="tab-live" class="tab-pane ${activeTab === 'live' ? 'active' : ''}">
           ${liveHtml}
+        </div>
+        <div id="tab-tasks" class="tab-pane ${activeTab === 'tasks' ? 'active' : ''}">
+          ${tasksHtml}
+        </div>
+        <div id="tab-knowledge" class="tab-pane ${activeTab === 'knowledge' ? 'active' : ''}">
+          ${knowledgeHtml}
         </div>
         <div id="tab-obligations" class="tab-pane ${activeTab === 'obligations' ? 'active' : ''}">
           ${obligationsHtml}
@@ -110,9 +120,6 @@ ${WEBVIEW_STYLES}
         </div>
         <div id="tab-skills" class="tab-pane ${activeTab === 'skills' ? 'active' : ''}">
           ${skillsHtml}
-        </div>
-        <div id="tab-tasks" class="tab-pane ${activeTab === 'tasks' ? 'active' : ''}">
-          ${tasksHtml}
         </div>
         </div>
 

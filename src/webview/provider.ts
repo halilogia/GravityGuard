@@ -10,6 +10,7 @@ import { getNonce } from './html_utils';
 import { loadGuardianState, getLiveLogPath } from './state';
 import { buildHtmlDocument, extractRootInnerHtml } from './layout';
 import { updateTaskItemStatus, deleteTaskItem, addTaskItem, TaskStatus } from '../tasks';
+import { addAdrItem, addChangelogItem } from '../knowledge';
 
 export class GuardianViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
@@ -87,7 +88,7 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
       this._isHtmlInitialized = false;
     });
 
-    webviewView.webview.onDidReceiveMessage(async (message: { command: string; path?: string; text?: string; tab?: string; line?: number; status?: string; title?: string }) => {
+    webviewView.webview.onDidReceiveMessage(async (message: { command: string; path?: string; text?: string; tab?: string; line?: number; status?: string; title?: string; decision?: string }) => {
       if (message.command === 'ready') {
         this._isWebviewReady = true;
         this._recoveryAttempts = 0;
@@ -147,6 +148,16 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
         }
       } else if (message.command === 'addTaskItem' && message.path && message.title) {
         if (addTaskItem(message.path, message.title)) {
+          this._lastDataSig = '';
+          this.updateHtml(true);
+        }
+      } else if (message.command === 'addAdr' && message.path && message.title && message.decision) {
+        if (addAdrItem(message.path, { title: message.title, decision: message.decision })) {
+          this._lastDataSig = '';
+          this.updateHtml(true);
+        }
+      } else if (message.command === 'addChangelogItem' && message.path && message.text) {
+        if (addChangelogItem(message.path, message.text)) {
           this._lastDataSig = '';
           this.updateHtml(true);
         }
