@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.17] - 2026-10-16
+
+### Added (PMA Architectural Boundary Detector)
+- **`engine/gravityguard_engine/architecture_rules.py`**: Pragmatic Modular Architecture sınır dedektörü (BLOCK):
+  - `ARCH_PMA_HORIZONTAL_DENY`: `src/controllers|services|repositories|managers/` altına yazım engellenir (`index.ts` dahil); mesaj dikey dilim (`src/features/<ozellik>/`) yönlendirmesi içerir.
+  - `ARCH_PMA_DEEP_IMPORT`: bir feature, başka feature'ın iç dosyasını import edemez; yalnızca `features/<x>` ve `features/<x>/index` serbesttir (alias, göreli, Python ve dinamik import/require çözümlenir).
+  - `ARCH_PMA_CORE_PURITY`: `src/core/` → `features/`, `pipelines/`, `shared/ui` import edemez.
+  - `ARCH_PMA_SHARED_PURITY`: `src/shared/` → `features/` import edemez.
+  - Muafiyetler: testler (`*.test.*`, `*.spec.*`, `test_*.py`, `tests/`), vendor/build çıktıları, GravityGuard'ın kendi deposu; import kapıları için ayrıca composition root'lar (`main`, `App`, `index`).
+- **`engine/gravityguard_engine/dispatcher.py`**: GUARD 4B olarak bağlandı; `is_rule_shadow` ile shadow moduna alınabilir.
+- **`engine/tests/test_architecture_rules.py`**: tüm PMA kuralları, ihlaller ve muafiyetler için birim testleri.
+
 ### Fixed (Webview "Could not register service worker: InvalidStateError")
 - **Kök neden ölçüldü**: Hata, VS Code'un webview barındırıcı sayfasından (`pre/index.html`) eklentinin `webview.html` atamasından ÖNCE geliyor; eklenti zamanlamasıyla önlenemez. Gerçek IDE profilinin klonunda (aynı eklentiler, önbellek yok) 8/8 tam yeniden başlatma ve 12/12 pencere yenilemesi hatasızdı; klon kendi `Service Worker` deposunu yeniden oluşturdu. Bozuk durum, `Service Worker` klasörü ALTINDAN silinen uzun süredir açık IDE sürecinde görülüyor: o süreç depoyu yeniden oluşturmaz, her yeni webview hata verir.
 - **`tools/auto_update_ide.py`**: `Service Worker` ve `Code Cache` temizliği artık yalnızca hiçbir Antigravity / Antigravity IDE süreci çalışmıyorken yapılır; IDE açıkken adım atlanır ve nedeni yazdırılır (açık IDE'nin altından silmek, o IDE'de webview'ları bozuyordu).

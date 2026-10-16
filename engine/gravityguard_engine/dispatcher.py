@@ -17,6 +17,8 @@ from .architecture_rules import (
     check_arch_file_growth,
     check_g3_compiler_bypass,
     check_g4_import_matrix,
+    check_pma_horizontal,
+    check_pma_imports,
     check_oe_spike,
     is_ts_cohesive_monolith,
     record_and_check_cumulative_growth,
@@ -536,6 +538,27 @@ def validate_gravityguard() -> None:
             print(json.dumps({
                 "decision": "deny",
                 "reason": f"🛑 [G4_IMPORT_MATRIX]: '{target_file}' - {g4_reason}"
+            }))
+            sys.exit(0)
+
+    # ========================================================================
+    # GUARD 4B: ARCH_PMA_* — PRAGMATIC MODULAR ARCHITECTURE BOUNDARIES (BLOCK)
+    # ========================================================================
+    pma_hits = []
+    pma_h_violated, pma_h_reason = check_pma_horizontal(target_file)
+    if pma_h_violated:
+        pma_hits.append(("ARCH_PMA_HORIZONTAL_DENY", pma_h_reason))
+    pma_i_violated, pma_i_rule, pma_i_reason = check_pma_imports(target_file, added_text)
+    if pma_i_violated:
+        pma_hits.append((pma_i_rule, pma_i_reason))
+    for pma_rule, pma_reason in pma_hits:
+        if is_rule_shadow(pma_rule, cfg):
+            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {pma_reason}", rule_id=pma_rule)
+        else:
+            _log("BLOCKED", target_file, pma_reason, rule_id=pma_rule)
+            print(json.dumps({
+                "decision": "deny",
+                "reason": f"🛑 [{pma_rule}]: '{target_file}' - {pma_reason}"
             }))
             sys.exit(0)
 
