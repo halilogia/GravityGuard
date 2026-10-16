@@ -29,12 +29,15 @@ class TestTranslation(unittest.TestCase):
         os.environ.pop("CLAUDE_PROJECT_DIR", None)
 
     def test_write_becomes_write_to_file(self):
+        # A path that is absolute on THIS platform and Python version (os.path.isabs("/x") differs between them on
+        # Windows), so the adapter must hand it over unchanged.
+        target = os.path.abspath("/proj/a.py")
         payload = adapter.to_engine_pretool({
             "session_id": "s1", "cwd": "/proj", "tool_name": "Write",
-            "tool_input": {"file_path": "/proj/a.py", "content": "x = 1\n"},
+            "tool_input": {"file_path": target, "content": "x = 1\n"},
         })
         self.assertEqual(payload["toolCall"]["name"], "write_to_file")
-        self.assertEqual(payload["toolCall"]["args"], {"TargetFile": os.path.abspath("/proj/a.py"), "CodeContent": "x = 1\n"})
+        self.assertEqual(payload["toolCall"]["args"], {"TargetFile": target, "CodeContent": "x = 1\n"})
 
     def test_edit_becomes_replace_file_content(self):
         payload = adapter.to_engine_pretool({
@@ -60,12 +63,13 @@ class TestTranslation(unittest.TestCase):
             self.assertIsNone(adapter.to_engine_pretool({"session_id": "s1", "cwd": "/p", "tool_name": name, "tool_input": {}}))
 
     def test_notebook_edit_becomes_a_write_of_the_new_cell_source(self):
+        target = os.path.abspath("/proj/a.ipynb")
         payload = adapter.to_engine_pretool({
             "session_id": "s1", "cwd": "/proj", "tool_name": "NotebookEdit",
-            "tool_input": {"notebook_path": "/proj/a.ipynb", "new_source": "x = 1\n", "cell_id": "c1"},
+            "tool_input": {"notebook_path": target, "new_source": "x = 1\n", "cell_id": "c1"},
         })
         self.assertEqual(payload["toolCall"]["name"], "write_to_file")
-        self.assertEqual(payload["toolCall"]["args"], {"TargetFile": os.path.abspath("/proj/a.ipynb"), "CodeContent": "x = 1\n"})
+        self.assertEqual(payload["toolCall"]["args"], {"TargetFile": target, "CodeContent": "x = 1\n"})
 
     def test_conversation_id_is_provider_prefixed(self):
         self.assertEqual(adapter.conversation_id({"session_id": "abc"}), "claude:abc")
