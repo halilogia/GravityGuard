@@ -38,12 +38,27 @@ More details here.
   assert.equal(result.description, 'This is the primary summary paragraph of the skill.');
 });
 
-test('scanAllSkills discovers global and builtin skills', () => {
-  const skills = scanAllSkills();
-  assert.ok(Array.isArray(skills), 'Skills should be an array');
-  assert.ok(skills.length > 0, 'Should discover at least one skill in global or builtin paths');
-  const hasCoreDocsOrOther = skills.some(s => s.name === 'core-docs' || s.name === 'find-skill' || s.name === 'automation');
-  assert.ok(hasCoreDocsOrOther, 'Expected to find core-docs, find-skill, or automation');
+test('scanAllSkills discovers global skills under the user home', () => {
+  // Hermetic: a throw-away home with one skill, so the test never depends on what the developer (or the CI runner)
+  // happens to have installed under ~/.gemini.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gg-home-'));
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  try {
+    write(home, '.gemini/config/skills/core-docs/SKILL.md', '---\nname: core-docs\ndescription: Core docs standard\n---\n');
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    const skills = scanAllSkills();
+    assert.ok(Array.isArray(skills), 'Skills should be an array');
+    const found = skills.find(s => s.name === 'core-docs');
+    assert.ok(found, 'Expected the fixture skill core-docs under the user home');
+    assert.equal(found.scope, 'global');
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test('scanAllSkills detects universal agent rule files by agent type', () => {

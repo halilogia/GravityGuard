@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (CI: hermetic skills test)
+- **`tests/skills.test.mjs`**: `scanAllSkills discovers global skills under the user home` artık geliştiricinin gerçek `~/.gemini` dizinine değil, geçici bir ev dizinindeki fixture beceriye (`core-docs`) bakar (`HOME`/`USERPROFILE` geçici olarak değiştirilir). Test, beceri kurulu olmayan CI makinelerinde (ubuntu/macos/windows) "Should discover at least one skill" diye düşüyordu; son üç push'un kırmızı CI'ının tek sebebi buydu. Temiz checkout'ta `npm test` 120/120 geçer.
+
 ### Added & Fixed (One-Click IDE Auto-Updater & Webview ServiceWorker Cache Purge)
 - **Tek Tıkla Otomatik IDE Güncelleyici (`tools/auto_update_ide.py` & `.bat`)**:
   - `npm run update:ide` komutu eklendi: TypeScript'i derler, `.antigravity-ide` ve `.vscode` eklenti klasörlerine doğrudan dağıtır, eski sürümleri temizler ve `extensions.json` kaydını günceller.
