@@ -11,8 +11,8 @@ export function buildClientScript(nonce: string, activeTab: string): string {
           const savedState = vscode.getState() || {};
           let currentTab = savedState.currentTab || '${escapeJs(activeTab)}';
 
-          // Handshake: tells the extension host the document booted (disarms recovery watchdog)
-          vscode.postMessage({ command: 'ready' });
+          // Handshake: tells the extension host this exact document generation booted (nonce ignores stale documents)
+          vscode.postMessage({ command: 'ready', nonce: '${nonce}' });
 
           // In-place dynamic DOM replacement without iframe reload (eliminates InvalidStateError)
           window.addEventListener('message', (event) => {

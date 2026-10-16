@@ -5,6 +5,19 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.16] - 2026-10-16
+
+### Fixed & Architectural Protection (ServiceWorker InvalidStateError Elimination)
+- **Webview Yaşam Döngüsü Durum Makinesi (`src/webview/lifecycle.ts`)**:
+  - `unresolved → hidden → settling → loading → ready → recovering → failed → disposed` aşamalarından oluşan, `vscode` bağımsız deterministik durum makinesi kuruldu.
+  - `webview.html` ataması tamamen bu denetleyiciye bağlandı; iframe henüz DOM'a bağlanmadan, gizliyken veya yüklenme/kapanma aşamasındayken HTML atanması engellendi.
+  - Görünürlük açıldığında 150ms "settle" beklemesi konularak Chromium iframe dokümanının hazır olması sağlandı.
+  - Canlı güncellemeler dokümanı yeniden oluşturup ServiceWorker'ı sıfırlamak yerine `postMessage` ile yerinde (in-place) DOM güncellemesine devredildi.
+  - Bayat nonce handshake filtrelemesi ile eski veya yarışa giren dokümanların 'ready' sinyalleri izole edildi.
+  - Kurtarma bütçesi tükendiğinde otomatik `workbench.action.webview.reloadWebviewAction` kancası ile host düzeyinde temiz ServiceWorker kaydı tetiklendi.
+- **Kapsamlı Test Kapsamı (`tests/webview_lifecycle.test.mjs`)**:
+  - Settle gecikmesi, gizliyken HTML basılmaması, yükleme isteklerinin birleştirilmesi, yerinde güncelleme, geri çekilme (backoff) ve dispose senaryoları için 11 yeni birim testi eklendi (toplam 109 Node testi %100 geçti).
+
 ## [1.4.15] - 2026-10-16
 
 ### Added & Enhanced (Official Extension Brand Identity & High-Res App Icon)

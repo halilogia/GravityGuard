@@ -17,11 +17,25 @@ test('resetWebview command is contributed and registered', () => {
 test('client script posts ready handshake', () => {
   const script = buildClientScript('nonce123', 'live');
   assert.ok(script.includes("command: 'ready'"));
+  assert.ok(script.includes("nonce: 'nonce123'"), 'ready carries the document nonce');
 });
 
 test('recovery failure message exists in both languages', () => {
   for (const lang of ['tr', 'en']) {
     initI18n(lang);
     assert.notEqual(t('actions.webviewRecoveryFailed'), 'actions.webviewRecoveryFailed');
+  }
+});
+
+test('provider only assigns webview.html through the lifecycle controller', () => {
+  const src = fs.readFileSync(new URL('../src/webview/provider.ts', import.meta.url), 'utf8');
+  assert.equal((src.match(/\.webview\.html\s*=/g) || []).length, 1);
+  assert.ok(src.includes('workbench.action.webview.reloadWebviewAction'));
+});
+
+test('reloadWebviews label exists in both languages', () => {
+  for (const lang of ['tr', 'en']) {
+    initI18n(lang);
+    assert.notEqual(t('actions.reloadWebviews'), 'actions.reloadWebviews');
   }
 });
