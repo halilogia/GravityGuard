@@ -5,6 +5,14 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.15] - 2026-10-16
+
+### Added & Enhanced (Official Extension Brand Identity & High-Res App Icon)
+- **Resmi VSIX / Marketplace İkonu (`media/icon.png` & `media/icon.svg`)**:
+  - GravityGuard'ın "Architecture Airbag & Gatekeeper" kimliğine özel tasarlanmış 512x512 yüksek çözünürlüklü vektör ikon eklendi.
+  - Tasarım bileşenleri: Kozmik kalkan silüeti, kütleçekim orbital halkaları (Antigravity gravitational rings), mimari şok emici kuantum hava yastığı elması ve yeşil anayasal doğrulama anahtarı.
+  - `package.json` içine `"icon": "media/icon.png"` tanımlanarak VS Code ve Antigravity IDE'deki varsayılan genel kutu ikonu yerine resmi marka logosunun gösterilmesi sağlandı.
+
 ## [1.4.14] - 2026-10-16
 
 ### Changed (Test Evidence Engine: Testing Trophy Alignment — T1/T2/T3)

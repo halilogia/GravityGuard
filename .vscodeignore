@@ -30,6 +30,7 @@ plugin/
 brain/
 docs/
 media/*.png
+!media/icon.png
 media/*.jpg
 ARCHITECTURE.md
 CHANGELOG.md

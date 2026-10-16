@@ -2,8 +2,9 @@
   "name": "gravityguard",
   "displayName": "GravityGuard — Architecture Airbag & Gatekeeper for AI Agents",
   "description": "Deterministic architectural gatekeeper, test sufficiency analyzer, and prompt engineering copilot for Antigravity IDE & AI Coding Agents.",
-  "version": "1.4.14",
+  "version": "1.4.15",
   "publisher": "halilogia",
+  "icon": "media/icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/halilogia/GravityGuard.git"

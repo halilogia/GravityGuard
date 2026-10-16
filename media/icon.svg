@@ -1,0 +1,143 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Background Gradient -->
+    <radialGradient id="bgGlow" cx="50%" cy="40%" r="65%">
+      <stop offset="0%" stop-color="#1e1b4b" stop-opacity="0.9"/>
+      <stop offset="55%" stop-color="#0f172a" stop-opacity="0.98"/>
+      <stop offset="100%" stop-color="#030712" stop-opacity="1"/>
+    </radialGradient>
+
+    <!-- Shield Border Gradient -->
+    <linearGradient id="shieldBorderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="45%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#c084fc"/>
+    </linearGradient>
+
+    <!-- Shield Interior Gradient -->
+    <linearGradient id="shieldInnerGrad" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" stop-opacity="0.92"/>
+      <stop offset="50%" stop-color="#0f172a" stop-opacity="0.96"/>
+      <stop offset="100%" stop-color="#020617" stop-opacity="1"/>
+    </linearGradient>
+
+    <!-- Core Singularity Gradient -->
+    <linearGradient id="coreGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#67e8f9"/>
+      <stop offset="50%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#818cf8"/>
+    </linearGradient>
+
+    <!-- Gravity Wave Gradient -->
+    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.1"/>
+      <stop offset="30%" stop-color="#38bdf8" stop-opacity="0.85"/>
+      <stop offset="70%" stop-color="#a855f7" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#a855f7" stop-opacity="0.1"/>
+    </linearGradient>
+
+    <!-- Neon Glow Filter -->
+    <filter id="neonGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="8" result="blur1"/>
+      <feGaussianBlur stdDeviation="16" result="blur2"/>
+      <feMerge>
+        <feMergeNode in="blur2"/>
+        <feMergeNode in="blur1"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Shield Drop Shadow -->
+    <filter id="shieldShadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#020617" flood-opacity="0.95"/>
+      <feDropShadow dx="0" dy="4" stdDeviation="10" flood-color="#38bdf8" flood-opacity="0.3"/>
+    </filter>
+
+    <!-- Shockwave Gradient -->
+    <linearGradient id="waveGrad" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#818cf8" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 1. Squircle Canvas Background -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGlow)"/>
+  <rect width="508" height="508" x="2" y="2" rx="110" fill="none" stroke="url(#shieldBorderGrad)" stroke-width="2.5" stroke-opacity="0.4"/>
+
+  <!-- 2. Ambient Gravitational Field Rings (Background Orbitals) -->
+  <g opacity="0.5" filter="url(#neonGlow)">
+    <ellipse cx="256" cy="246" rx="200" ry="60" transform="rotate(-26 256 246)" fill="none" stroke="url(#ringGrad)" stroke-width="3" stroke-dasharray="14 8"/>
+    <ellipse cx="256" cy="246" rx="180" ry="50" transform="rotate(34 256 246)" fill="none" stroke="url(#ringGrad)" stroke-width="2.5" stroke-dasharray="20 10"/>
+  </g>
+
+  <!-- 3. Airbag Shockwave Arcs -->
+  <path d="M 120 148 C 190 95, 322 95, 392 148" fill="none" stroke="url(#waveGrad)" stroke-width="3.5" stroke-linecap="round" opacity="0.65"/>
+  <path d="M 148 174 C 205 130, 307 130, 364 174" fill="none" stroke="url(#waveGrad)" stroke-width="2.5" stroke-linecap="round" opacity="0.45"/>
+
+  <!-- 4. The Guardian Shield (Main Body) -->
+  <g filter="url(#shieldShadow)">
+    <!-- Shield Outer Shell -->
+    <path d="M 256 82 
+             C 328 82, 388 102, 388 178 
+             C 388 290, 312 372, 256 426 
+             C 200 372, 124 290, 124 178 
+             C 124 102, 184 82, 256 82 Z" 
+          fill="url(#shieldInnerGrad)" 
+          stroke="url(#shieldBorderGrad)" 
+          stroke-width="7" 
+          stroke-linejoin="round"/>
+
+    <!-- Shield Inner Bevel Highlight -->
+    <path d="M 256 98 
+             C 316 98, 370 114, 370 182 
+             C 370 278, 302 352, 256 402 
+             C 210 352, 142 278, 142 182 
+             C 142 114, 196 98, 256 98 Z" 
+          fill="none" 
+          stroke="#ffffff" 
+          stroke-width="1.8" 
+          stroke-opacity="0.25"/>
+  </g>
+
+  <!-- 5. Gravitational Singularity Foreground Orbital Ring -->
+  <g filter="url(#neonGlow)">
+    <ellipse cx="256" cy="238" rx="146" ry="46" transform="rotate(-18 256 238)" fill="none" stroke="url(#shieldBorderGrad)" stroke-width="4.5"/>
+  </g>
+
+  <!-- 6. Architectural Airbag Geometric Core (Diamond Nexus) -->
+  <g filter="url(#neonGlow)">
+    <!-- Outer Core Diamond -->
+    <polygon points="256,164 316,234 256,304 196,234" 
+             fill="url(#coreGrad)" 
+             stroke="#ffffff" 
+             stroke-width="2.5" 
+             stroke-opacity="0.85"/>
+
+    <!-- Inner Core Geometry (The Constitutional Gatekeeper) -->
+    <polygon points="256,184 298,234 256,284 214,234" 
+             fill="#020617" 
+             fill-opacity="0.9" 
+             stroke="url(#shieldBorderGrad)" 
+             stroke-width="2"/>
+
+    <!-- Central Singularity Spark -->
+    <polygon points="256,208 276,234 256,260 236,234" 
+             fill="#ffffff" 
+             opacity="0.95"/>
+    <circle cx="256" cy="234" r="6" fill="#38bdf8"/>
+    <circle cx="256" cy="234" r="2.5" fill="#ffffff"/>
+  </g>
+
+  <!-- 7. Bottom Verification Anchor (Checkmark Gatekeeper Key) -->
+  <path d="M 238 340 L 252 354 L 276 326" 
+        fill="none" 
+        stroke="#38bdf8" 
+        stroke-width="5" 
+        stroke-linecap="round" 
+        stroke-linejoin="round" 
+        filter="url(#neonGlow)"/>
+
+  <!-- 8. Top Specular Glints -->
+  <circle cx="256" cy="84" r="3.5" fill="#ffffff" filter="url(#neonGlow)"/>
+  <circle cx="340" cy="118" r="2" fill="#ffffff" opacity="0.8"/>
+</svg>
