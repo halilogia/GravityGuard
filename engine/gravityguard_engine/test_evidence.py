@@ -7,7 +7,6 @@ import ast
 import fnmatch
 import os
 import re
-import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -17,6 +16,76 @@ DEFAULT_EXEMPT_PATTERNS: List[str] = [
 ]
 
 _TEST_FILE_PATTERNS = ("test_*.py", "*_test.py", "*.test.*", "*.spec.*", "conftest.py")
+
+# Subsystem / glob mapping (Testing Trophy): UI, webview and adapter layers are covered by
+# integration tests rather than 1:1 mirror unit tests. Production glob -> accepted test globs,
+# resolved against any ancestor of the target file. Extendable/overridable per glob key via
+# `testEvidence.subsystemMappings` in .gravityguard.json.
+DEFAULT_SUBSYSTEM_MAPPINGS: Dict[str, List[str]] = {
+    "src/webview/**": [
+        "tests/webview_*.test.mjs",
+        "tests/tasks.test.mjs",
+        "tests/knowledge.test.mjs",
+        "tests/obligations.test.mjs",
+        "tests/agent_identity.test.mjs",
+    ],
+}
+
+
+def _get_subsystem_mappings(cfg: Optional[dict] = None) -> Dict[str, List[str]]:
+    """Default mappings merged with `testEvidence.subsystemMappings` (config wins per glob key)."""
+    mappings: Dict[str, List[str]] = {k: list(v) for k, v in DEFAULT_SUBSYSTEM_MAPPINGS.items()}
+    if cfg and isinstance(cfg, dict):
+        te_cfg = cfg.get("testEvidence", {})
+        custom = te_cfg.get("subsystemMappings") if isinstance(te_cfg, dict) else None
+        if isinstance(custom, dict):
+            for glob_key, test_globs in custom.items():
+                if isinstance(test_globs, str):
+                    test_globs = [test_globs]
+                if isinstance(glob_key, str) and isinstance(test_globs, list):
+                    mappings[glob_key] = [g for g in test_globs if isinstance(g, str)]
+    return mappings
+
+
+def resolve_subsystem_test_files(target_file: str, cfg: Optional[dict] = None) -> List[str]:
+    """
+    Returns existing test files accepted as evidence for `target_file` through subsystem glob mappings.
+    Mapping globs match the normalized path (or any trailing portion of it); test globs are resolved
+    against the target's ancestor directories.
+    """
+    normalized = target_file.replace("\\", "/")
+    lowered = normalized.lower()
+
+    matched_globs: List[str] = []
+    for src_glob, test_globs in _get_subsystem_mappings(cfg).items():
+        pat = src_glob.replace("\\", "/").lower()
+        if fnmatch.fnmatch(lowered, pat) or fnmatch.fnmatch(lowered, f"*/{pat}"):
+            matched_globs.extend(test_globs)
+    if not matched_globs:
+        return []
+
+    roots: List[Path] = []
+    curr = Path(normalized).parent
+    roots.append(curr)
+    for _ in range(5):
+        if curr.parent == curr:
+            break
+        curr = curr.parent
+        roots.append(curr)
+
+    found: List[str] = []
+    for root in roots:
+        for tg in matched_globs:
+            try:
+                hits = sorted(root.glob(tg))
+            except (ValueError, NotImplementedError, OSError):
+                continue
+            for hit in hits:
+                if hit.is_file():
+                    path = str(hit).replace("\\", "/")
+                    if path not in found:
+                        found.append(path)
+    return found
 
 
 def is_exempt_from_test_evidence(target_file: str, cfg: Optional[dict] = None) -> bool:
@@ -100,13 +169,7 @@ def resolve_candidate_test_file(target_file: str, cfg: Optional[dict] = None) ->
             f"test_{stem}.js", f"test_{stem_us}.js"
         ]
         if "webview" in normalized:
-            candidate_names.extend([
-                "agent_identity.test.mjs",
-                "obligations.test.mjs",
-                "webview_tasks.test.mjs",
-                "webview_recovery.test.mjs",
-                f"webview_{stem}.test.mjs"
-            ])
+            candidate_names.append(f"webview_{stem}.test.mjs")
         candidate_names = list(dict.fromkeys(candidate_names))
     else:
         candidate_names = [f"test_{stem}{suffix}", f"test_{stem_us}{suffix}"]
@@ -211,8 +274,9 @@ def check_t1_missing_test(
 ) -> Tuple[bool, str, Optional[str]]:
     """
     T1 — MISSING_RELATED_TEST (WARN ONLY).
-    Triggers when production code changes but no candidate test file exists on disk,
-    or candidate test file exists but was not updated in the active session window.
+    Triggers when production code changes but no candidate test file exists on disk
+    (neither a 1:1 mirror test nor a subsystem-mapped integration test).
+    Test existence is the evidence; the test file's mtime is never penalized.
     Silent when the project has no test infrastructure at all.
     Returns: (warn_triggered, warn_message, candidate_test_path)
     """
@@ -225,6 +289,9 @@ def check_t1_missing_test(
     candidate_path, expected_name = resolve_candidate_test_file(target_file, cfg)
 
     if not candidate_path or not os.path.exists(candidate_path):
+        subsystem_files = resolve_subsystem_test_files(target_file, cfg)
+        if subsystem_files:
+            return False, "", subsystem_files[0]
         if not project_has_test_infrastructure(target_file, cfg):
             return False, "", None
         return True, (
@@ -232,20 +299,6 @@ def check_t1_missing_test(
             f"ancak ilişkili test dosyası ('{expected_name}') diskte bulunamadı. "
             f"Davranış değişikliği için ilgili test dosyasını oluşturmayı veya güncellemeyi değerlendirin."
         ), None
-
-    session_window = 300
-    if cfg and isinstance(cfg, dict):
-        session_window = cfg.get("testEvidence", {}).get("sessionWindowSeconds", 300)
-
-    try:
-        test_mtime = os.path.getmtime(candidate_path)
-        if (time.time() - test_mtime) > session_window:
-            return True, (
-                f"Test Kanıtı Uyarısı (T1_MISSING_RELATED_TEST): Üretim kodu değiştirildi ancak "
-                f"ilişkili test dosyası ('{candidate_path}') bu oturumda ({session_window}s) güncellenmedi."
-            ), candidate_path
-    except OSError:
-        test_mtime = 0.0
 
     return False, "", candidate_path
 
@@ -373,12 +426,14 @@ def check_t3_symbol_to_test_link(
     is_python: bool,
     is_ts: bool,
     projected_content: str = "",
-    added_line_numbers: Optional[Set[int]] = None
+    added_line_numbers: Optional[Set[int]] = None,
+    extra_test_paths: Optional[List[str]] = None
 ) -> Tuple[bool, str]:
     """
     T3 — SYMBOL_TO_TEST_LINK (WARN ONLY).
     Checks whether modified/added top-level functions or classes (including body-only changes)
-    are referenced by name in the candidate test file.
+    are referenced by name in the candidate test file (plus `extra_test_paths`, used for
+    subsystem-mapped integration tests).
     """
     if not added_text.strip() or not candidate_test_path:
         return False, ""
@@ -451,10 +506,14 @@ def check_t3_symbol_to_test_link(
     if not extracted_symbols:
         return False, ""
 
-    try:
-        with open(candidate_test_path, "r", encoding="utf-8", errors="ignore") as f:
-            test_content = f.read()
-    except (IOError, OSError):
+    test_content = ""
+    for test_path in [candidate_test_path] + [p for p in (extra_test_paths or []) if p != candidate_test_path]:
+        try:
+            with open(test_path, "r", encoding="utf-8", errors="ignore") as f:
+                test_content += f.read() + "\n"
+        except (IOError, OSError):
+            continue
+    if not test_content.strip():
         return False, ""
 
     missing_symbols = []
@@ -524,10 +583,13 @@ def evaluate_test_evidence(
                 warnings.append(("T1_MISSING_RELATED_TEST", t1_msg))
 
         if candidate_path and os.path.isfile(candidate_path):
+            direct_path, _ = resolve_candidate_test_file(target_file, cfg)
+            extra_paths = None if direct_path else resolve_subsystem_test_files(target_file, cfg)
             t3_warn, t3_msg = check_t3_symbol_to_test_link(
                 target_file, added_text, candidate_path, is_python, is_ts,
                 projected_content=projected_content,
-                added_line_numbers=added_line_numbers
+                added_line_numbers=added_line_numbers,
+                extra_test_paths=extra_paths
             )
             if t3_warn:
                 warnings.append(("T3_SYMBOL_TO_TEST_LINK", t3_msg))

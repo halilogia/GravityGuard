@@ -5,6 +5,14 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.14] - 2026-10-16
+
+### Changed (Test Evidence Engine: Testing Trophy Alignment — T1/T2/T3)
+- **Subsystem / Glob Mapping (`testEvidence.subsystemMappings`)**: T1 artık yalnızca birebir ayna test (`foo.ts` → `foo.test.ts`) aramıyor; üretim glob'u → kabul edilen test glob'ları eşlemesi destekleniyor. Varsayılan: `src/webview/**` → `tests/webview_*.test.mjs`, `tests/tasks.test.mjs`, `tests/knowledge.test.mjs`, `tests/obligations.test.mjs`, `tests/agent_identity.test.mjs`. `.gravityguard.json` içindeki eşlemeler varsayılanlara glob anahtarı bazında eklenir/üzerine yazar. Gerekçe: UI/webview/adapter katmanları için entegrasyon testleri, "her üretim dosyasına 1 unit test" anti-pattern'ine göre daha yüksek ROI sağlar.
+- **mtime cezası kaldırıldı**: `sessionWindowSeconds` (300s) kontrolü silindi. Test dosyası diskte mevcutsa (doğrudan veya subsystem eşlemesiyle) dosyanın son değişiklik zamanı artık `T1_MISSING_RELATED_TEST` üretmez; mtime testin kendisini değil dosya tarihini ölçüyordu. `sessionWindowSeconds` yapılandırma anahtarı geriye dönük uyumluluk için sessizce yok sayılır.
+- **T3 birleşik kapsam**: Subsystem eşlemesiyle bulunan testlerde sembol referansı tüm eşlenmiş test dosyalarının birleşiminde aranır (`extra_test_paths`); tek bir rastgele test dosyasına karşı yanlış T3 uyarısı oluşmaz.
+- **Testler**: `engine/tests/test_test_evidence.py` içine subsystem eşleme, config override/genişletme, eşlenmemiş dosyada T1 uyarısı, bayat mtime muafiyeti ve T3 birleşim senaryoları eklendi.
+
 ## [1.4.13] - 2026-10-16
 
 ### Added & Enhanced (Core Docs & Memory Tab: Knowledge, ADR & Changelog Hub)

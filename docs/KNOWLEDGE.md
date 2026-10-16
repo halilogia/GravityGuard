@@ -138,7 +138,7 @@ The Python engine enforces checks through an ordered, high-to-low priority pipel
 | Block | Consumed by | Notes |
 |---|---|---|
 | `layers` | `G4_IMPORT_MATRIX` (BLOCK) | Forbidden import targets per layer. Exact path-segment matching. |
-| `testEvidence` | `T1` / `T2` / `T3` (WARN) | `sourceRoots`, `testRoots`, `sessionWindowSeconds` (default 300), `exemptPatterns` (fnmatch globs), `deferredMode`. |
+| `testEvidence` | `T1` / `T2` / `T3` (WARN) | `sourceRoots`, `testRoots`, `subsystemMappings` (glob → test globs; default `src/webview/**`), `exemptPatterns` (fnmatch globs), `deferredMode`. `sessionWindowSeconds` kaldırıldı (mtime cezası yok). |
 | `review` | `R1` (Stop gate) | `enabled` (opt-in, default `false`); `exemptPatterns` (project-relative globs; defaults exclude `tests/**`, `test_*`, `*.test.ts`, …). Only production code suffixes are ever reviewed. |
 | `complexity` | `OE_SPIKE`, `ARCH_FILE_GROWTH` (WARN only) | `monolithLoc` (1000), `singleWriteLoc` (180), `creepBaseLoc` (800), `creepAddedLoc` (80), `overEngineeringMaxLoc` (50), `overEngineerAbstractions` (2). |
 | *(none)* | `hooks.json` in the live plugin | The plugin invokes `python scripts/srp-validator.py`, which is why the repo's `engine/gravity-validator.py` is renamed there. Both entry points state this in their header; `tools/sync_plugin.py` keeps them equal. |
