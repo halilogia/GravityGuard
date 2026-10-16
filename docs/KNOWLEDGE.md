@@ -179,6 +179,8 @@ The Python engine enforces checks through an ordered, high-to-low priority pipel
 5. **WARN rules may accept a human exemption; BLOCK rules may not.** Extending `complexity` or the marker to a blocking rule re-opens Anti-Goal 5 and must be argued explicitly.
 6. **Schema is a contract.** The hook stdout permits only `decision`, `reason`, `permissionOverrides`, `overwrite`; protojson discards the entire response for an unknown field, and a test harness using plain `json.loads` cannot observe that class of bug. `run_validator()` gates every response against the allowed key set for this reason.
 
+7. **"Could not register service worker: InvalidStateError" is a host failure, not an extension bug.** The error is raised by VS Code's own webview host page (`contrib/webview/browser/pre/index.html`) *before* the extension's `webview.html` is delivered, so no html-assignment timing can prevent it (upstream: microsoft/vscode#125993). Measured on a clone of the real IDE profile (same extensions, no caches): 8/8 full restarts and 12/12 reloads clean, and the clone re-created its own `Service Worker` store. The broken case was a *long-running* IDE process whose `Service Worker` folder had been deleted underneath it by `tools/auto_update_ide.py`: that process never recreates the store, so every new webview fails until the IDE is fully quit and reopened (a window reload is not enough). Rule: never delete `Service Worker` / `Code Cache` while an Antigravity process runs (the updater now refuses), and tell the user to fully restart when recovery gives up.
+
 ---
 
 ## 5. Release Cutting Ritual (repeatable — proven on v1.3.0)

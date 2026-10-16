@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (Webview "Could not register service worker: InvalidStateError")
+- **Kök neden ölçüldü**: Hata, VS Code'un webview barındırıcı sayfasından (`pre/index.html`) eklentinin `webview.html` atamasından ÖNCE geliyor; eklenti zamanlamasıyla önlenemez. Gerçek IDE profilinin klonunda (aynı eklentiler, önbellek yok) 8/8 tam yeniden başlatma ve 12/12 pencere yenilemesi hatasızdı; klon kendi `Service Worker` deposunu yeniden oluşturdu. Bozuk durum, `Service Worker` klasörü ALTINDAN silinen uzun süredir açık IDE sürecinde görülüyor: o süreç depoyu yeniden oluşturmaz, her yeni webview hata verir.
+- **`tools/auto_update_ide.py`**: `Service Worker` ve `Code Cache` temizliği artık yalnızca hiçbir Antigravity / Antigravity IDE süreci çalışmıyorken yapılır; IDE açıkken adım atlanır ve nedeni yazdırılır (açık IDE'nin altından silmek, o IDE'de webview'ları bozuyordu).
+- **`src/i18n/index.ts`**: Kurtarma başarısız olduğunda gösterilen mesaj (TR/EN), pencere yenilemenin yetmeyebileceğini ve tüm IDE pencerelerinin TAMAMEN kapatılıp yeniden açılması gerektiğini söyler.
+- **`docs/KNOWLEDGE.md` §4.7**: Bulgu ve kural kayda geçti.
+
 ### Fixed (CI: hermetic skills test)
 - **`tests/skills.test.mjs`**: `scanAllSkills discovers global skills under the user home` artık geliştiricinin gerçek `~/.gemini` dizinine değil, geçici bir ev dizinindeki fixture beceriye (`core-docs`) bakar (`HOME`/`USERPROFILE` geçici olarak değiştirilir). Test, beceri kurulu olmayan CI makinelerinde (ubuntu/macos/windows) "Should discover at least one skill" diye düşüyordu; son üç push'un kırmızı CI'ının tek sebebi buydu. Temiz checkout'ta `npm test` 120/120 geçer.
 - **`src/tasks.ts` (`discoverTaskFiles`)**: Büyük/küçük harfe duyarsız dosya sistemlerinde (macOS, Windows) `tasks.md` ile `TASKS.md` aynı dosyadır, ama yol anahtarı yalnızca Windows'ta küçük harfe çevrildiği için macOS'ta aynı görevler iki kez listeleniyordu. Artık dosya kimliğiyle (`dev:ino`) tekilleştirilir. Regresyon testi: sabit bağlantı (hard link) ile her platformda aynı durumu üretir (`tests/tasks.test.mjs`).

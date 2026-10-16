@@ -113,8 +113,30 @@ for ext_dir in targets:
 
 print("✔ 2/4 Uzantı dosyaları başarıyla IDE dizinine kopyalandı.")
 
-# 3. Clean Corrupted Chromium Service Worker Cache
-print("🧹 3/4 Bozulan Chromium ServiceWorker ve Webview önbelleği temizleniyor...")
+# 3. Clean Corrupted Chromium Service Worker Cache (ONLY while no IDE process is running)
+#
+# Deleting `Service Worker` / `Code Cache` under a RUNNING Chromium leaves that process without a usable service worker
+# store: it does not recreate the folder, every new webview then fails with
+# "Could not register service worker: InvalidStateError" until the IDE is fully quit and restarted. A fresh process
+# recreates the store on its own (verified on a clone of the real profile: 8/8 restarts clean), so the cleanup is only
+# ever done while the IDE is closed.
+IDE_EXECUTABLES = ('Antigravity.exe', 'Antigravity IDE.exe')
+
+
+def running_ide_processes():
+    """Names of Antigravity / Antigravity IDE executables that are currently running (empty list when none)."""
+    if os.name != 'nt':
+        res = subprocess.run(['pgrep', '-fl', 'Antigravity'], capture_output=True, text=True)
+        return [line for line in res.stdout.splitlines() if line.strip()]
+    found = []
+    for exe in IDE_EXECUTABLES:
+        res = subprocess.run(['tasklist', '/FI', f'IMAGENAME eq {exe}', '/NH'], capture_output=True, text=True)
+        if exe.lower() in res.stdout.lower():
+            found.append(exe)
+    return found
+
+
+print("🧹 3/4 ServiceWorker / Code Cache temizliği kontrol ediliyor...")
 sw_dirs = [
     home / 'AppData' / 'Roaming' / 'Antigravity IDE' / 'Service Worker',
     home / 'AppData' / 'Roaming' / 'Antigravity' / 'Service Worker',
@@ -123,16 +145,22 @@ sw_dirs = [
 ]
 
 cleaned_sw = 0
-for d in sw_dirs:
-    if d.exists():
-        try:
-            shutil.rmtree(d, ignore_errors=True)
-            cleaned_sw += 1
-            print(f"   ✔ Temizlendi: {d.parent.name}\\{d.name}")
-        except Exception as e:
-            print(f"   ⚠️ Temizleme atlandı ({d.name}): {e}")
+running = running_ide_processes()
+if running:
+    print(f"   ⏭ Önbellek temizliği ATLANDI: IDE açık ({', '.join(running)}).")
+    print("     Açık IDE'nin altından silmek, o IDE'de webview'ları ('Could not register service worker') bozar.")
+    print("     Temizlik gerekiyorsa tüm Antigravity pencerelerini kapatıp bu betiği yeniden çalıştırın.")
+else:
+    for d in sw_dirs:
+        if d.exists():
+            try:
+                shutil.rmtree(d, ignore_errors=True)
+                cleaned_sw += 1
+                print(f"   ✔ Temizlendi: {d.parent.name}\\{d.name}")
+            except Exception as e:
+                print(f"   ⚠️ Temizleme atlandı ({d.name}): {e}")
 
-print(f"✔ 3/4 Önbellek temizliği tamamlandı ({cleaned_sw} dizin).")
+print(f"✔ 3/4 Önbellek adımı bitti ({cleaned_sw} dizin temizlendi).")
 
 # 4. Result & Instructions
 print("\n" + "=" * 60)
