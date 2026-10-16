@@ -265,8 +265,13 @@ test('real Chromium: webview lifecycle never produces a destructive document ass
     await t.test('negative control: the pre-1.4.16 behaviour (assign html on every event) IS detected by this harness', async () => {
       await browser.cdp.eval('window.__host.violations.length = 0');
       await host(browser, 'setVisible(false)');
-      await browser.cdp.eval(`window.__host.assign(${JSON.stringify(buildDoc('naive1'))})`); // hidden assign
-      await browser.cdp.eval(`window.__host.assign(${JSON.stringify(buildDoc('naive2'))})`); // while previous loading
+      // Both assigns in ONE evaluation (one JS task): the first document cannot fire its `load` event in between, so
+      // the second assign deterministically happens "while the previous document is still loading". Two separate CDP
+      // round trips raced the load event on fast runners (the violation was then never recorded).
+      await browser.cdp.eval(
+        `window.__host.assign(${JSON.stringify(buildDoc('naive1'))});` + // hidden assign
+        `window.__host.assign(${JSON.stringify(buildDoc('naive2'))})` // while previous loading
+      );
       const v = await host(browser, 'violations');
       assert.ok(v.includes('assigned while hidden/detached'), JSON.stringify(v));
       assert.ok(v.includes('assigned while previous document still loading'), JSON.stringify(v));

@@ -113,6 +113,20 @@ test('discoverTaskFiles finds repo task files and the conversation brain task.md
   }
 });
 
+test('discoverTaskFiles lists one physical file once even when two candidate names reach it', () => {
+  // On macOS `tasks.md` and `TASKS.md` are the same file; a hard link reproduces that on every platform.
+  const root = tmpDir();
+  try {
+    write(root, 'tasks.md', '- [ ] only task\n');
+    fs.mkdirSync(path.join(root, 'docs'), { recursive: true });
+    fs.linkSync(path.join(root, 'tasks.md'), path.join(root, 'docs', 'TASKS.md'));
+    const files = discoverTaskFiles([root], { homeDir: root });
+    assert.equal(files.length, 1, files.map((f) => f.path).join(' | '));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('collectTasks merges files, obligation project roots and governance tasks', () => {
   const root = tmpDir();
   const other = tmpDir();

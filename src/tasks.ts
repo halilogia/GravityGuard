@@ -437,11 +437,27 @@ export function readTaskFile(filePath: string): TaskFile | null {
  */
 export function discoverTaskFiles(projectRoots: readonly string[], options: DiscoverTaskOptions = {}): TaskFile[] {
   const files: TaskFile[] = [];
+  // On a case-insensitive file system (macOS, Windows) `tasks.md` and `TASKS.md` are ONE file; the path key above
+  // only folds case on Windows, so also de-duplicate by file identity (device + inode) to list it once everywhere.
+  const seenIdentity = new Set<string>();
   for (const candidate of taskFileCandidates(projectRoots, options.conversationId, options.homeDir, options.activeEditorPath)) {
     const file = readTaskFile(candidate);
-    if (file) {
-      files.push(file);
+    if (!file) {
+      continue;
     }
+    try {
+      const stat = fs.statSync(candidate);
+      const identity = stat.ino ? `${stat.dev}:${stat.ino}` : '';
+      if (identity) {
+        if (seenIdentity.has(identity)) {
+          continue;
+        }
+        seenIdentity.add(identity);
+      }
+    } catch {
+      // identity unavailable: keep the path-based de-duplication only
+    }
+    files.push(file);
   }
   return files;
 }

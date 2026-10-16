@@ -346,13 +346,16 @@ class TestAdapterRobustness(unittest.TestCase):
         event = {"session_id": "w", "cwd": str(Path(self.proj) / "src" / "deep")}
         self.assertEqual(Path(adapter.workspace_paths(event)[0]).resolve(), Path(self.proj).resolve())
 
-    def test_audit_log_goes_to_the_project_not_to_gemini_by_default(self):
+    def test_audit_log_goes_where_gravityguard_audit_dir_points(self):
+        """Documented behaviour (plugin README): the central ~/.gemini/logs is the default so the Live Monitor sees Claude
+        Code activity; GRAVITYGUARD_AUDIT_DIR keeps the stream project-local."""
         event = {"session_id": "a", "cwd": self.proj, "tool_name": "Write",
                  "tool_input": {"file_path": str(Path(self.proj) / "src" / "x.py"), "content": "x = 1\n"}}
         self.env["CLAUDE_PROJECT_DIR"] = self.proj
-        self.run_hook(event)
         logs = Path(self.proj) / ".gravityguard" / "logs"
-        self.assertTrue(logs.is_dir() and any(logs.rglob("*.jsonl")), "audit stream must land in <project>/.gravityguard/logs")
+        self.env["GRAVITYGUARD_AUDIT_DIR"] = str(logs)
+        self.run_hook(event)
+        self.assertTrue(logs.is_dir() and any(logs.rglob("*.jsonl")), "audit stream must land in GRAVITYGUARD_AUDIT_DIR")
 
 
 if __name__ == "__main__":

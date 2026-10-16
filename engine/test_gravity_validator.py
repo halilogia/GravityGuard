@@ -3230,8 +3230,9 @@ class TestV127G0ZeroBypassAndStatefulEvidence(unittest.TestCase):
         self.assertNotIn("ancient.ts", reason, "Stale record older than TTL must be pruned")
         self.assertIn("fresh.ts", reason, "Fresh record must be preserved")
 
-    def test_t1_modified_prod_file_with_old_test_deferred(self):
-        """When modifying an existing prod file whose test exists but has old mtime, warning is deferred"""
+    def test_t1_modified_prod_file_with_old_test_is_accepted(self):
+        """v1.4.13 removed the mtime penalty: an existing test file counts even when it was not touched in this session,
+        so neither PreToolUse nor Stop raises T1_MISSING_RELATED_TEST for it."""
         src = os.path.join(self.temp_dir, "src", "user.ts")
         test = os.path.join(self.temp_dir, "tests", "user.test.ts")
         os.makedirs(os.path.dirname(src), exist_ok=True)
@@ -3255,11 +3256,11 @@ class TestV127G0ZeroBypassAndStatefulEvidence(unittest.TestCase):
         }
         res, _ = run_validator(payload)
         self.assertEqual(res.get("decision"), "allow")
-        self.assertNotIn("T1_MISSING_RELATED_TEST", _warnings_from(res), "PreToolUse must defer warning")
+        self.assertNotIn("T1_MISSING_RELATED_TEST", _warnings_from(res), "an existing (old) test file satisfies T1")
 
-        # Stop hook surfaces T1 warning for user.ts
+        # Stop hook raises no T1 obligation for user.ts either (the stale mtime is no longer held against the agent)
         stop_res, _ = run_validator({"terminationReason": "model_stop"})
-        self.assertIn("user.ts", _warnings_from(stop_res), "Stop hook must report un-updated test")
+        self.assertNotIn("user.ts", _warnings_from(stop_res), "Stop hook must not report a T1 obligation for a file whose test exists")
 
     def test_g1_variable_naming_tricks_still_blocked(self):
         """Variable name tricks like catch (_expectedErr) {} or catch (_ignored) {} must NOT bypass G1"""

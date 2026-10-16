@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed (CI: hermetic skills test)
 - **`tests/skills.test.mjs`**: `scanAllSkills discovers global skills under the user home` artık geliştiricinin gerçek `~/.gemini` dizinine değil, geçici bir ev dizinindeki fixture beceriye (`core-docs`) bakar (`HOME`/`USERPROFILE` geçici olarak değiştirilir). Test, beceri kurulu olmayan CI makinelerinde (ubuntu/macos/windows) "Should discover at least one skill" diye düşüyordu; son üç push'un kırmızı CI'ının tek sebebi buydu. Temiz checkout'ta `npm test` 120/120 geçer.
+- **`src/tasks.ts` (`discoverTaskFiles`)**: Büyük/küçük harfe duyarsız dosya sistemlerinde (macOS, Windows) `tasks.md` ile `TASKS.md` aynı dosyadır, ama yol anahtarı yalnızca Windows'ta küçük harfe çevrildiği için macOS'ta aynı görevler iki kez listeleniyordu. Artık dosya kimliğiyle (`dev:ino`) tekilleştirilir. Regresyon testi: sabit bağlantı (hard link) ile her platformda aynı durumu üretir (`tests/tasks.test.mjs`).
+- **`tests/webview_real_lifecycle.test.mjs`**: Negatif kontrol testi iki `assign` çağrısını iki ayrı CDP turunda yapıyordu; hızlı runner'larda ilk dokümanın `load` olayı araya girip "önceki doküman hâlâ yükleniyor" ihlalini hiç üretmiyordu. İki çağrı tek değerlendirmede (tek JS görevi) yapılır, sonuç deterministik.
+- **`engine/test_gravity_validator.py`**: `test_t1_modified_prod_file_with_old_test_is_accepted`, v1.4.13'te kaldırılan mtime cezasına göre güncellendi (var olan eski test dosyası T1'i karşılar).
+- **`engine/tests/test_claude_adapter.py`**: Denetim günlüğü testi, belgelenmiş davranışa göre `GRAVITYGUARD_AUDIT_DIR` ile çalışır (varsayılan merkezi `~/.gemini/logs`).
 
 ### Added & Fixed (One-Click IDE Auto-Updater & Webview ServiceWorker Cache Purge)
 - **Tek Tıkla Otomatik IDE Güncelleyici (`tools/auto_update_ide.py` & `.bat`)**:
