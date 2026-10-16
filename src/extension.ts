@@ -31,6 +31,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   );
   context.subscriptions.push(
+    { dispose: () => provider.dispose() },
     vscode.window.registerWebviewViewProvider('antigravity-guardian-view', provider, {
       webviewOptions: { retainContextWhenHidden: true }
     })

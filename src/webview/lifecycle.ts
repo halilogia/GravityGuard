@@ -49,6 +49,8 @@ export class WebviewLifecycle {
   private _readyTimer: unknown;
   private _recoveryTimer: unknown;
   private _dirty = false;
+  /** True while a recovery was triggered by a missed handshake: a late 'ready' of that very document is still valid. */
+  private _recoveringFromTimeout = false;
 
   constructor(
     private readonly host: LifecycleHost,
@@ -72,6 +74,7 @@ export class WebviewLifecycle {
     this._generation++;
     this._attempts = 0;
     this._dirty = false;
+    this._recoveringFromTimeout = false;
     this.currentNonce = '';
     this._phase = this.host.isVisible() ? 'settling' : 'hidden';
     if (this._phase === 'settling') {
@@ -93,6 +96,7 @@ export class WebviewLifecycle {
         this.clearReady();
       } else if (this._phase === 'recovering') {
         this.clearRecovery();
+        this._recoveringFromTimeout = false;
         this._phase = 'hidden';
       }
       return;
@@ -141,13 +145,17 @@ export class WebviewLifecycle {
 
   /** Webview handshake. Only the nonce of the current document generation is accepted (idempotent). */
   ready(nonce?: string): boolean {
-    if (this._phase !== 'loading') {
+    const lateReady = this._phase === 'recovering' && this._recoveringFromTimeout;
+    if (this._phase !== 'loading' && !lateReady) {
       return false;
     }
     if (nonce !== undefined && nonce !== this.currentNonce) {
       return false;
     }
+    // A slow-but-healthy document answered after the watchdog fired: keep it instead of tearing it down again
     this.clearReady();
+    this.clearRecovery();
+    this._recoveringFromTimeout = false;
     this._attempts = 0;
     this._phase = 'ready';
     if (this._dirty && this.host.isVisible()) {
@@ -164,13 +172,14 @@ export class WebviewLifecycle {
     }
     this.cancelTimers();
     this._attempts = 0;
-    this.scheduleRecovery(reason);
+    this.scheduleRecovery(reason, false);
   }
 
   dispose(): void {
     this.cancelTimers();
     this._generation++;
     this._phase = 'disposed';
+    this._recoveringFromTimeout = false;
     this.currentNonce = '';
   }
 
@@ -180,6 +189,7 @@ export class WebviewLifecycle {
     this.clearSettle();
     this.clearRecovery();
     this.currentNonce = this.nonceFactory();
+    this._recoveringFromTimeout = false;
     this._phase = 'loading';
     this._dirty = false;
     this.host.renderDocument(this.currentNonce);
@@ -194,17 +204,19 @@ export class WebviewLifecycle {
     this._readyTimer = this.timers.setTimeout(() => {
       this._readyTimer = undefined;
       if (gen === this._generation && this._phase === 'loading') {
-        this.scheduleRecovery('ready timeout');
+        this.scheduleRecovery('ready timeout', true);
       }
     }, this.opts.readyTimeoutMs);
   }
 
-  private scheduleRecovery(reason: string): void {
+  private scheduleRecovery(reason: string, fromTimeout: boolean): void {
+    this._recoveringFromTimeout = fromTimeout;
     this.clearReady();
     this.clearSettle();
     this.clearRecovery();
     if (this._attempts >= this.opts.backoffMs.length) {
       this._phase = 'failed';
+      this._recoveringFromTimeout = false;
       this.host.log?.(`recovery gave up (${reason})`);
       this.host.onGiveUp(reason);
       return;
@@ -221,6 +233,7 @@ export class WebviewLifecycle {
       if (this.host.isVisible()) {
         this.beginLoad();
       } else {
+        this._recoveringFromTimeout = false;
         this._phase = 'hidden';
         this._dirty = true;
       }

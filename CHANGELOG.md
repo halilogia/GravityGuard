@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added & Fixed (One-Click IDE Auto-Updater & Webview ServiceWorker Cache Purge)
+- **Tek Tıkla Otomatik IDE Güncelleyici (`tools/auto_update_ide.py` & `.bat`)**:
+  - `npm run update:ide` komutu eklendi: TypeScript'i derler, `.antigravity-ide` ve `.vscode` eklenti klasörlerine doğrudan dağıtır, eski sürümleri temizler ve `extensions.json` kaydını günceller.
+  - Chromium'un bozulmuş LevelDB `Service Worker` ve `Code Cache` dizinlerini (`%appdata%\Antigravity IDE\Service Worker`, `%appdata%\Antigravity\Service Worker`) otomatik temizleyerek `InvalidStateError` kilitlenmesini kökten çözer.
+- **Gerçek Chromium CDP Entegrasyon Testi (`tests/webview_real_lifecycle.test.mjs`)**:
+  - Headless Chromium DevTools Protocol ile gerçek iframe ve CSP ortamında webview yaşam döngüsünü doğrulayan 8 entegrasyon testi eklendi (120 test %100 geçti).
+- **Webview Yaşam Döngüsü & Escalate İyileştirmesi (`src/webview/provider.ts` & `lifecycle.ts`)**:
+  - Sonsuz bildirim döngüsünü engellemek için `escalate` aşamasındaki otomatik reload çağrısı kullanıcı kontrollü ve kontrollü loglama moduna geçirildi.
+
 ### Security (Claude Code adapter hardening)
 - **`NotebookEdit` kapsamı (`plugin/claude-code/gravityguard_claude_hook.py`)**: Jupyter hücre düzenlemesi `TOOL_MAP`'e eklendi; yeni hücre kaynağı (`new_source`) motora tam dosya yazımı olarak verilir, böylece sır kuralı (G0) not defteri hücrelerinde de çalışır. Hücre bazlı diff yoktur.
 - **Acil durum sır kontrolü (`emergency_deny`)**: Motor çalışmadığında adaptör artık her şeye izin vermez. Özel anahtar başlığı, GitHub token, Anthropic/OpenAI anahtarı veya AWS erişim anahtarı içeren yazımlar ile canlı `.env` okumaları, geri alınamaz zarar oldukları için yine reddedilir. Placeholder mantığı olmayan, G0'ın katı bir alt kümesidir. `GRAVITYGUARD_ADAPTER_FAIL_OPEN=1` bu istisnayı kapatır; `Stop` her zaman fail-open kalır.

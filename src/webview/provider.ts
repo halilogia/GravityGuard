@@ -63,9 +63,11 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.onDidDispose(() => {
       lifecycle.dispose();
-      if (this._lifecycle === lifecycle) {
-        this._lifecycle = undefined;
+      if (this._view !== webviewView) {
+        // The host already re-resolved a newer view: its watcher / poller / lifecycle must stay untouched
+        return;
       }
+      this._lifecycle = undefined;
       this.clearTimers();
       this._visibilityListener?.dispose();
       this._visibilityListener = undefined;
@@ -161,12 +163,15 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
     lifecycle.resolve();
 
     // 1. Live File Watcher (Stored in _logWatcher to prevent leak)
+    try {
+      this._logWatcher?.close();
+    } catch (err) {
+      console.debug('[GravityGuard] Watcher close error:', err);
+    }
+    this._logWatcher = undefined;
     const logPath = getLiveLogPath();
     if (fs.existsSync(logPath)) {
       try {
-        if (this._logWatcher) {
-          this._logWatcher.close();
-        }
         this._logWatcher = fs.watch(logPath, () => {
           this.updateHtml(false);
         });
@@ -198,6 +203,26 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
     this._lastHtml = '';
     this._lastDataSig = '';
     this._lifecycle?.reset('manual reset');
+  }
+
+  /** Extension deactivation / disable: stop every timer, watcher and lifecycle so nothing touches a dead view. */
+  public dispose(): void {
+    this._lifecycle?.dispose();
+    this._lifecycle = undefined;
+    this._visibilityListener?.dispose();
+    this._visibilityListener = undefined;
+    this.clearTimers();
+    if (this._pollInterval) {
+      clearInterval(this._pollInterval);
+      this._pollInterval = undefined;
+    }
+    try {
+      this._logWatcher?.close();
+    } catch (err) {
+      console.debug('[GravityGuard] Watcher close error:', err);
+    }
+    this._logWatcher = undefined;
+    this._view = undefined;
   }
 
   private clearTimers(): void {
