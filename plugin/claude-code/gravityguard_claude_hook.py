@@ -16,11 +16,14 @@ obligations) is the only backstop there; there is no git-level secret scanner.
 
 Fail-open by design: when the engine cannot be started or gives no answer, the tool call proceeds and the reason goes to
 stderr. A guard that wedges the agent on its own bug is worse than a guard that steps aside and says so.
+One exception: a secret about to be written to a file, or a live `.env` read, is denied by a small built-in check
+(`emergency_deny`), because that harm cannot be undone. `GRAVITYGUARD_ADAPTER_FAIL_OPEN=1` turns the exception off.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -36,7 +39,22 @@ TOOL_MAP = {
     "Edit": "replace_file_content",
     "MultiEdit": "multi_replace_file_content",
     "Read": "read_file",
+    # A notebook cell is not a file diff: the new cell source is checked as the text of a whole-file write.
+    "NotebookEdit": "write_to_file",
 }
+
+# Last-resort secret shapes, used ONLY when the engine could not give an answer (see `emergency_deny`). A strict subset of
+# the engine's G0: no placeholder logic, no entropy heuristics, so it can be wrong in the cautious direction only.
+EMERGENCY_SECRET_PATTERNS = (
+    ("özel anahtar başlığı", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |PGP |DSA )?PRIVATE KEY-----")),
+    ("GitHub token", re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}\b")),
+    ("Anthropic API anahtarı", re.compile(r"\bsk-ant-(?:api|admin)\d{0,2}-[A-Za-z0-9_\-]{20,}")),
+    ("OpenAI API anahtarı", re.compile(r"\bsk-(?:proj|svcacct|admin)-[A-Za-z0-9_\-]{20,}")),
+    ("AWS erişim anahtarı", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+)
+_LIVE_ENV_NAME = re.compile(r"^\.env(\..+)?$", re.IGNORECASE)
+_ENV_TEMPLATE_SUFFIXES = (".example", ".sample", ".template", ".dist")
+FAIL_OPEN_ENV = "GRAVITYGUARD_ADAPTER_FAIL_OPEN"
 
 
 def engine_path() -> Path:
@@ -72,7 +90,7 @@ def to_engine_pretool(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if name not in TOOL_MAP:
         return None
     tool_input = event.get("tool_input") or {}
-    target = str(tool_input.get("file_path", "") or "")
+    target = str(tool_input.get("notebook_path" if name == "NotebookEdit" else "file_path", "") or "")
     if target and not os.path.isabs(target):
         cwd = str(event.get("cwd") or os.getcwd())
         target = os.path.abspath(os.path.join(cwd, target))
@@ -83,6 +101,8 @@ def to_engine_pretool(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         args: Dict[str, Any] = {"TargetFile": target}
     elif name == "Write":
         args = {"TargetFile": target, "CodeContent": tool_input.get("content", "")}
+    elif name == "NotebookEdit":
+        args = {"TargetFile": target, "CodeContent": tool_input.get("new_source", "")}
     elif name == "Edit":
         args = {
             "TargetFile": target,
@@ -175,6 +195,56 @@ def run_engine(payload: Dict[str, Any], extra_args: Sequence[str] = ()) -> Optio
     return answer
 
 
+def added_text(event: Dict[str, Any]) -> str:
+    """The text a Write/Edit/MultiEdit/NotebookEdit call would put into a file (what the engine's G0 looks at)."""
+    tool_input = event.get("tool_input") or {}
+    name = event.get("tool_name", "")
+    if name == "Write":
+        return str(tool_input.get("content") or "")
+    if name == "Edit":
+        return str(tool_input.get("new_string") or "")
+    if name == "NotebookEdit":
+        return str(tool_input.get("new_source") or "")
+    if name == "MultiEdit":
+        return "\n".join(str(e.get("new_string") or "") for e in tool_input.get("edits") or [] if isinstance(e, dict))
+    return ""
+
+
+def emergency_deny(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Engine gave no answer: still refuse the two things that must never slip through unchecked.
+
+    A secret written to a file, or a live `.env` read, cannot be undone, so for those the adapter does not fail open.
+    Everything else (style, tests, docs) still passes: a guard that wedges the agent on its own bug is worse.
+    `GRAVITYGUARD_ADAPTER_FAIL_OPEN=1` switches this off when the engine is known to be broken and work must go on.
+    """
+    if os.environ.get(FAIL_OPEN_ENV) == "1":
+        return None
+    name = event.get("tool_name", "")
+    tool_input = event.get("tool_input") or {}
+    reason = ""
+    if name == "Read":
+        base = os.path.basename(str(tool_input.get("file_path") or "")).lower()
+        if _LIVE_ENV_NAME.match(base) and not base.endswith(_ENV_TEMPLATE_SUFFIXES):
+            reason = f"'{base}' canlı bir .env dosyası"
+    elif name in TOOL_MAP:
+        text = added_text(event)
+        for label, pattern in EMERGENCY_SECRET_PATTERNS:
+            if pattern.search(text):
+                reason = f"yazılacak metinde {label} var"
+                break
+    if not reason:
+        return None
+    return {"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": (
+            f"🛑 [GravityGuard acil durum kontrolü]: Doğrulama motoru çalışmadığı için kural motoru devre dışı, ve {reason}. "
+            "Bu işlem motor olmadan geçirilmiyor. Sırrı ortam değişkenine taşıyın veya motoru onarın "
+            f"(bilerek devam etmek için {FAIL_OPEN_ENV}=1)."
+        ),
+    }}
+
+
 def handle(event: Dict[str, Any], stop: bool) -> Optional[Dict[str, Any]]:
     """Claude Code event in, Claude Code answer out (None = say nothing, let it proceed)."""
     if stop:
@@ -188,7 +258,9 @@ def handle(event: Dict[str, Any], stop: bool) -> Optional[Dict[str, Any]]:
     if payload is None:
         return None
     answer = run_engine(payload)
-    return from_engine_pretool(answer) if answer else None
+    if not answer:
+        return emergency_deny(event)
+    return from_engine_pretool(answer)
 
 
 def main(argv: Sequence[str]) -> int:

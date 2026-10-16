@@ -34,7 +34,7 @@ class TestTranslation(unittest.TestCase):
             "tool_input": {"file_path": "/proj/a.py", "content": "x = 1\n"},
         })
         self.assertEqual(payload["toolCall"]["name"], "write_to_file")
-        self.assertEqual(payload["toolCall"]["args"], {"TargetFile": "/proj/a.py", "CodeContent": "x = 1\n"})
+        self.assertEqual(payload["toolCall"]["args"], {"TargetFile": os.path.abspath("/proj/a.py"), "CodeContent": "x = 1\n"})
 
     def test_edit_becomes_replace_file_content(self):
         payload = adapter.to_engine_pretool({
@@ -56,8 +56,16 @@ class TestTranslation(unittest.TestCase):
         self.assertEqual([c["AllowMultiple"] for c in chunks], [False, True])
 
     def test_tools_without_file_rules_are_ignored(self):
-        for name in ("Bash", "Read", "Grep", "NotebookEdit"):
+        for name in ("Bash", "Read", "Grep"):
             self.assertIsNone(adapter.to_engine_pretool({"session_id": "s1", "cwd": "/p", "tool_name": name, "tool_input": {}}))
+
+    def test_notebook_edit_becomes_a_write_of_the_new_cell_source(self):
+        payload = adapter.to_engine_pretool({
+            "session_id": "s1", "cwd": "/proj", "tool_name": "NotebookEdit",
+            "tool_input": {"notebook_path": "/proj/a.ipynb", "new_source": "x = 1\n", "cell_id": "c1"},
+        })
+        self.assertEqual(payload["toolCall"]["name"], "write_to_file")
+        self.assertEqual(payload["toolCall"]["args"], {"TargetFile": os.path.abspath("/proj/a.ipynb"), "CodeContent": "x = 1\n"})
 
     def test_conversation_id_is_provider_prefixed(self):
         self.assertEqual(adapter.conversation_id({"session_id": "abc"}), "claude:abc")
@@ -111,6 +119,56 @@ class TestHandle(unittest.TestCase):
         self.assertIn("engine not found", err.getvalue())
 
 
+class TestEmergencyDeny(unittest.TestCase):
+    """Engine dead: harmless work still passes, an unrecoverable leak does not."""
+
+    KEY = "sk-proj-" + "abcd1234" * 6
+    PEM = "-----BEGIN RSA " + "PRIVATE KEY-----\nabc"  # split so this file itself never trips the secret guard
+
+    def run_without_engine(self, tool, tool_input, **env):
+        event = {"session_id": "s1", "cwd": "/p", "tool_name": tool, "tool_input": tool_input}
+        missing = str(Path(tempfile.gettempdir()) / "no_such_engine.py")
+        with mock.patch.dict(os.environ, {"GRAVITYGUARD_ENGINE": missing, **env}), redirect_stderr(io.StringIO()):
+            return adapter.handle(event, stop=False)
+
+    def assertDenied(self, out):
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertNotIn(self.KEY, json.dumps(out), "the deny reason must not echo the secret")
+
+    def test_secret_write_is_denied_without_the_engine(self):
+        self.assertDenied(self.run_without_engine("Write", {"file_path": "/p/a.py", "content": f'K = "{self.KEY}"'}))
+
+    def test_secret_in_edit_multiedit_and_notebook_is_denied_without_the_engine(self):
+        self.assertDenied(self.run_without_engine("Edit", {"file_path": "/p/a.py", "old_string": "a", "new_string": self.KEY}))
+        self.assertDenied(self.run_without_engine("MultiEdit", {"file_path": "/p/a.py", "edits": [
+            {"old_string": "a", "new_string": "b"}, {"old_string": "c", "new_string": self.KEY}]}))
+        self.assertDenied(self.run_without_engine("NotebookEdit", {"notebook_path": "/p/a.ipynb", "new_source": self.KEY}))
+
+    def test_private_key_and_github_token_are_denied_without_the_engine(self):
+        for text in (self.PEM, "t = 'ghp_" + "a1B2c3D4" * 4 + "'", "AKIA" + "ABCDEFGH12345678"):
+            out = self.run_without_engine("Write", {"file_path": "/p/a.txt", "content": text})
+            self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny", text)
+
+    def test_harmless_write_still_passes_without_the_engine(self):
+        self.assertIsNone(self.run_without_engine("Write", {"file_path": "/p/a.py", "content": "x = 1\n"}))
+        self.assertIsNone(self.run_without_engine("Write", {"file_path": "/p/n.md", "content": "task-report-cleanup done"}))
+
+    def test_live_env_read_is_denied_but_templates_and_other_files_are_not(self):
+        for name in (".env", ".env.local", ".ENV"):
+            out = self.run_without_engine("Read", {"file_path": f"/p/{name}"})
+            self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny", name)
+        for name in (".env.example", ".env.sample", "environment.md", "main.py"):
+            self.assertIsNone(self.run_without_engine("Read", {"file_path": f"/p/{name}"}), name)
+
+    def test_fail_open_switch_turns_the_emergency_check_off(self):
+        out = self.run_without_engine("Write", {"file_path": "/p/a.py", "content": self.KEY}, GRAVITYGUARD_ADAPTER_FAIL_OPEN="1")
+        self.assertIsNone(out)
+
+    def test_stop_without_engine_still_fails_open(self):
+        with mock.patch.object(adapter, "run_engine", return_value=None):
+            self.assertIsNone(adapter.handle({"session_id": "s1", "cwd": "/p"}, stop=True))
+
+
 class TestEndToEnd(unittest.TestCase):
     """The adapter against the real engine, as Claude Code would run it (one process per hook call)."""
 
@@ -143,6 +201,17 @@ class TestEndToEnd(unittest.TestCase):
         out = self.hook("s1", "Write", {"file_path": os.path.join(self.proj, "app.py"), "content": f'KEY = "{key}"\n'})
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertNotIn(key, json.dumps(out), "the deny reason must redact the token")
+
+    def test_secret_in_a_notebook_cell_is_denied(self):
+        key = "sk-proj-" + "abcd1234" * 6
+        out = self.hook("s1", "NotebookEdit", {"notebook_path": os.path.join(self.proj, "nb.ipynb"),
+                                               "new_source": f'KEY = "{key}"\n', "cell_id": "c1"})
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertNotIn(key, json.dumps(out))
+
+    def test_harmless_notebook_cell_is_silent(self):
+        out = self.hook("s1", "NotebookEdit", {"notebook_path": os.path.join(self.proj, "nb.ipynb"), "new_source": "print(1)\n"})
+        self.assertIsNone(out)
 
     def test_legacy_openai_key_is_denied(self):
         key = "sk-" + "Zx9Qw7Er5Ty3" * 4

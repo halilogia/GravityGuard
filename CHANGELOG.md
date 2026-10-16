@@ -5,6 +5,14 @@ All notable changes to **GravityGuard** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security (Claude Code adapter hardening)
+- **`NotebookEdit` kapsamı (`plugin/claude-code/gravityguard_claude_hook.py`)**: Jupyter hücre düzenlemesi `TOOL_MAP`'e eklendi; yeni hücre kaynağı (`new_source`) motora tam dosya yazımı olarak verilir, böylece sır kuralı (G0) not defteri hücrelerinde de çalışır. Hücre bazlı diff yoktur.
+- **Acil durum sır kontrolü (`emergency_deny`)**: Motor çalışmadığında adaptör artık her şeye izin vermez. Özel anahtar başlığı, GitHub token, Anthropic/OpenAI anahtarı veya AWS erişim anahtarı içeren yazımlar ile canlı `.env` okumaları, geri alınamaz zarar oldukları için yine reddedilir. Placeholder mantığı olmayan, G0'ın katı bir alt kümesidir. `GRAVITYGUARD_ADAPTER_FAIL_OPEN=1` bu istisnayı kapatır; `Stop` her zaman fail-open kalır.
+- **Testler (`engine/tests/test_claude_adapter.py`)**: `TestEmergencyDeny` (7 test) ve gerçek motorla NotebookEdit uçtan uca testleri (2) eklendi; Windows'ta yol biçimine bağlı `test_write_becomes_write_to_file` düzeltildi.
+- **Belgeler**: `plugin/claude-code/README.md` ve `ARCHITECTURE.md` güncellendi.
+
 ## [1.4.16] - 2026-10-16
 
 ### Fixed & Architectural Protection (ServiceWorker InvalidStateError Elimination)
