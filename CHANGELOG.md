@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`engine/gravityguard_engine/task_archiver.py`**:
   - Bağımsız Python motoru geliştirildi; `tasks.md` ve `task.md` dosyalarını atomik olarak arşivler.
 - **`engine/gravityguard_engine/dispatcher.py`**:
-  - Stop Hook kapısına bağlandı: Ajan oturumu temiz şekilde bitirdiğinde (`decision: allow`), birikmiş tamamlanan görevleri arka planda `taskslog.md`'ye aktarır ve `TASK_ARCHIVE_AUTO` denetim günlüğü üretir.
+  - Stop Hook kapısına bağlandı: Ajan oturumu temiz şekilde bitirdiğinde (`decision: allow`) ve circuit breaker (5 retry aşımı) devreye girdiğinde, birikmiş tamamlanan görevleri arka planda `taskslog.md`'ye aktarır ve `TASK_ARCHIVE_AUTO` denetim günlüğü üretir (`_perform_task_archiving`).
 - **Test Kapsamı**: `tests/tasks.test.mjs` (22/22) ve `engine/tests/test_task_archiver.py` (3/3) birim testleri ile uçtan uca doğrulandı.
 
 ### Added (Design Scrollbar / Default Browser Scrollbar Ban)
