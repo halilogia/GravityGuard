@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (Automated Task Archiving & Watermark Governance — tasks.md -> taskslog.md)
+- **`src/tasks.ts` (`archiveCompletedTasks`)**:
+  - `tasks.md` içindeki tamamlanan görevlerin (`[x]`) otomatik olarak `taskslog.md` kütüğüne aktarılmasını sağlayan cerrahi arşivleme motoru entegre edildi.
+  - **Tetikleyici Mimarisi (High-Water Mark & Anti-Bloat Guard)**:
+    - Tamamlanan görev sayısı eşiği aştığında (varsayılan: `threshold = 10`) veya dosya satır sayısı şiştiğinde (varsayılan: `maxLines = 150`) otomatik devreye girer.
+    - **Akıllı Bağlam Kalıcılığı (`keepRecentDone = 5`)**: Tamamlananların hepsi silinmez; en son tamamlanan 5 görev `tasks.md` içinde güncel sprint bağlamı olarak korunur, daha eskiler `taskslog.md` kütüğüne aktarılır.
+    - `taskslog.md` dosyası tarih başlıkları (`## [YYYY-MM-DD]`) altında formatlanarak birikir ve mükerrer başlık oluşturmaz.
+  - `updateTaskItemStatus`: Bir görev `done` (`[x]`) yapıldığında otomatik eşik kontrolü ve arşivleme yapar.
+- **`src/webview/tabs/tasks.ts` & `src/webview/client.ts`**:
+  - Görev kartı başlığına tamamlanan işler varsa tek tıkla arşivleme sağlayan modern Lucide `archive` butonu eklendi.
+  - Arşivleme tamamlandığında kullanıcıya bilgilendirme bildirimi gösterilir.
+- **`src/icons.ts`**: Crisp Lucide `archive` vektör SVG ikonu eklendi.
+- **`src/i18n/index.ts`**: TR ve EN yerelleştirme anahtarları (`archiveCompleted`, `archivedNotice`) eklendi.
+- **`engine/gravityguard_engine/task_archiver.py`**:
+  - Bağımsız Python motoru geliştirildi; `tasks.md` ve `task.md` dosyalarını atomik olarak arşivler.
+- **`engine/gravityguard_engine/dispatcher.py`**:
+  - Stop Hook kapısına bağlandı: Ajan oturumu temiz şekilde bitirdiğinde (`decision: allow`), birikmiş tamamlanan görevleri arka planda `taskslog.md`'ye aktarır ve `TASK_ARCHIVE_AUTO` denetim günlüğü üretir.
+- **Test Kapsamı**: `tests/tasks.test.mjs` (22/22) ve `engine/tests/test_task_archiver.py` (3/3) birim testleri ile uçtan uca doğrulandı.
+
 ### Added (Design Scrollbar / Default Browser Scrollbar Ban)
 - **`engine/gravityguard_engine/architecture_rules.py`**: `check_design_scrollbar_rule` kuralı eklendi; web dosyalarında (`.html`, `.css`, `.vue`, `.svelte`, `.tsx`, `.jsx`) taşma/kaydırma tanımlandığında varsayılan tarayıcı kaydırma çubuğu bırakılması engellenir (`allow`, ancak `DESIGN_SCROLLBAR_RULE` kritik uyarısı basar). Evrensel minimalist / görünmez scrollbar standardı (`::-webkit-scrollbar`, `scrollbar-width: thin`, `::-webkit-scrollbar-button { display: none }`) zorunlu tutulur.
 - **`engine/gravityguard_engine/dispatcher.py`**: Motor işlem boru hattına bağlandı; motor çıktısında `DESIGN_SCROLLBAR_RULE` uyarısı iletilir.

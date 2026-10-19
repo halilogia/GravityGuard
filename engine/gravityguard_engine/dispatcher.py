@@ -260,6 +260,28 @@ def validate_gravityguard() -> None:
                 print(json.dumps({"decision": "continue", "reason": full_reason}))
             else:
                 reset_session_stop_retries(project_root, conversation_id)
+                try:
+                    from .task_archiver import archive_completed_tasks
+                    candidates = [project_root / "tasks.md", project_root / "task.md"]
+                    if conversation_id and conversation_id != "default":
+                        candidates.append(Path.home() / ".gemini" / "antigravity" / "brain" / conversation_id / "tasks.md")
+                    for t_path in candidates:
+                        if t_path.is_file():
+                            res = archive_completed_tasks(t_path)
+                            if res.get("performed") and int(res.get("archived_count", 0)) > 0:
+                                log_event(
+                                    "stop", "APPROVED", str(t_path),
+                                    f"Archived {res['archived_count']} completed tasks into taskslog.md",
+                                    rule_id="TASK_ARCHIVE_AUTO",
+                                    conversation_id=conversation_id
+                                )
+                except Exception as arch_err:
+                    log_event(
+                        "stop", "WARNING", "tasks.md",
+                        f"Non-fatal error during automatic task archiving: {arch_err}",
+                        rule_id="TASK_ARCHIVE_ERROR",
+                        conversation_id=conversation_id
+                    )
                 print(json.dumps({"decision": "allow"}))
             sys.exit(0)
         except StateLockTimeout as lock_err:

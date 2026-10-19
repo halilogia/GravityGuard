@@ -67,6 +67,9 @@ function renderTaskFile(file: TaskFile, fileIdx: number): string {
   const openBtn = isGovernance
     ? ''
     : `<button class="mini-icon-btn" data-action="openFile" data-path="${escapeHtml(file.path)}" title="${escapeHtml(t('tasks.openFile'))}">${lucide('fileText', { size: 12 })}</button>`;
+  const archiveBtn = !isGovernance && file.done > 0
+    ? `<button class="mini-icon-btn task-archive-btn" data-action="archiveCompletedTasks" data-path="${escapeHtml(file.path)}" title="${escapeHtml(t('tasks.archiveCompleted'))}" style="background: none; border: none; cursor: pointer; padding: 0 2px; color: var(--color-cyan); display: inline-flex; align-items: center; opacity: 0.8; transition: opacity 0.15s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'">${lucide('archive', { size: 12 })}</button>`
+    : '';
   const items = file.items.length > 0
     ? file.items.map(item => renderTaskItem(item, file)).join('')
     : `<div class="empty-state">${t('tasks.empty')}</div>`;
@@ -87,6 +90,7 @@ function renderTaskFile(file: TaskFile, fileIdx: number): string {
             </span>
             <span style="display: flex; align-items: center; gap: 4px;">
               <span class="badge-counter" style="background: rgba(56, 189, 248, 0.25); color: #38bdf8;">${file.done} / ${file.total}</span>
+              ${archiveBtn}
               ${openBtn}
             </span>
           </div>

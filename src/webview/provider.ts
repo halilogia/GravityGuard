@@ -9,7 +9,7 @@ import { handleOpenConfig } from '../commands';
 import { getNonce } from './html_utils';
 import { loadGuardianState, getLiveLogPath } from './state';
 import { buildHtmlDocument, extractRootInnerHtml } from './layout';
-import { updateTaskItemStatus, deleteTaskItem, addTaskItem, TaskStatus } from '../tasks';
+import { updateTaskItemStatus, deleteTaskItem, addTaskItem, archiveCompletedTasks, TaskStatus } from '../tasks';
 import { addAdrItem, addChangelogItem } from '../knowledge';
 import { WebviewLifecycle } from './lifecycle';
 
@@ -140,6 +140,13 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
         if (deleteTaskItem(message.path, message.line)) {
           this._lastDataSig = '';
           this.updateHtml(true);
+        }
+      } else if (message.command === 'archiveCompletedTasks' && message.path) {
+        const res = archiveCompletedTasks(message.path, { force: true });
+        if (res.performed) {
+          this._lastDataSig = '';
+          this.updateHtml(true);
+          vscode.window.showInformationMessage(t('tasks.archivedNotice', { count: res.archivedCount }));
         }
       } else if (message.command === 'addTaskItem' && message.path && message.title) {
         if (addTaskItem(message.path, message.title)) {

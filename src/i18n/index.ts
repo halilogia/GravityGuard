@@ -244,7 +244,9 @@ export const resources = {
         deleteTask: 'Görevi Sil',
         addTask: 'Ekle',
         addTaskPlaceholder: 'Yeni görev yazın... (Enter ile ekleyin)',
-        cycleStatus: 'Durumu Değiştir'
+        cycleStatus: 'Durumu Değiştir',
+        archiveCompleted: 'Tamamlananları taskslog.md\'ye Arşivle',
+        archivedNotice: '{{count}} tamamlanmış görev taskslog.md dosyasına arşivlendi.'
       },
       knowledge: {
         hubTitle: 'Hafıza & Karar Merkezi',
@@ -517,7 +519,9 @@ export const resources = {
         deleteTask: 'Delete Task',
         addTask: 'Add',
         addTaskPlaceholder: 'Type a new task... (press Enter to add)',
-        cycleStatus: 'Cycle Status'
+        cycleStatus: 'Cycle Status',
+        archiveCompleted: 'Archive Completed to taskslog.md',
+        archivedNotice: '{{count}} completed tasks archived to taskslog.md.'
       },
       knowledge: {
         hubTitle: 'Knowledge & Decision Hub',

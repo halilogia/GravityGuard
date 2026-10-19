@@ -17,7 +17,8 @@ import {
   deleteTaskItem,
   addTaskItem,
   findRecentBrainTaskFiles,
-  resolveDefaultTaskFilePath
+  resolveDefaultTaskFilePath,
+  archiveCompletedTasks
 } from '../dist/tasks.js';
 
 function tmpDir() {
@@ -309,5 +310,97 @@ test('collectTasks with allowBrainFallback discovers active brain tasks when wor
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+test('archiveCompletedTasks does not archive when below threshold', () => {
+  const root = tmpDir();
+  try {
+    const taskPath = path.join(root, 'tasks.md');
+    fs.writeFileSync(taskPath, '- [ ] open\n- [x] done 1\n- [x] done 2\n', 'utf8');
+    const res = archiveCompletedTasks(taskPath, { threshold: 5 });
+    assert.equal(res.performed, false);
+    assert.equal(res.archivedCount, 0);
+    assert.equal(res.retainedDoneCount, 2);
+    assert.equal(fs.existsSync(path.join(root, 'taskslog.md')), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('archiveCompletedTasks archives older completed tasks and retains recent done items', () => {
+  const root = tmpDir();
+  try {
+    const taskPath = path.join(root, 'tasks.md');
+    const lines = [
+      '# Sprint Tasks',
+      '- [ ] pending task 1',
+      '- [/] in progress task',
+      '- [x] done 1',
+      '- [x] done 2',
+      '- [x] done 3',
+      '- [x] done 4',
+      '- [x] done 5',
+      '- [x] done 6',
+      '- [x] done 7',
+      '- [ ] pending task 2'
+    ];
+    fs.writeFileSync(taskPath, lines.join('\n') + '\n', 'utf8');
+
+    // Threshold = 5, keepRecentDone = 3. 7 done tasks > 5, so 7 - 3 = 4 should be archived.
+    const res = archiveCompletedTasks(taskPath, { threshold: 5, keepRecentDone: 3, dateStr: '2026-10-19' });
+    assert.equal(res.performed, true);
+    assert.equal(res.archivedCount, 4);
+    assert.equal(res.retainedDoneCount, 3);
+
+    // Verify tasks.md contents: done 1..4 removed, done 5..7 kept, pending tasks kept
+    const updatedTasks = fs.readFileSync(taskPath, 'utf8');
+    assert.ok(!updatedTasks.includes('done 1'));
+    assert.ok(!updatedTasks.includes('done 4'));
+    assert.ok(updatedTasks.includes('done 5'));
+    assert.ok(updatedTasks.includes('done 6'));
+    assert.ok(updatedTasks.includes('done 7'));
+    assert.ok(updatedTasks.includes('pending task 1'));
+    assert.ok(updatedTasks.includes('in progress task'));
+    assert.ok(updatedTasks.includes('pending task 2'));
+
+    // Verify taskslog.md contents
+    const logPath = path.join(root, 'taskslog.md');
+    assert.ok(fs.existsSync(logPath));
+    const logContent = fs.readFileSync(logPath, 'utf8');
+    assert.ok(logContent.includes('## [2026-10-19]'));
+    assert.ok(logContent.includes('- [x] done 1'));
+    assert.ok(logContent.includes('- [x] done 4'));
+    assert.ok(!logContent.includes('- [x] done 5'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('archiveCompletedTasks supports force mode and appends to existing log', () => {
+  const root = tmpDir();
+  try {
+    const taskPath = path.join(root, 'tasks.md');
+    fs.writeFileSync(taskPath, '- [x] batch1\n', 'utf8');
+
+    const res1 = archiveCompletedTasks(taskPath, { force: true, dateStr: '2026-10-19' });
+    assert.equal(res1.performed, true);
+    assert.equal(res1.archivedCount, 1);
+
+    // Add another done item and archive again under same date
+    fs.writeFileSync(taskPath, '- [x] batch2\n', 'utf8');
+    const res2 = archiveCompletedTasks(taskPath, { force: true, dateStr: '2026-10-19' });
+    assert.equal(res2.performed, true);
+    assert.equal(res2.archivedCount, 1);
+
+    const logContent = fs.readFileSync(path.join(root, 'taskslog.md'), 'utf8');
+    assert.ok(logContent.includes('- [x] batch1'));
+    assert.ok(logContent.includes('- [x] batch2'));
+    // Ensure date header is not duplicated
+    const matches = logContent.match(/## \[2026-10-19\]/g);
+    assert.equal(matches.length, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 
 

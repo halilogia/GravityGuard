@@ -110,6 +110,11 @@ export function buildClientScript(nonce: string, activeTab: string): string {
               if (filePath && line > 0) {
                 vscode.postMessage({ command: 'deleteTaskItem', path: filePath, line });
               }
+            } else if (action === 'archiveCompletedTasks') {
+              const filePath = target.getAttribute('data-path');
+              if (filePath) {
+                vscode.postMessage({ command: 'archiveCompletedTasks', path: filePath });
+              }
             } else if (action === 'addTaskItem') {
               const filePath = target.getAttribute('data-path');
               const inputId = target.getAttribute('data-input-id');

@@ -41,6 +41,7 @@ export type LucideIconName =
   | 'bookOpen'
   | 'chevronRight'
   | 'tag'
+  | 'archive'
   | 'plus';
 
 export interface IconOptions {
@@ -90,6 +91,7 @@ const ICON_PATHS: Record<LucideIconName, string> = {
   bookOpen: '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>',
   chevronRight: '<path d="m9 18 6-6-6-6"/>',
   tag: '<path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z"/><circle cx="7" cy="7" r=".5" fill="currentColor"/>',
+  archive: '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
   plus: '<path d="M5 12h14"/><path d="M12 5v14"/>'
 };
 
