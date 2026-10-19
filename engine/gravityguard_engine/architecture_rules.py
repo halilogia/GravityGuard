@@ -43,6 +43,30 @@ def check_design_icon_rule(target_file: str, added_text: str) -> List[str]:
     return list(dict.fromkeys(icons))
 
 
+# --- DESIGN_SCROLLBAR_RULE: DEFAULT WEBKIT / BROWSER SCROLLBAR BAN (WARN ONLY) ---
+def check_design_scrollbar_rule(target_file: str, added_text: str) -> List[str]:
+    """
+    Checks that web files (html, css, vue, svelte, tsx) with scrolling containers do not rely
+    on default browser scrollbars. Requires sleek custom scrollbar definitions (scrollbar-width,
+    ::-webkit-scrollbar, ::-webkit-scrollbar-button { display: none }).
+    """
+    norm = target_file.replace("\\", "/").lower()
+    parts = norm.split("/")
+    name = parts[-1]
+    if not name.endswith((".html", ".css", ".vue", ".svelte", ".tsx", ".jsx")):
+        return []
+    if any(part in {"doc", "docs", "documentation", "test", "tests", "__tests__"} for part in parts[:-1]):
+        return []
+    if any(marker in name for marker in ("test_", "_test.", ".test.", "spec.")):
+        return []
+
+    violations = []
+    if re.search(r"\boverflow(?:-[xy])?\s*:\s*(?:scroll|auto)\b", added_text, re.IGNORECASE):
+        if not re.search(r"::-webkit-scrollbar|scrollbar-width", added_text, re.IGNORECASE):
+            violations.append("varsayılan tarayıcı kaydırma çubuğu (custom scrollbar eksik)")
+    return violations
+
+
 # --- G3: COMPILER & LINTER BYPASS (WARN ONLY) ---
 def check_g3_compiler_bypass(added_text: str) -> List[str]:
     """

@@ -16,6 +16,7 @@ from .architecture_rules import (
     analyze_python_srp,
     check_arch_file_growth,
     check_design_icon_rule,
+    check_design_scrollbar_rule,
     check_g3_compiler_bypass,
     check_g4_import_matrix,
     check_pma_horizontal,
@@ -437,6 +438,12 @@ def validate_gravityguard() -> None:
         warn_msg = f"Tasarım kuralına uymuyor hemen düzelt: kodda standart emoji/ikon kullanımı tespit edildi ({', '.join(design_icons[:5])})."
         _log('WARNING', target_file, warn_msg, rule_id='DESIGN_ICON_RULE')
         all_warnings.append(('DESIGN_ICON_RULE', warn_msg))
+
+    design_scrollbars = check_design_scrollbar_rule(target_file, added_text)
+    if design_scrollbars:
+        warn_msg = "Tasarım kuralına uymuyor hemen düzelt: webin varsayılan yukarı aşağı kaydırma barları kullanılamaz. Evrensel minimalist / görünmez scrollbar standardı uygulanmalıdır."
+        _log('WARNING', target_file, warn_msg, rule_id='DESIGN_SCROLLBAR_RULE')
+        all_warnings.append(('DESIGN_SCROLLBAR_RULE', warn_msg))
 
     # Fast-pass for vendor, cache, and non-code text assets (ONLY AFTER G0 IS CLEAN)
     if is_vendor_or_cache or (is_data_or_doc and not file_lower.endswith((".py", ".ts", ".tsx", ".js", ".jsx"))):

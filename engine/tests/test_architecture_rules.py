@@ -20,6 +20,7 @@ from gravityguard_engine.architecture_rules import (
     analyze_python_srp,
     check_arch_file_growth,
     check_design_icon_rule,
+    check_design_scrollbar_rule,
     check_g3_compiler_bypass,
     check_oe_spike,
     check_pma_horizontal,
@@ -80,6 +81,24 @@ class TestDesignIconRule(unittest.TestCase):
                     self.assertIn('[DESIGN_ICON_RULE] ' + message, response['reason'])
                     log.assert_any_call('write_to_file', 'WARNING', target, message,
                                         rule_id='DESIGN_ICON_RULE', conversation_id='default')
+
+
+class TestDesignScrollbarRule(unittest.TestCase):
+    def test_detects_default_scrollbar_on_overflow_without_styling(self):
+        css_with_default = ".container { overflow-y: auto; height: 300px; }"
+        violations = check_design_scrollbar_rule("src/ui.css", css_with_default)
+        self.assertTrue(len(violations) > 0)
+
+    def test_allows_overflow_with_custom_scrollbar_styling(self):
+        css_with_custom = ".container { overflow-y: auto; scrollbar-width: thin; }\n::-webkit-scrollbar { width: 6px; }"
+        violations = check_design_scrollbar_rule("src/ui.css", css_with_custom)
+        self.assertEqual(len(violations), 0)
+
+    def test_skips_non_web_files_and_tests(self):
+        violations = check_design_scrollbar_rule("src/server.py", "overflow: auto")
+        self.assertEqual(len(violations), 0)
+        violations2 = check_design_scrollbar_rule("tests/test_ui.css", "overflow: auto")
+        self.assertEqual(len(violations2), 0)
 
 
 class TestArchitectureRulesDomain(unittest.TestCase):
