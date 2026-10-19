@@ -3,8 +3,14 @@
 Unit tests for GravityGuard Architecture Rules (G3, G4, OE Spike, Cumulative Growth, SRP).
 """
 import os
+import io
+import json
 import sys
+import tempfile
 import unittest
+from contextlib import ExitStack
+from pathlib import Path
+from unittest.mock import patch
 
 _ENGINE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ENGINE_DIR not in sys.path:
@@ -13,6 +19,7 @@ if _ENGINE_DIR not in sys.path:
 from gravityguard_engine.architecture_rules import (
     analyze_python_srp,
     check_arch_file_growth,
+    check_design_icon_rule,
     check_g3_compiler_bypass,
     check_oe_spike,
     check_pma_horizontal,
@@ -22,6 +29,57 @@ from gravityguard_engine.architecture_rules import (
     is_py_cohesive_monolith,
     is_ts_cohesive_monolith,
 )
+
+
+class TestDesignIconRule(unittest.TestCase):
+    def test_detects_icons_in_all_supported_source_files(self):
+        icons = ['🔍', '📋', '⚡', '⏳', '✔', '✅', '🗑', '🚀', '💡']
+        for extension in ('.ts', '.tsx', '.js', '.jsx', '.html', '.vue', '.svelte', '.css', '.py'):
+            with self.subTest(extension=extension):
+                self.assertEqual(check_design_icon_rule('src/button' + extension, ' '.join(icons)), icons)
+
+    def test_excludes_documentation_data_and_tests(self):
+        for path in ('README.md', 'config.json', 'docs/demo.ts', 'documentation/demo.py',
+                     'doc/demo.html', 'test_button.py', 'button.test.ts', 'button.spec.ts',
+                     'spec.js', 'tests/button.ts', r'C:\app\tests\button.py', '__tests__/button.ts'):
+            with self.subTest(path=path):
+                self.assertEqual(check_design_icon_rule(path, '✅'), [])
+
+    def test_empty_plain_text_and_duplicate_icons(self):
+        self.assertEqual(check_design_icon_rule('src/button.ts', ''), [])
+        self.assertEqual(check_design_icon_rule('src/button.ts', 'const label = "Kaydet";'), [])
+        self.assertEqual(check_design_icon_rule('src/button.ts', '✅ ✅ 🗑️'), ['✅', '🗑️'])
+
+    def test_dispatcher_allows_write_and_emits_warning(self):
+        from gravityguard_engine import dispatcher
+
+        with tempfile.TemporaryDirectory() as directory:
+            for extension in ('.ts', '.css'):
+                target = str(Path(directory) / ('button' + extension))
+                payload = {'toolCall': {'name': 'write_to_file', 'args': {'TargetFile': target}}}
+                output = io.StringIO()
+                with self.subTest(extension=extension), ExitStack() as stack:
+                    stack.enter_context(patch('sys.stdin', io.StringIO(json.dumps(payload))))
+                    stack.enter_context(patch('sys.stdout', output))
+                    stack.enter_context(patch('sys.argv', ['gravityguard']))
+                    stack.enter_context(patch.object(dispatcher, 'resolve_project_root', return_value=Path(directory)))
+                    stack.enter_context(patch.object(dispatcher, 'load_gravityguard_config', return_value={}))
+                    stack.enter_context(patch.object(dispatcher, 'get_projected_and_old_content', return_value=('', 'const label = "✅";')))
+                    for name in ('reconcile_obligations_on_disk', 'record_review_obligation',
+                                 'record_pending_doc_obligation', 'trigger_background_validation'):
+                        stack.enter_context(patch.object(dispatcher, name))
+                    stack.enter_context(patch.object(dispatcher, 'evaluate_test_evidence', return_value=([], {})))
+                    stack.enter_context(patch.object(dispatcher, 'read_recent_diagnostics', return_value=[]))
+                    log = stack.enter_context(patch.object(dispatcher, 'log_event'))
+                    with self.assertRaises(SystemExit) as result:
+                        dispatcher.validate_gravityguard()
+                    self.assertEqual(result.exception.code, 0)
+                    response = json.loads(output.getvalue())
+                    self.assertEqual(response['decision'], 'allow')
+                    message = 'Tasarım kuralına uymuyor hemen düzelt: kodda standart emoji/ikon kullanımı tespit edildi (✅).'
+                    self.assertIn('[DESIGN_ICON_RULE] ' + message, response['reason'])
+                    log.assert_any_call('write_to_file', 'WARNING', target, message,
+                                        rule_id='DESIGN_ICON_RULE', conversation_id='default')
 
 
 class TestArchitectureRulesDomain(unittest.TestCase):

@@ -15,6 +15,12 @@ function renderObligationMeta(item: any, filePath: string): string {
       agent = 'Claude Code';
     } else if (rawSession.includes('codex')) {
       agent = 'Codex';
+    } else if (rawSession.includes('opencode')) {
+      agent = 'OpenCode';
+    } else if (rawSession.includes('aider')) {
+      agent = 'Aider';
+    } else if (rawSession.includes('freebuff')) {
+      agent = 'Freebuff';
     } else if (rawSession.includes('cli') || rawSession.includes('agy-cli')) {
       agent = 'Antigravity CLI';
     } else if (rawSession.includes('sdk') || rawSession.includes('agy-sdk')) {

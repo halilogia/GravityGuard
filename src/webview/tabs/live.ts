@@ -5,13 +5,22 @@ import { escapeHtml } from '../html_utils';
 import { GuardianViewModel } from '../types';
 
 export function renderAgentBadge(agent: string | undefined, short: boolean): string {
-  if (agent === 'Claude Code') {
+  if (agent === 'Claude Code' || agent === 'claude') {
     return `<span class="agent-pill agent-claude">🟠 ${short ? 'Claude' : 'Claude Code'}</span>`;
   }
-  if (agent === 'Codex' || agent === 'OpenAI Codex') {
+  if (agent === 'Codex' || agent === 'OpenAI Codex' || agent === 'codex') {
     return `<span class="agent-pill agent-codex">⚪ ${short ? 'Codex' : 'Codex'}</span>`;
   }
-  if (agent === 'Antigravity CLI') {
+  if (agent === 'OpenCode' || agent === 'opencode') {
+    return `<span class="agent-pill agent-opencode">⚫ ${short ? 'OpenCode' : 'OpenCode CLI'}</span>`;
+  }
+  if (agent === 'Aider' || agent === 'aider') {
+    return `<span class="agent-pill agent-aider">🔴 ${short ? 'Aider' : 'Aider CLI'}</span>`;
+  }
+  if (agent === 'Freebuff' || agent === 'freebuff') {
+    return `<span class="agent-pill agent-freebuff">💎 ${short ? 'Freebuff' : 'Freebuff CLI'}</span>`;
+  }
+  if (agent === 'Antigravity CLI' || agent === 'agy') {
     return `<span class="agent-pill agent-antigravity-cli">🟣 ${short ? 'CLI' : 'Antigravity CLI'}</span>`;
   }
   if (agent === 'Antigravity SDK') {

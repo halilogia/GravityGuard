@@ -62,6 +62,21 @@ export const STREAM_STYLES = `\
             border-color: rgba(168, 85, 247, 0.55);
             color: #c084fc;
           }
+          .agent-opencode {
+            background: #000000;
+            border-color: #3f3f46;
+            color: #ffffff;
+          }
+          .agent-aider {
+            background: rgba(239, 68, 68, 0.15);
+            border-color: rgba(239, 68, 68, 0.55);
+            color: #f87171;
+          }
+          .agent-freebuff {
+            background: rgba(6, 182, 212, 0.15);
+            border-color: rgba(6, 182, 212, 0.55);
+            color: #22d3ee;
+          }
           .agent-antigravity-sdk {
             background: rgba(16, 185, 129, 0.15);
             border-color: rgba(16, 185, 129, 0.55);

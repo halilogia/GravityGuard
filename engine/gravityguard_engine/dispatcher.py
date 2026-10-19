@@ -15,6 +15,7 @@ from typing import List, Tuple, Optional, Dict
 from .architecture_rules import (
     analyze_python_srp,
     check_arch_file_growth,
+    check_design_icon_rule,
     check_g3_compiler_bypass,
     check_g4_import_matrix,
     check_pma_horizontal,
@@ -429,6 +430,13 @@ def validate_gravityguard() -> None:
                 "reason": f"🛑 [G0_SECRET_LEAK]: '{target_file}' - {g0_reason}"
             }))
             sys.exit(0)
+
+    # Warn before the asset fast-pass so CSS additions are checked as well.
+    design_icons = check_design_icon_rule(target_file, added_text)
+    if design_icons:
+        warn_msg = f"Tasarım kuralına uymuyor hemen düzelt: kodda standart emoji/ikon kullanımı tespit edildi ({', '.join(design_icons[:5])})."
+        _log('WARNING', target_file, warn_msg, rule_id='DESIGN_ICON_RULE')
+        all_warnings.append(('DESIGN_ICON_RULE', warn_msg))
 
     # Fast-pass for vendor, cache, and non-code text assets (ONLY AFTER G0 IS CLEAN)
     if is_vendor_or_cache or (is_data_or_doc and not file_lower.endswith((".py", ".ts", ".tsx", ".js", ".jsx"))):

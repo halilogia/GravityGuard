@@ -25,6 +25,24 @@ from .audit import _resolve_log_dir
 from .project_context import DEFAULT_COMPLEXITY_THRESHOLDS, load_gravityguard_config
 
 
+# --- DESIGN_ICON_RULE: STANDARD EMOJI / ICON USAGE (WARN ONLY) ---
+def check_design_icon_rule(target_file: str, added_text: str) -> List[str]:
+    """Return distinct added icons in source files, preserving encounter order."""
+    norm = target_file.replace("\\", "/").lower()
+    parts = norm.split("/")
+    name = parts[-1]
+    if not name.endswith((".ts", ".tsx", ".js", ".jsx", ".html", ".vue", ".svelte", ".css", ".py")):
+        return []
+    if any(part in {"doc", "docs", "documentation", "test", "tests", "__tests__"} for part in parts[:-1]):
+        return []
+    if any(marker in name for marker in ("test_", "_test.", ".test.", "spec.")):
+        return []
+
+    # Include hourglasses outside the main symbol ranges and optional presentation selectors.
+    icons = re.findall(r"[\U00010000-\U0010ffff\u2600-\u27bf\u231a\u231b\u23e9-\u23f3\u23f8-\u23fa][\ufe0e\ufe0f]?", added_text)
+    return list(dict.fromkeys(icons))
+
+
 # --- G3: COMPILER & LINTER BYPASS (WARN ONLY) ---
 def check_g3_compiler_bypass(added_text: str) -> List[str]:
     """

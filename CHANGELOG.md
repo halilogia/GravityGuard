@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (Design Icon / Standard Emoji Warning Rule)
+- **`engine/gravityguard_engine/architecture_rules.py`**: `check_design_icon_rule` kuralı eklendi; kod dosyalarında (`.ts`, `.tsx`, `.js`, `.jsx`, `.html`, `.css`, `.py`) standart unicode emoji veya ikon kullanımı tespit edildiğinde yazmayı engellemeden (`allow`) kritik uyarı (`DESIGN_ICON_RULE`) üretir: *"Tasarım kuralına uymuyor hemen düzelt: kodda standart emoji/ikon kullanımı tespit edildi (...)"*. Dokümantasyon ve testler kuraldan muaftır.
+- **`engine/gravityguard_engine/dispatcher.py`**: Motor işlem boru hattına bağlandı; motor çıktısında kritik uyarı iletilir.
+- **`engine/tests/test_architecture_rules.py`**: Standart emoji tespiti ve muafiyetler için 4 yeni birim testi eklendi.
+
 ## [1.4.17] - 2026-10-16
 
 ### Added (PMA Architectural Boundary Detector)
