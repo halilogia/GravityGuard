@@ -10,9 +10,10 @@ as they do under Antigravity.
     PreToolUse (Write | Edit | MultiEdit | Read) -> engine PreToolUse payload -> deny / additionalContext / silent allow
     Stop                                   ->  engine `--stop` payload    ->  {"decision": "block"} or silent allow
 
-What it does not cover: Bash. A shell command cannot be reliably reduced to "which lines were added to which file", so
-a file written with `echo > x` or `sed -i` never reaches the file rules. The Stop hook (final diff guard, doc and test
-obligations) is the only backstop there; there is no git-level secret scanner.
+What it only partly covers: Bash and PowerShell. A shell command cannot be reliably reduced to "which lines were added to
+which file", so a file written with `echo > x` or `sed -i` never reaches the file rules. `shell_deny` still refuses the two
+decidable cases (a secret literal in the command, a shell read of a live `.env`); the Stop hook (final diff guard, doc and
+test obligations) is the backstop for the rest; there is no git-level secret scanner.
 
 Fail-open by design: when the engine cannot be started or gives no answer, the tool call proceeds and the reason goes to
 stderr. A guard that wedges the agent on its own bug is worse than a guard that steps aside and says so.
@@ -245,8 +246,59 @@ def emergency_deny(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }}
 
 
+SHELL_TOOLS = ("Bash", "PowerShell")
+# A live .env named as an argument (not `.env.example` and friends), next to a verb that reads or copies it.
+_ENV_TOKEN = re.compile(r"(?<![\w./\\-])(?:[\w./\\:-]*[/\\])?\.env(?:\.[\w-]+)?(?![\w.-])", re.IGNORECASE)
+# One simple command at a time: the read verb must open the segment and the `.env` must be its argument, so a commit
+# message or a `| tail` elsewhere in the line that merely mentions `.env` is not a read.
+_SHELL_SEGMENT_SPLIT = re.compile(r"[;&|\n(`]+")
+_ENV_READ_SEGMENT = re.compile(
+    r"^\s*(?:sudo\s+)?(?:cat|type|less|more|head|tail|grep|rg|sed|awk|cp|copy|xxd|base64|source|Get-Content|gc|"
+    r"Select-String|sls|Copy-Item|cpi|Import-Csv|\.)\s+(?P<args>.*)$",
+    re.IGNORECASE,
+)
+
+
+def shell_deny(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Bash/PowerShell cannot be reduced to file diffs, but two things in the command text are still decidable.
+
+    A secret literal in the command (it is about to land in a file, in shell history or in a remote) and a shell read of
+    a live `.env` (the Read-tool check is useless if `cat .env` is open). Everything else passes, as before.
+    """
+    if os.environ.get(FAIL_OPEN_ENV) == "1":
+        return None
+    command = str((event.get("tool_input") or {}).get("command") or "")
+    reason = ""
+    for label, pattern in EMERGENCY_SECRET_PATTERNS:
+        if pattern.search(command):
+            reason = f"komutta {label} var"
+            break
+    if not reason:
+        for segment in _SHELL_SEGMENT_SPLIT.split(command):
+            read = _ENV_READ_SEGMENT.match(segment)
+            for match in (_ENV_TOKEN.finditer(read.group("args")) if read else ()):
+                name = os.path.basename(match.group(0).replace("\\", "/")).lower()
+                if _LIVE_ENV_NAME.match(name) and not name.endswith(_ENV_TEMPLATE_SUFFIXES):
+                    reason = f"'{name}' canlı bir .env dosyası ve komut onu okuyor"
+                    break
+            if reason:
+                break
+    if not reason:
+        return None
+    return {"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": (
+            f"[GravityGuard kabuk kontrolü]: {reason}. Sırrı ortam değişkeninden okuyun; "
+            f"bilerek devam etmek için {FAIL_OPEN_ENV}=1."
+        ),
+    }}
+
+
 def handle(event: Dict[str, Any], stop: bool) -> Optional[Dict[str, Any]]:
     """Claude Code event in, Claude Code answer out (None = say nothing, let it proceed)."""
+    if not stop and event.get("tool_name") in SHELL_TOOLS:
+        return shell_deny(event)
     if stop:
         # `stop_hook_active` is deliberately ignored: it only says that Claude Code is already continuing because of
         # a Stop hook, and answering "allow" to it would let an agent leave after ONE extra turn without clearing its

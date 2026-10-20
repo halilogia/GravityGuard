@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (Shell guard for the Claude Code adapter)
+- **`plugin/claude-code/gravityguard_claude_hook.py` (`shell_deny`)**: `Bash` and `PowerShell` calls are no longer invisible. A command holding a secret literal (same patterns as `emergency_deny`) or a read verb (`cat`, `type`, `Get-Content`, `source`, ...) opening a command segment with a live `.env` as its argument is denied; `.env.example` and a mere mention of `.env` elsewhere in the line pass. `GRAVITYGUARD_ADAPTER_FAIL_OPEN=1` switches it off. Writes made through the shell still only meet the Stop-time guard.
+- `settings.example.json` matcher now lists `NotebookEdit|Bash|PowerShell`; `engine/tests/test_claude_adapter.py` gained `TestShellDeny` (45 adapter tests pass).
+
+### Fixed (Git hooks under `git worktree`)
+- The `pre-commit` / `pre-merge-commit` hooks located `loss-guard.py` through `git rev-parse --git-dir`, which inside a linked worktree points at `.git/worktrees/<name>` where the script does not exist, so every worktree commit failed. They now use `--git-common-dir`. Fixed in the template `~/.git-template/hooks/` (new repositories) and in this repository; existing repositories created from the old template still carry the old line.
+
 ### Added (Automated Task Archiving & Watermark Governance — tasks.md -> taskslog.md)
 - **`src/tasks.ts` (`archiveCompletedTasks`)**:
   - `tasks.md` içindeki tamamlanan görevlerin (`[x]`) otomatik olarak `taskslog.md` kütüğüne aktarılmasını sağlayan cerrahi arşivleme motoru entegre edildi.

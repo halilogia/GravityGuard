@@ -362,5 +362,40 @@ class TestAdapterRobustness(unittest.TestCase):
         self.assertTrue(logs.is_dir() and any(logs.rglob("*.jsonl")), "audit stream must land in GRAVITYGUARD_AUDIT_DIR")
 
 
+class TestShellDeny(unittest.TestCase):
+    def setUp(self):
+        self.addCleanup(os.environ.pop, adapter.FAIL_OPEN_ENV, None)
+        os.environ.pop(adapter.FAIL_OPEN_ENV, None)
+
+    def deny(self, command, tool="Bash"):
+        return adapter.handle({"tool_name": tool, "tool_input": {"command": command}, "session_id": "sh"}, stop=False)
+
+    def test_secret_literal_in_a_command_is_denied_in_both_shells(self):
+        token = "ghp_" + "a" * 30          # built at runtime so this file holds no secret literal
+        for tool in ("Bash", "PowerShell"):
+            out = self.deny(f'echo "TOKEN={token}" >> notes.txt', tool)
+            self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_shell_read_of_a_live_env_is_denied(self):
+        for command in ("cat .env", "type .\\.env", "Get-Content C:\\p\\.env.local", "grep KEY config/.env", "source .env"):
+            out = self.deny(command)
+            self.assertIsNotNone(out, command)
+            self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_env_templates_and_unrelated_commands_pass(self):
+        for command in ("cat .env.example", "cat README.md", "echo hi", "git status", "ls -a", "grep -r environment src",
+                        'git commit -m "deny live .env reads" 2>&1 | tail -6', "echo .env | head -1"):
+            self.assertIsNone(self.deny(command), command)
+
+    def test_fail_open_switch_also_turns_the_shell_check_off(self):
+        os.environ[adapter.FAIL_OPEN_ENV] = "1"
+        self.assertIsNone(self.deny("cat .env"))
+
+    def test_settings_example_covers_shell_tools(self):
+        settings = json.loads((_ADAPTER.parent / "settings.example.json").read_text(encoding="utf-8"))
+        matcher = settings["hooks"]["PreToolUse"][0]["matcher"].split("|")
+        self.assertTrue({"Bash", "PowerShell"} <= set(matcher))
+
+
 if __name__ == "__main__":
     unittest.main()
