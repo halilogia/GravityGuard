@@ -6,8 +6,8 @@
 
 | Durum | Sürüm | Nerede |
 |---|---|---|
-| Yayınlandı | **v1.3.0** (2026-09-27) | `CHANGELOG.md` → `## [1.3.0]` |
-| Önceki | v1.2.7 (2026-09-21) | `CHANGELOG.md` → `## [1.2.7]` |
+| Yayınlandı | **v1.4.18** (2026-10-21) | GitHub Releases · `CHANGELOG.md` → `[Unreleased]` / `## [1.4.17]` |
+| Önceki | v1.3.0 (2026-09-27) | `CHANGELOG.md` → `## [1.3.0]` |
 | Makine katmanı / repo araçları (`.vsix` içinde değil) | secret safety net, plugin senkronizasyonu, hijyen | `CHANGELOG.md` → `Appendix` |
 | Sıradaki hedef | v1.4.0 (aşağıda) |
 
