@@ -1,8 +1,21 @@
-# GravityGuard — v1.4.0
+# GravityGuard
 
-> Deterministic Architecture Airbag, Secret Leak Airbag & AI Agent Gatekeeper for Antigravity IDE.
+> **If your AI coding agent deletes a test, writes `except: pass`, or hard-codes an API key, GravityGuard refuses the write — before it reaches your disk.**
+> Deterministic guardrails for **Claude Code** and **Antigravity IDE**. No LLM in the loop, ~0.1 ms per check, zero dependencies.
+
+![GravityGuard blocking a leaked API key and a skipped test](media/demo.svg)
 
 [English](#english) | [Türkçe](#türkçe)
+
+### Try it in Claude Code (2 minutes)
+
+```bash
+git clone https://github.com/halilogia/GravityGuard.git
+```
+
+Add the hook from [`plugin/claude-code/settings.example.json`](plugin/claude-code/settings.example.json) to your Claude Code `settings.json` (replace `<GRAVITYGUARD>` with the clone path). Requires only Python 3.10+. Details: [plugin/claude-code/README.md](plugin/claude-code/README.md).
+
+**What it blocks:** leaked secrets (OpenAI, Anthropic, Gemini, Slack, GitHub, private keys) · silenced or deleted tests · silent `except: pass` · layer-boundary violations · god-files. Full list in the [rule matrix](#active-rule--evidence-matrix).
 
 [![Antigravity Compatible](https://img.shields.io/badge/Antigravity%20IDE-Compatible-blue.svg)](https://antigravity.google/)
 [![Tests](https://img.shields.io/badge/Engine%20265%20%2B%20TS%2037-Passing-brightgreen.svg)]()

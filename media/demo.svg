@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 400" width="820" height="400" role="img" aria-label="GravityGuard blocks an AI agent that writes a hard-coded API key and then tries to skip a test">
+  <style>
+    .bg{fill:#0d1117}
+    .bar{fill:#161b22}
+    text{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:14px}
+    .dim{fill:#8b949e}.cmd{fill:#c9d1d9}.ok{fill:#3fb950}.bad{fill:#f85149}.warn{fill:#d29922}.hl{fill:#58a6ff}
+    .l{opacity:0;animation:show .01s forwards}
+    .l1{animation-delay:.3s}.l2{animation-delay:1.4s}.l3{animation-delay:2.0s}.l4{animation-delay:3.6s}.l5{animation-delay:4.2s}.l6{animation-delay:5.6s}
+    @keyframes show{to{opacity:1}}
+  </style>
+  <rect class="bg" width="820" height="400" rx="10"/>
+  <rect class="bar" width="820" height="34" rx="10"/>
+  <circle cx="20" cy="17" r="6" fill="#f85149"/><circle cx="40" cy="17" r="6" fill="#d29922"/><circle cx="60" cy="17" r="6" fill="#3fb950"/>
+  <text x="330" y="22" class="dim">Claude Code · GravityGuard PreToolUse hook</text>
+
+  <g class="l l1"><text x="24" y="70" class="hl">agent</text><text x="72" y="70" class="cmd">▸ Write app.py   KEY = "sk-proj-A1b2…"</text></g>
+  <g class="l l2"><text x="24" y="100" class="bad">🛑 DENIED</text><text x="110" y="100" class="cmd">[G0_SECRET_LEAK] OpenAI API key detected: sk-p****…****3n4</text></g>
+  <g class="l l3"><text x="110" y="122" class="dim">Use an environment variable. The file was never written.</text></g>
+
+  <g class="l l4"><text x="24" y="176" class="hl">agent</text><text x="72" y="176" class="cmd">▸ Write tests/test_a.py   @pytest.mark.skip</text></g>
+  <g class="l l5"><text x="24" y="206" class="bad">🛑 DENIED</text><text x="110" y="206" class="cmd">[G2_TEST_INTEGRITY] test-disabling trick detected</text></g>
+  <g class="l l5"><text x="110" y="228" class="dim">Fix the failure instead of silencing the test.</text></g>
+
+  <g class="l l6">
+    <text x="24" y="290" class="ok">✔ 0 secrets written</text>
+    <text x="24" y="314" class="ok">✔ 0 tests silenced</text>
+    <text x="24" y="338" class="dim">Pure in-memory evaluation · avg ~0.1 ms · zero dependencies</text>
+  </g>
+</svg>
