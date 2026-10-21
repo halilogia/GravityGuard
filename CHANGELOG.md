@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (G7 TypeScript-First Advisory & Antigravity Tool Hooks)
+- **`engine/gravityguard_engine/architecture_rules.py` (`check_g7_ts_first`)**:
+  - G7 TypeScript-First değişmez kuralı mekanik denetime bağlandı. Yeni eklenen saf JavaScript (`.js`, `.cjs`, `.mjs`) dosyaları için 1 kerelik `WARN (ADVISORY)` tavsiye uyarısı üretir (`G7_TS_FIRST`).
+  - Doğal istisnalar (`dist/`, `build/`, `.config.js`, tarayıcı istemci scriptleri `static/`, `public/`) whitelist ile kural dışı bırakıldı.
+- **`engine/gravityguard_engine/diffing.py` & `dispatcher.py`**:
+  - Antigravity 2.0 yerel araçları (`write_file`, `edit_file`, `read_file`) ve parametreleri (`Path`, `Content`, `Target`, `Replacement`) tam destekle normalize edildi.
+- **`hooks.json`**:
+  - PreToolUse matcher'ı `write_file|edit_file|read_file|write_to_file|replace_file_content|multi_replace_file_content|view_file` olarak genişletildi.
+
+
 ### Added (Shell guard for the Claude Code adapter)
 - **`plugin/claude-code/gravityguard_claude_hook.py` (`shell_deny`)**: `Bash` and `PowerShell` calls are no longer invisible. A command holding a secret literal (same patterns as `emergency_deny`) or a read verb (`cat`, `type`, `Get-Content`, `source`, ...) opening a command segment with a live `.env` as its argument is denied; `.env.example` and a mere mention of `.env` elsewhere in the line pass. `GRAVITYGUARD_ADAPTER_FAIL_OPEN=1` switches it off. Writes made through the shell still only meet the Stop-time guard.
 - `settings.example.json` matcher now lists `NotebookEdit|Bash|PowerShell`; `engine/tests/test_claude_adapter.py` gained `TestShellDeny` (45 adapter tests pass).
@@ -286,6 +296,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Antigravity IDE 1.4.1 Paketi**: Eklenti sürümü `1.4.1` olarak artırıldı ve Antigravity IDE'ye doğrudan kuruldu.
 
 ## [Unreleased]
+
+### Added (G7 TypeScript-First Advisory & Antigravity Tool Hooks)
+- **`engine/gravityguard_engine/architecture_rules.py` (`check_g7_ts_first`)**:
+  - G7 TypeScript-First değişmez kuralı mekanik denetime bağlandı. Yeni eklenen saf JavaScript (`.js`, `.cjs`, `.mjs`) dosyaları için 1 kerelik `WARN (ADVISORY)` tavsiye uyarısı üretir (`G7_TS_FIRST`).
+  - Doğal istisnalar (`dist/`, `build/`, `.config.js`, tarayıcı istemci scriptleri `static/`, `public/`) whitelist ile kural dışı bırakıldı.
+- **`engine/gravityguard_engine/diffing.py` & `dispatcher.py`**:
+  - Antigravity 2.0 yerel araçları (`write_file`, `edit_file`, `read_file`) ve parametreleri (`Path`, `Content`, `Target`, `Replacement`) tam destekle normalize edildi.
+- **`hooks.json`**:
+  - PreToolUse matcher'ı `write_file|edit_file|read_file|write_to_file|replace_file_content|multi_replace_file_content|view_file` olarak genişletildi.
+
 
 > **Specialist Review (R1) — Uzman İnceleme Yükümlülüğü.** GravityGuard artık yönetilen
 > üretim kodu değiştiğinde, oturum kapanmadan önce bağımsız bir `code-reviewer`

@@ -30,13 +30,13 @@ def get_projected_and_old_content(
         except (IOError, OSError):
             existing_content = ""
 
-    if tool_name == "write_to_file":
-        new_content = _text(args.get("CodeContent"))
+    if tool_name in ("write_to_file", "write_file"):
+        new_content = _text(args.get("CodeContent") or args.get("Content") or args.get("content"))
         return existing_content, new_content
 
-    if tool_name == "replace_file_content":
-        target = _text(args.get("TargetContent"))
-        repl = _text(args.get("ReplacementContent"))
+    if tool_name in ("replace_file_content", "edit_file"):
+        target = _text(args.get("TargetContent") or args.get("Target") or args.get("target"))
+        repl = _text(args.get("ReplacementContent") or args.get("Replacement") or args.get("replacement"))
         allow_multiple = args.get("AllowMultiple", False)
         if existing_content:
             count = -1 if allow_multiple else 1

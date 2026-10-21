@@ -19,6 +19,7 @@ from .architecture_rules import (
     check_design_scrollbar_rule,
     check_g3_compiler_bypass,
     check_g4_import_matrix,
+    check_g7_ts_first,
     check_pma_horizontal,
     check_pma_imports,
     check_oe_spike,
@@ -303,11 +304,12 @@ def validate_gravityguard() -> None:
     tool_call = payload.get("toolCall", {})
     args = tool_call.get("args", {})
     target_file = (
+        args.get("Path") or
+        args.get("path") or
         args.get("TargetFile") or
         args.get("target_file") or
         args.get("file_path") or
         args.get("AbsolutePath") or
-        args.get("path") or
         ""
     )
     tool_name = tool_call.get("name", "edit")
@@ -460,6 +462,12 @@ def validate_gravityguard() -> None:
             sys.exit(0)
 
     # Warn before the asset fast-pass so CSS additions are checked as well.
+    # G7: TypeScript First Advisory (WARN ONLY)
+    g7_warn = check_g7_ts_first(target_file)
+    if g7_warn:
+        _log('WARNING', target_file, g7_warn, rule_id='G7_TS_FIRST')
+        all_warnings.append(('G7_TS_FIRST', g7_warn))
+
     design_icons = check_design_icon_rule(target_file, added_text)
     if design_icons:
         warn_msg = f"Tasarım kuralına uymuyor hemen düzelt: kodda standart emoji/ikon kullanımı tespit edildi ({', '.join(design_icons[:5])})."

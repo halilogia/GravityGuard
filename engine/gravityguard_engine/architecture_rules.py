@@ -31,7 +31,7 @@ def check_design_icon_rule(target_file: str, added_text: str) -> List[str]:
     norm = target_file.replace("\\", "/").lower()
     parts = norm.split("/")
     name = parts[-1]
-    if not name.endswith((".ts", ".tsx", ".js", ".jsx", ".html", ".vue", ".svelte", ".css", ".py")):
+    if not name.endswith((".ts", ".tsx", ".js", ".jsx", ".html", ".vue", ".svelte", ".css", ".py", ".gd", ".gdshader")):
         return []
     if any(part in {"doc", "docs", "documentation", "test", "tests", "__tests__"} for part in parts[:-1]):
         return []
@@ -41,6 +41,40 @@ def check_design_icon_rule(target_file: str, added_text: str) -> List[str]:
     # Include hourglasses outside the main symbol ranges and optional presentation selectors.
     icons = re.findall(r"[\U00010000-\U0010ffff\u2600-\u27bf\u231a\u231b\u23e9-\u23f3\u23f8-\u23fa][\ufe0e\ufe0f]?", added_text)
     return list(dict.fromkeys(icons))
+
+
+# --- G7: TYPESCRIPT FIRST ADVISORY (WARN ONLY) ---
+def check_g7_ts_first(target_file: str) -> Optional[str]:
+    """
+    Checks if a newly introduced or edited file is a raw JavaScript file (.js, .cjs, .mjs).
+    Upholds the G7 TypeScript-First standing invariant by issuing an Advisory Warning.
+    Never blocks; respects pragmatic exceptions:
+    - Distribution/build outputs: dist/, build/, out/, .next/
+    - Dependency directories: node_modules/
+    - Tool/bundler configuration files: *.config.js, *.config.cjs, *.config.mjs
+    - Direct client-side browser scripts: static/, public/, or *.min.js
+    """
+    norm = target_file.replace("\\", "/").lower()
+    parts = norm.split("/")
+    name = parts[-1]
+
+    if not name.endswith((".js", ".cjs", ".mjs")):
+        return None
+
+    # Pragmatic exceptions
+    if any(part in {"dist", "build", "out", ".next", "node_modules", "vendor", "coverage", "static", "public"} for part in parts[:-1]):
+        return None
+
+    if name.endswith((".min.js", ".config.js", ".config.cjs", ".config.mjs")):
+        return None
+
+    if any(part in {"doc", "docs", "documentation"} for part in parts[:-1]):
+        return None
+
+    return (
+        f"G7 TypeScript-First Tavsiyesi: '{name}' dosyası saf JavaScript ({name.split('.')[-1]}) olarak yazılıyor. "
+        "Ekosistem standardı gereği kodların ve scriptlerin tip güvenli TypeScript (.ts) olarak yazılması tavsiye edilir."
+    )
 
 
 # --- DESIGN_SCROLLBAR_RULE: DEFAULT WEBKIT / BROWSER SCROLLBAR BAN (WARN ONLY) ---
