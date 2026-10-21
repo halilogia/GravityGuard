@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (Project presentation & core docs)
+- `README.md` now leads with the value proposition, an animated demo (`media/demo.svg`, output taken from the real engine) and a Claude Code quick start; the hand-written version heading was removed.
+- Added root `TASKS.md` (active sprint / backlog / done) and `docs/launch-drafts.md`; `ROADMAP.md` status table now points at v1.4.18.
+
 ### Added (G7 TypeScript-First Advisory & Antigravity Tool Hooks)
 - **`engine/gravityguard_engine/architecture_rules.py` (`check_g7_ts_first`)**:
   - G7 TypeScript-First değişmez kuralı mekanik denetime bağlandı. Yeni eklenen saf JavaScript (`.js`, `.cjs`, `.mjs`) dosyaları için 1 kerelik `WARN (ADVISORY)` tavsiye uyarısı üretir (`G7_TS_FIRST`).
