@@ -29,7 +29,12 @@ from .architecture_rules import (
 from .audit import log_event
 from .state_lock import StateLockTimeout
 from .diagnostics import read_recent_diagnostics, trigger_background_validation
-from .diffing import get_diff_analysis, get_projected_and_old_content
+from .diffing import get_diff_analysis, get_projected_and_old_content, ProjectionError
+from .policy_integrity import MANDATORY_RULES, check_policy_change, is_runtime_control_file
+from .shell_rules import check_shell_command
+from .publication_guard import scan_git_secrets
+from .removal_observer import observe_removals
+from .operations import normalize_operation, UnsupportedOperation
 from .governance import (
     get_session_stop_retries,
     get_unresolved_doc_obligations,
@@ -66,6 +71,7 @@ from .test_evidence import (
 )
 from .review_governance import (
     evaluate_review_obligations,
+    get_unresolved_review_obligations,
     record_final_diff_guard,
     record_review_obligation,
     register_review_invocation,
@@ -104,7 +110,7 @@ def _project_relative(path: str, root: Path) -> str:
 
 def is_rule_shadow(rule_id: str, cfg: Optional[dict]) -> bool:
     """Checks if a rule is configured in shadow mode (observes without blocking/warning)."""
-    if not isinstance(cfg, dict):
+    if rule_id in MANDATORY_RULES or not isinstance(cfg, dict):
         return False
     rules_cfg = cfg.get("rules", {})
     if isinstance(rules_cfg, dict):
@@ -187,8 +193,12 @@ def validate_gravityguard() -> None:
 
     try:
         payload = json.loads(raw_input)
-    except Exception:
-        print(json.dumps({"decision": "allow"}))
+    except (ValueError, RecursionError):
+        print(json.dumps({"decision": "deny", "reason": "[TOOL_SCHEMA_UNSUPPORTED]: Invalid JSON payload"}))
+        sys.exit(0)
+
+    if not isinstance(payload, dict):
+        print(json.dumps({"decision": "deny", "reason": "[TOOL_SCHEMA_UNSUPPORTED]: Expected a JSON object"}))
         sys.exit(0)
 
     # ========================================================================
@@ -205,9 +215,19 @@ def validate_gravityguard() -> None:
             conversation_id = payload.get("conversationId", "default")
             cfg = load_gravityguard_config("", project_root)
 
+            # Mandatory security scans run before the advisory circuit breaker.
+            security_findings = []
+            for scan_root in [project_root, *_other_stop_roots(payload, project_root)]:
+                security_findings.extend(scan_git_secrets(scan_root))
+            if security_findings:
+                reason = " | ".join(security_findings)
+                log_event("stop", "BLOCKED", "workspace", reason, rule_id="FINAL_SECURITY_SCAN", conversation_id=conversation_id)
+                print(json.dumps({"decision": "continue", "reason": reason}))
+                sys.exit(0)
+
             # Defect A fix: Circuit breaker strictly governed by session continuation retries
             session_retries = get_session_stop_retries(project_root, conversation_id)
-            if session_retries >= 5:
+            if session_retries >= 5 and not get_unresolved_review_obligations(project_root, conversation_id):
                 log_event(
                     "stop", "WARNING", "workspace",
                     f"Circuit breaker triggered (retries={session_retries}): allowing stop despite obligations",
@@ -240,6 +260,24 @@ def validate_gravityguard() -> None:
                 unresolved_reviews.update(other_reviews.get("unresolved", {}))
 
             warn_reasons = []
+            try:
+                removals = observe_removals(project_root)
+            except OSError as removal_err:
+                removals = {"deleted": [], "suspicious_tests": []}
+                log_event("stop", "WARNING", "workspace", f"Removal observer state error: {removal_err}", rule_id="REMOVAL_OBSERVER_ERROR", conversation_id=conversation_id)
+            if removals["deleted"]:
+                names = removals["deleted"]
+                shown = ", ".join(names[:8]) + (f" (+{len(names) - 8} more)" if len(names) > 8 else "")
+                log_event("stop", "APPROVED", "workspace", f"{len(names)} file(s) deleted outside the hook path: {shown}", rule_id="DELETE_OBSERVED", conversation_id=conversation_id)
+            if removals["suspicious_tests"]:
+                tests = removals["suspicious_tests"]
+                shown = ", ".join(tests[:5]) + (f" (+{len(tests) - 5} more)" if len(tests) > 5 else "")
+                removal_warn = (
+                    f"Test Silme Uyarısı (TEST_DELETED_SUBJECT_REMAINS): Test dosyası silindi ama test ettiği kod hâlâ duruyor: {shown}. "
+                    "Özellik gerçekten kaldırılıyorsa kodunu da sil; değilse testi geri getir. Emin değilsen kullanıcıya sor."
+                )
+                log_event("stop", "WARNING", "workspace", removal_warn, rule_id="TEST_DELETED_SUBJECT_REMAINS", conversation_id=conversation_id)
+                warn_reasons.append(removal_warn)
             if unresolved_tests:
                 missing_items = [
                     f"'{p}' (beklenen test: {info.get('expected_name', 'test')})"
@@ -302,28 +340,28 @@ def validate_gravityguard() -> None:
     # PreToolUse Lifecycle Hook Dispatcher
     # ========================================================================
     tool_call = payload.get("toolCall", {})
+    if not isinstance(tool_call, dict):
+        print(json.dumps({"decision": "deny", "reason": "[TOOL_SCHEMA_UNSUPPORTED]: Invalid toolCall"}))
+        sys.exit(0)
     args = tool_call.get("args", {})
-    target_file = (
-        args.get("Path") or
-        args.get("path") or
-        args.get("TargetFile") or
-        args.get("target_file") or
-        args.get("file_path") or
-        args.get("AbsolutePath") or
-        ""
-    )
-    tool_name = tool_call.get("name", "edit")
+    tool_name = tool_call.get("name", "")
     c_id = payload.get("conversationId", "default")
 
     def _log(status: str, target: str, reason: str, rule_id: str = "") -> None:
         log_event(tool_name, status, target, reason, rule_id=rule_id, conversation_id=c_id)
+
+    shell_reason = check_shell_command(args)
+    if shell_reason:
+        _log("BLOCKED", "shell", shell_reason, rule_id="SHELL_SECURITY")
+        print(json.dumps({"decision": "deny", "reason": shell_reason}))
+        sys.exit(0)
 
     # ========================================================================
     # MCP Reviewer Observation — provenance anchor (not a file write)
     # When the Lead calls the Swarm code-reviewer, record the review_id / nonce /
     # fingerprint it carried. A receipt with no matching invocation is refused.
     # ========================================================================
-    if _MCP_REVIEW_TOOL_RE.search(tool_name or ""):
+    if isinstance(tool_name, str) and isinstance(args, dict) and _MCP_REVIEW_TOOL_RE.search(tool_name):
         mcp_review = _extract_mcp_review_args(args)
         if mcp_review:
             mcp_root = resolve_project_root(payload)
@@ -338,8 +376,26 @@ def validate_gravityguard() -> None:
                 _log("APPROVED", tool_name, f"Reviewer invocation observed (review_id={mcp_review['review_id']})", rule_id="REVIEW_INVOCATION")
             except StateLockTimeout as lock_err:
                 _log("WARNING", tool_name, f"State lock timeout observing reviewer call: {lock_err}", rule_id="STATE_LOCK_TIMEOUT")
+        # Observation is not a file-rule exemption: a reviewer-shaped tool
+        # carrying mutation arguments must still pass semantic validation.
+
+    try:
+        operation = normalize_operation(tool_name, args)
+    except UnsupportedOperation as exc:
+        reason = f"[TOOL_SCHEMA_UNSUPPORTED]: {exc}"
+        _log("BLOCKED", "", reason, rule_id="TOOL_SCHEMA_UNSUPPORTED")
+        print(json.dumps({"decision": "deny", "reason": reason}))
+        sys.exit(0)
+    if operation is None:
         print(json.dumps({"decision": "allow"}))
         sys.exit(0)
+    target_file = operation.path
+    if not os.path.isabs(target_file):
+        cwd = payload.get("cwd")
+        base = Path(cwd) if isinstance(cwd, str) and os.path.isabs(cwd) else resolve_project_root(payload)
+        target_file = str(base / target_file)
+    target_file = os.path.realpath(target_file)
+    args = {**operation.args, "TargetFile": target_file}
 
     # 1. Normalize path
     normalized_path = target_file.replace("\\\\", "/").replace("\\", "/")
@@ -370,16 +426,8 @@ def validate_gravityguard() -> None:
         ".so", ".bin", ".wasm", ".zip", ".tar", ".gz"
     ))
 
-    # Fast-pass for pure binary assets
-    # Benign asset writes are silent by default to prevent log pollution (like read tools)
-    if is_binary_asset:
-        if target_file and os.environ.get("GRAVITYGUARD_LOG_EXEMPTS", "").strip().lower() in ("1", "true", "yes"):
-            _log("APPROVED", target_file, "Exempt file (Binary Asset)", rule_id="EXEMPT")
-        print(json.dumps({"decision": "allow"}))
-        sys.exit(0)
-
     # 1.1 Protect live .env files from being read, created, overwritten, or modified by AI agents
-    if is_protected_env_file(target_file):
+    if is_protected_env_file(operation.path) or is_protected_env_file(target_file):
         p_root = resolve_project_root(payload, target_file)
         cfg = load_gravityguard_config(target_file, p_root)
         if not is_rule_shadow("G0_ENV_PROTECTION", cfg):
@@ -396,10 +444,16 @@ def validate_gravityguard() -> None:
             sys.exit(0)
 
     # Fast-pass for view/read tools once protected env files are checked
-    if tool_name.lower() in ("view_file", "read_file", "read_file_content", "view", "read"):
+    if operation.kind == "READ":
         if target_file:
             _log("APPROVED", target_file, "Read tool allowed for non-sensitive file", rule_id="READ_ALLOW")
         print(json.dumps({"decision": "allow"}))
+        sys.exit(0)
+
+    if is_runtime_control_file(target_file):
+        reason = "[POLICY_INTEGRITY]: Installed guard hooks, receipts and runtime state require a trusted host action"
+        _log("BLOCKED", target_file, reason, rule_id="POLICY_INTEGRITY")
+        print(json.dumps({"decision": "deny", "reason": reason}))
         sys.exit(0)
 
     # 1.2 Prevent blind overwriting of existing documentation, architecture, rule, and skill files
@@ -426,7 +480,21 @@ def validate_gravityguard() -> None:
         sys.exit(0)
 
     # 2. Extract projected and old content, compute exact diff
-    old_full_content, projected_content = get_projected_and_old_content(target_file, tool_name, args)
+    try:
+        old_full_content, projected_content = get_projected_and_old_content(
+            target_file, tool_name, args,
+            allow_virtual=os.environ.get("GRAVITYGUARD_TEST_VIRTUAL_FILES") == "1",
+        )
+    except ProjectionError as exc:
+        reason = f"[PROJECTION_UNSUPPORTED]: {exc}"
+        _log("BLOCKED", target_file, reason, rule_id="PROJECTION_UNSUPPORTED")
+        print(json.dumps({"decision": "deny", "reason": reason}))
+        sys.exit(0)
+    policy_reason = check_policy_change(target_file, projected_content)
+    if policy_reason:
+        _log("BLOCKED", target_file, policy_reason, rule_id="POLICY_INTEGRITY")
+        print(json.dumps({"decision": "deny", "reason": f"[POLICY_INTEGRITY]: {policy_reason}"}))
+        sys.exit(0)
     added_lines, added_text, added_line_numbers = get_diff_analysis(old_full_content, projected_content)
 
     all_warnings: List[Tuple[str, str]] = []
@@ -460,6 +528,13 @@ def validate_gravityguard() -> None:
                 "reason": f"🛑 [G0_SECRET_LEAK]: '{target_file}' - {g0_reason}"
             }))
             sys.exit(0)
+
+    # A filename suffix cannot exempt incoming text from G0.
+    if is_binary_asset:
+        if os.environ.get("GRAVITYGUARD_LOG_EXEMPTS", "").lower() in ("1", "true", "yes"):
+            _log("APPROVED", target_file, "Exempt file (Binary Asset)", rule_id="EXEMPT")
+        print(json.dumps({"decision": "allow"}))
+        sys.exit(0)
 
     # Warn before the asset fast-pass so CSS additions are checked as well.
     # G7: TypeScript First Advisory (WARN ONLY)
@@ -762,4 +837,11 @@ def validate_gravityguard() -> None:
 
 
 def run_cli() -> None:
-    validate_gravityguard()
+    try:
+        validate_gravityguard()
+    except Exception:
+        # Native hosts must receive an explicit result even when persistence or
+        # another subsystem fails. Do not echo payloads or exception contents.
+        print("[GravityGuard] validation failed; operation was not validated", file=sys.stderr)
+        print(json.dumps({"decision": "continue" if "--stop" in sys.argv else "deny",
+                          "reason": "[GUARD_UNAVAILABLE]: Validation could not complete"}))

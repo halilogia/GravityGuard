@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Feature-removal visibility
+- Added `removal_observer`: at Stop, files deleted by any means (shell `rm`, `git rm`, an IDE) are read from git and logged once as `DELETE_OBSERVED`. The shell itself is not parsed or blocked.
+- A deleted test whose subject is also deleted (same-named source, or a module it imports, including `@/` aliases and `.js` specifiers) is treated as a legitimate feature removal. A test deleted while its subject remains raises `TEST_DELETED_SUBJECT_REMAINS` once, so test sabotage by file deletion no longer slips past G2-C.
+
+### Audit maintenance
+- Separated observed security blocks from code correction rates; removed fabricated 100% deterrence and path-only recovery inference.
+- Added locked, hash-verified private audit archival with durable sequence and pending-violation checkpoints. Crash recovery preserves the checkpoint without restoring cleared events.
+- Moved telemetry rotation backups outside repositories and isolated adapter tests from the user's audit stream.
+
+### Security hardening
+- Enforced a mandatory G0 security floor and blocked structured writes to installed control files and runtime receipts. Text writes are scanned even with binary filename suffixes.
+- Replaced permissive projections with strict UTF-8 reads, search/range validation and explicit failures. Virtual-file projection is restricted to an explicit synthetic-test mode.
+- Added shared command-text checks and an independent Git added-text secret gate at Stop, pre-commit and CI. Mandatory security and review obligations are evaluated outside the advisory Stop circuit breaker.
+- Default adapter/CLI failures now return explicit deny/block responses. Review receipts require validated findings, matching invocation provenance, a verified result hash and HMAC authentication with a trusted key outside the workspace.
+- Routed advisory UI waivers through the engine transaction lock, preserved session scope and mandatory review debt, and authorized webview mutation paths against the rendered file set.
+- Required HTTPS for remote gateways, limited response sizes, migrated router tokens to SecretStorage and restricted endpoint configuration to machine settings.
+- Added the dependency lockfile for version control and switched CI to `npm ci`. VSIX verification now uses an explicit file allowlist; archives, local agent settings and nested caches are excluded. Added a static preview for VSIX-compatible README rendering.
+
+### Changed (Tool schema compatibility)
+- Added a shared deterministic file-operation normalizer for the engine, Claude Code and Codex adapters. Renamed tools with supported payload shapes receive the same WRITE/EDIT/MULTI_EDIT checks; malformed, conflicting and unsupported file schemas return `TOOL_SCHEMA_UNSUPPORTED` instead of silently bypassing rules.
+- Antigravity manifests and the Claude Code example now listen to all tool names. The duplicate reviewer hook was removed; reviewer observation remains inside the dispatcher. New schemas still require explicit adapters and host compatibility validation.
+- G4 now covers `write_file` and semantic full writes. Relative paths use the provider working directory and environment protection checks both the supplied and resolved path. Invalid JSON is explicitly denied.
+- Added a project security review in `docs/security-review-2026-10-21.md`, including remaining shell, trust-boundary, projection, packaging and failure-mode limitations.
+
 ### Changed (Project presentation & core docs)
 - `README.md` now leads with the value proposition, an animated demo (`media/demo.svg`, output taken from the real engine) and a Claude Code quick start; the hand-written version heading was removed.
 - Added root `TASKS.md` (active sprint / backlog / done) and `docs/launch-drafts.md`; `ROADMAP.md` status table now points at v1.4.18.
