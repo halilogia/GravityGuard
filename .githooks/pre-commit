@@ -1,10 +1,12 @@
 #!/bin/sh
 # GravityGuard Pre-Commit Hook (Stage 2: Local Repo Gate)
 # 1. Check for secret leaks
+# 1b. Block real local user paths (C:\Users\<name>\, /Users/<name>/, /home/<name>/) in added lines
 # 2. Enforce doc governance (CHANGELOG.md same-commit rule)
 # 3. Detect suspicious test file deletions (TEST_DELETED_SUBJECT_REMAINS)
 
 python tools/check_secrets.py || exit 1
+python tools/check_local_paths.py || exit 1
 python tools/verify_doc_governance.py || exit 1
 python tools/verify_removal_governance.py || exit 1
 

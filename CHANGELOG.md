@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Local Path Publication Gate
+- **`engine/gravityguard_engine/local_paths.py` + `tools/check_local_paths.py`**: the pre-commit hook now blocks staged ADDED lines that contain a real local user path (`C:\Users\<name>\`, `/Users/<name>/`, `/home/<name>/`, including JSON-escaped forms). Placeholders (`<user>`, `%USERNAME%`, `${USER}`) and system accounts (`Public`, `runner`) pass; the finding prints the user name only, never the rest of the path. Policy in `.gravityguard.json` (`publication.localPaths`: `block` | `warn` | `off`, `publication.allowLocalPaths`: globs) with a one-off escape `GRAVITYGUARD_ALLOW_LOCAL_PATHS=1`. Tests: `engine/tests/test_local_paths.py`.
+
 ### 4-Stage Categorized Governance Architecture
 - **In-Flight Gatekeeper (PreToolUse)**: Synchronous fast airbag (<5ms) strictly for preventing security leaks (G0), silent catch blocks (G1), test deletion/tampering (G2), structural layer breaches (G4), and destructive shell actions.
 - **Turn End Non-Intrusive Advisory (Stop)**: Relieved from intrusive review blocking and test deletion halts. Emits lightweight test reminders (T1) without trapping the agent in bureaucratic conversation loops.
