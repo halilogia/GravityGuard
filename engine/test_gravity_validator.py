@@ -14,6 +14,7 @@ from unittest.mock import patch, MagicMock
 # Set BEFORE importing any module so every spawn path observes it. Tests that
 # specifically assert the spawn contract clear this var locally.
 os.environ["GRAVITYGUARD_DISABLE_ASYNC"] = "1"
+os.environ["GRAVITYGUARD_TEST_VIRTUAL_FILES"] = "1"  # Legacy synthetic payloads deliberately have no disk file.
 # The developer's real ~/.gravityguard.json must never leak into a test.
 os.environ["GRAVITYGUARD_USER_CONFIG"] = os.path.join(tempfile.gettempdir(), "gg_no_such_user_config.json")
 

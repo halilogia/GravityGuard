@@ -12,6 +12,7 @@ if _ENGINE_DIR not in sys.path:
     sys.path.insert(0, _ENGINE_DIR)
 
 from gravityguard_engine.review_policy import (
+    check_review_risk_triggers,
     is_review_enabled,
     is_review_exempt_file,
     should_require_review,
@@ -57,6 +58,52 @@ class TestReviewPolicy(unittest.TestCase):
         cfg = {"review": {"enabled": True}}
         self.assertTrue(is_review_exempt_file("README.md", cfg, None))
         self.assertFalse(is_review_exempt_file("src/x.py", cfg, None))
+
+
+
+    # --- ChatGPT R1.1 Risk-Gated Policy Tests ------------------------------
+
+    def test_risk_triggers_disabled_when_review_off(self):
+        req, reason = check_review_risk_triggers(["engine/core.py"], {"review": {"enabled": False}})
+        self.assertFalse(req)
+        self.assertEqual(reason, "disabled")
+
+    def test_risk_triggers_skip_low_risk_changes(self):
+        cfg = {"review": {"enabled": True}}
+        req, reason = check_review_risk_triggers(["src/utils.py"], cfg, total_lines_changed=15)
+        self.assertFalse(req)
+        self.assertIn("Düşük riskli yerel değişiklik", reason)
+
+    def test_risk_triggers_on_security_path(self):
+        cfg = {"review": {"enabled": True}}
+        req, reason = check_review_risk_triggers(["engine/auth.py"], cfg, total_lines_changed=10)
+        self.assertTrue(req)
+        self.assertIn("Güvenlik/yönetişim modülü değişti", reason)
+
+    def test_risk_triggers_on_manifest_file(self):
+        cfg = {"review": {"enabled": True}}
+        req, reason = check_review_risk_triggers(["package.json"], cfg)
+        self.assertTrue(req)
+        self.assertIn("Dış bağımlılık", reason)
+
+    def test_risk_triggers_on_high_file_count(self):
+        cfg = {"review": {"enabled": True}}
+        files = [f"src/mod_{i}.py" for i in range(5)]
+        req, reason = check_review_risk_triggers(files, cfg)
+        self.assertTrue(req)
+        self.assertIn("5 dosya etkilendi", reason)
+
+    def test_risk_triggers_on_high_line_count(self):
+        cfg = {"review": {"enabled": True}}
+        req, reason = check_review_risk_triggers(["src/big.py"], cfg, total_lines_changed=150)
+        self.assertTrue(req)
+        self.assertIn("150 satır", reason)
+
+    def test_force_all_overrides_risk_gated(self):
+        cfg = {"review": {"enabled": True, "forceAll": True}}
+        req, reason = check_review_risk_triggers(["src/tiny.py"], cfg, total_lines_changed=2)
+        self.assertTrue(req)
+        self.assertEqual(reason, "force-all")
 
 
 if __name__ == "__main__":

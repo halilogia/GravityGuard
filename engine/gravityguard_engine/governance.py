@@ -161,7 +161,6 @@ def load_governance_state(
             "test_obligations": {"pending": {}},
             "doc_obligations": {"pending": {}},
             "review_obligations": {"pending": {}},
-            "review_invocations": [],
             "resolution_intents": [],
             "sessions": {}
         }
@@ -171,7 +170,6 @@ def load_governance_state(
     data.setdefault("test_obligations", {"pending": {}})
     data.setdefault("doc_obligations", {"pending": {}})
     data.setdefault("review_obligations", {"pending": {}})
-    data.setdefault("review_invocations", [])
     data.setdefault("resolution_intents", [])
 
     now = time.time()
@@ -231,8 +229,8 @@ def save_governance_state(state: Dict[str, Any], project_root: Optional[Path] = 
         with open(legacy_tmp, "w", encoding="utf-8") as f:
             json.dump(legacy_state, f, indent=2, ensure_ascii=False)
         legacy_tmp.replace(legacy_path)
-    except (IOError, OSError):
-        return
+    except (IOError, OSError) as exc:
+        raise OSError("Governance state could not be persisted") from exc
 
 
 def compute_file_digest(file_path: Path) -> Tuple[Optional[str], Optional[float], int]:
@@ -557,7 +555,6 @@ def clear_governance_state(project_root: Optional[Path] = None) -> None:
         state["test_obligations"] = {"pending": {}}
         state["doc_obligations"] = {"pending": {}}
         state["review_obligations"] = {"pending": {}}
-        state["review_invocations"] = []
         state["resolution_intents"] = []
         state["sessions"] = {}
         state["stop_retries"] = 0

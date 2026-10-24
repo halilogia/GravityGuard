@@ -57,7 +57,7 @@ class TestDesignIconRule(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             for extension in ('.ts', '.css'):
                 target = str(Path(directory) / ('button' + extension))
-                payload = {'toolCall': {'name': 'write_to_file', 'args': {'TargetFile': target}}}
+                payload = {'toolCall': {'name': 'write_to_file', 'args': {'TargetFile': target, 'CodeContent': 'const label = "✅";'}}}
                 output = io.StringIO()
                 with self.subTest(extension=extension), ExitStack() as stack:
                     stack.enter_context(patch('sys.stdin', io.StringIO(json.dumps(payload))))
@@ -79,7 +79,7 @@ class TestDesignIconRule(unittest.TestCase):
                     self.assertEqual(response['decision'], 'allow')
                     message = 'Tasarım kuralına uymuyor hemen düzelt: kodda standart emoji/ikon kullanımı tespit edildi (✅).'
                     self.assertIn('[DESIGN_ICON_RULE] ' + message, response['reason'])
-                    log.assert_any_call('write_to_file', 'WARNING', target, message,
+                    log.assert_any_call('write_to_file', 'WARNING', os.path.realpath(target), message,
                                         rule_id='DESIGN_ICON_RULE', conversation_id='default')
 
 

@@ -52,7 +52,7 @@ class TestTranslation(unittest.TestCase):
         payload = adapter.to_engine_pretool({
             "session_id": "s1", "cwd": "/proj", "tool_name": "MultiEdit",
             "tool_input": {"file_path": "/proj/a.py", "edits": [
-                {"old_string": "a", "new_string": "b"}, {"old_string": "c", "new_string": "d", "replace_all": True}, "junk"]},
+                {"old_string": "a", "new_string": "b"}, {"old_string": "c", "new_string": "d", "replace_all": True}]},
         })
         chunks = payload["toolCall"]["args"]["ReplacementChunks"]
         self.assertEqual([c["TargetContent"] for c in chunks], ["a", "c"])
@@ -114,12 +114,12 @@ class TestHandle(unittest.TestCase):
         self.assertEqual(out, {"decision": "block", "reason": "tests missing"})
         run.assert_called_once()
 
-    def test_missing_engine_fails_open_with_a_note(self):
+    def test_missing_engine_denies_with_a_note(self):
         event = {"session_id": "s1", "cwd": "/p", "tool_name": "Write", "tool_input": {"file_path": "/p/a.py", "content": "x"}}
         err = io.StringIO()
         with mock.patch.dict(os.environ, {"GRAVITYGUARD_ENGINE": str(Path(tempfile.gettempdir()) / "no_such_engine.py")}):
             with redirect_stderr(err):
-                self.assertIsNone(adapter.handle(event, stop=False))
+                self.assertEqual(adapter.handle(event, stop=False)["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertIn("engine not found", err.getvalue())
 
 
@@ -153,24 +153,25 @@ class TestEmergencyDeny(unittest.TestCase):
             out = self.run_without_engine("Write", {"file_path": "/p/a.txt", "content": text})
             self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny", text)
 
-    def test_harmless_write_still_passes_without_the_engine(self):
-        self.assertIsNone(self.run_without_engine("Write", {"file_path": "/p/a.py", "content": "x = 1\n"}))
-        self.assertIsNone(self.run_without_engine("Write", {"file_path": "/p/n.md", "content": "task-report-cleanup done"}))
+    def test_unvalidated_writes_are_denied_without_the_engine(self):
+        self.assertDenied(self.run_without_engine("Write", {"file_path": "/p/a.py", "content": "x = 1\n"}))
+        self.assertDenied(self.run_without_engine("future", {"path": "/p/n.md", "content": "task-report-cleanup done"}))
 
     def test_live_env_read_is_denied_but_templates_and_other_files_are_not(self):
         for name in (".env", ".env.local", ".ENV"):
             out = self.run_without_engine("Read", {"file_path": f"/p/{name}"})
             self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny", name)
-        for name in (".env.example", ".env.sample", "environment.md", "main.py"):
-            self.assertIsNone(self.run_without_engine("Read", {"file_path": f"/p/{name}"}), name)
+        for name in (".env.example", ".env.sample", "environment.md"):
+            self.assertDenied(self.run_without_engine("Read", {"file_path": f"/p/{name}"}))
+        self.assertIsNone(self.run_without_engine("Read", {"file_path": "/p/main.py"}))
 
     def test_fail_open_switch_turns_the_emergency_check_off(self):
         out = self.run_without_engine("Write", {"file_path": "/p/a.py", "content": self.KEY}, GRAVITYGUARD_ADAPTER_FAIL_OPEN="1")
         self.assertIsNone(out)
 
-    def test_stop_without_engine_still_fails_open(self):
+    def test_stop_without_engine_blocks(self):
         with mock.patch.object(adapter, "run_engine", return_value=None):
-            self.assertIsNone(adapter.handle({"session_id": "s1", "cwd": "/p"}, stop=True))
+            self.assertEqual(adapter.handle({"session_id": "s1", "cwd": "/p"}, stop=True)["decision"], "block")
 
 
 class TestEndToEnd(unittest.TestCase):
@@ -183,7 +184,8 @@ class TestEndToEnd(unittest.TestCase):
         (Path(self.proj) / "tests" / "test_base.py").write_text("def test_x():\n    assert True\n", encoding="utf-8")
         (Path(self.proj) / "util.py").write_text("def f():\n    x = 1\n    return x\n", encoding="utf-8")
         self.env = dict(os.environ, GRAVITYGUARD_LOG_DIR=str(Path(self.proj) / ".gglog"), GRAVITYGUARD_DISABLE_ASYNC="1",
-                        CLAUDE_PROJECT_DIR=self.proj, PYTHONIOENCODING="utf-8")
+                        CLAUDE_PROJECT_DIR=self.proj, PYTHONIOENCODING="utf-8",
+                        GRAVITYGUARD_USER_CONFIG=os.path.join(self.proj, "nonexistent_user_config.json"))
 
     def tearDown(self):
         shutil.rmtree(self.proj, ignore_errors=True)
@@ -295,9 +297,10 @@ class TestEndToEnd(unittest.TestCase):
         self.assertNotIn("KNOWLEDGE.md", reason, "the project has no docs/KNOWLEDGE.md")
         self.assertIn("Kalan deneme: 4", reason)
 
-    def test_non_string_content_is_treated_as_empty_not_a_traceback(self):
+    def test_non_string_content_is_denied_not_a_traceback(self):
         out = self.hook("A", "Write", {"file_path": os.path.join(self.proj, "n.py"), "content": 12345})
-        self.assertIsNone(out)
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("TOOL_SCHEMA_UNSUPPORTED", out["hookSpecificOutput"]["permissionDecisionReason"])
 
     def test_clearing_the_obligation_releases_the_stop(self):
         self.hook("A", "Write", {"file_path": os.path.join(self.proj, "foo.py"), "content": "def foo():\n    return 1\n"})
@@ -316,7 +319,8 @@ class TestAdapterRobustness(unittest.TestCase):
         (Path(self.proj) / "src" / "deep").mkdir(parents=True)
         (Path(self.proj) / ".env").write_text("SECRET=1\n", encoding="utf-8")
         self.env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_PROJECT_DIR", "GRAVITYGUARD_LOG_DIR", "GRAVITYGUARD_AUDIT_DIR")}
-        self.env.update(PYTHONIOENCODING="utf-8", GRAVITYGUARD_DISABLE_ASYNC="1")
+        self.env.update(PYTHONIOENCODING="utf-8", GRAVITYGUARD_DISABLE_ASYNC="1",
+                        GRAVITYGUARD_AUDIT_DIR=str(Path(self.proj) / ".ggaudit"))
 
     def tearDown(self):
         shutil.rmtree(self.proj, ignore_errors=True)
@@ -339,11 +343,11 @@ class TestAdapterRobustness(unittest.TestCase):
 
     def test_settings_example_matcher_includes_read(self):
         settings = json.loads((_ADAPTER.parent / "settings.example.json").read_text(encoding="utf-8"))
-        self.assertIn("Read", settings["hooks"]["PreToolUse"][0]["matcher"].split("|"))
+        self.assertEqual("*", settings["hooks"]["PreToolUse"][0]["matcher"])
 
-    def test_deeply_nested_payload_fails_open_with_a_note(self):
+    def test_deeply_nested_payload_denies_with_a_note(self):
         out, err = self.run_hook(None, raw="[" * 100000)
-        self.assertIsNone(out)
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertIn("nested too deeply", err)
 
     def test_without_claude_project_dir_the_root_is_found_by_walking_up(self):
@@ -387,14 +391,14 @@ class TestShellDeny(unittest.TestCase):
                         'git commit -m "deny live .env reads" 2>&1 | tail -6', "echo .env | head -1"):
             self.assertIsNone(self.deny(command), command)
 
-    def test_fail_open_switch_also_turns_the_shell_check_off(self):
+    def test_availability_override_does_not_disable_a_working_security_engine(self):
         os.environ[adapter.FAIL_OPEN_ENV] = "1"
-        self.assertIsNone(self.deny("cat .env"))
+        self.assertEqual(self.deny("cat .env")["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_settings_example_covers_shell_tools(self):
         settings = json.loads((_ADAPTER.parent / "settings.example.json").read_text(encoding="utf-8"))
-        matcher = settings["hooks"]["PreToolUse"][0]["matcher"].split("|")
-        self.assertTrue({"Bash", "PowerShell"} <= set(matcher))
+        matcher = settings["hooks"]["PreToolUse"][0]["matcher"]
+        self.assertEqual(matcher, "*")
 
 
 if __name__ == "__main__":

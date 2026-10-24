@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 4-Stage Categorized Governance Architecture
+- **In-Flight Gatekeeper (PreToolUse)**: Synchronous fast airbag (<5ms) strictly for preventing security leaks (G0), silent catch blocks (G1), test deletion/tampering (G2), structural layer breaches (G4), and destructive shell actions.
+- **Turn End Non-Intrusive Advisory (Stop)**: Relieved from intrusive review blocking and test deletion halts. Emits lightweight test reminders (T1) without trapping the agent in bureaucratic conversation loops.
+- **Local Git Gate (pre-commit)**: Enforces 	ools/verify_doc_governance.py (same-commit CHANGELOG obligations) and 	ools/verify_removal_governance.py (preventing orphaned test removals TEST_DELETED_SUBJECT_REMAINS while permitting genuine feature retirements).
+- **GitHub Push Gate (pre-push)**: Enforces 	ools/verify_review_governance.py requiring Self-Review receipts (.gravityguard/self-review/<id>.json) exclusively on high-risk modifications (≥5 files, ≥120 lines, or security/engine infrastructure changes). Low-risk and routine development iterations are automatically exempt.
+
+
+### Changed (R1 review becomes Self-Review with Candidate Fingerprint)
+- Removed the Swarm reviewer chain: the PreToolUse MCP observation block (`_MCP_REVIEW_TOOL_RE`, `_extract_mcp_review_args`, `register_review_invocation`), the `review_invocations` governance state, nonce checks, and the HMAC `receipt_auth.py` module. This supersedes the receipt-authentication line under "Security hardening" below.
+- The agent now reviews its own diff and writes `.gravityguard/self-review/<id>.json` (`reviewId`, `sourceFingerprint`, `findings` list, `notes` ≥ 20 chars). An obligation closes only for a schema-valid record with the current fingerprint on a non-stale candidate. The Stop R1 message carries a 4-point checklist (logic bug, deleted test, doc to update, invented import/function) and a `[Kod] [Test] [Doküman] [İnceleme]` stage summary.
+- `docs/adr/0001-specialist-review-v1.md` is marked Superseded; README, ARCHITECTURE, KNOWLEDGE and the obligation-pipeline doc describe the new model. `test_review_governance.py` was rewritten for the self-review schema, staleness and rejection reasons.
+
 ### Feature-removal visibility
 - Added `removal_observer`: at Stop, files deleted by any means (shell `rm`, `git rm`, an IDE) are read from git and logged once as `DELETE_OBSERVED`. The shell itself is not parsed or blocked.
 - A deleted test whose subject is also deleted (same-named source, or a module it imports, including `@/` aliases and `.js` specifiers) is treated as a legitimate feature removal. A test deleted while its subject remains raises `TEST_DELETED_SUBJECT_REMAINS` once, so test sabotage by file deletion no longer slips past G2-C.
@@ -324,6 +336,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Antigravity IDE 1.4.1 Paketi**: Eklenti sürümü `1.4.1` olarak artırıldı ve Antigravity IDE'ye doğrudan kuruldu.
 
 ## [Unreleased]
+
+### 4-Stage Categorized Governance Architecture
+- **In-Flight Gatekeeper (PreToolUse)**: Synchronous fast airbag (<5ms) strictly for preventing security leaks (G0), silent catch blocks (G1), test deletion/tampering (G2), structural layer breaches (G4), and destructive shell actions.
+- **Turn End Non-Intrusive Advisory (Stop)**: Relieved from intrusive review blocking and test deletion halts. Emits lightweight test reminders (T1) without trapping the agent in bureaucratic conversation loops.
+- **Local Git Gate (pre-commit)**: Enforces 	ools/verify_doc_governance.py (same-commit CHANGELOG obligations) and 	ools/verify_removal_governance.py (preventing orphaned test removals TEST_DELETED_SUBJECT_REMAINS while permitting genuine feature retirements).
+- **GitHub Push Gate (pre-push)**: Enforces 	ools/verify_review_governance.py requiring Self-Review receipts (.gravityguard/self-review/<id>.json) exclusively on high-risk modifications (≥5 files, ≥120 lines, or security/engine infrastructure changes). Low-risk and routine development iterations are automatically exempt.
+
 
 ### Added (G7 TypeScript-First Advisory & Antigravity Tool Hooks)
 - **`engine/gravityguard_engine/architecture_rules.py` (`check_g7_ts_first`)**:

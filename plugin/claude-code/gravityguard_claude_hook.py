@@ -34,6 +34,16 @@ _HERE = Path(__file__).resolve().parent
 _DEFAULT_ENGINE = _HERE.parent.parent / "engine" / "gravity-validator.py"
 ENGINE_TIMEOUT_SECONDS = 20
 
+# Shared schema classifier is shipped alongside the engine.
+sys.path.insert(0, str(_HERE.parent.parent / "engine"))
+sys.path.insert(0, str(_HERE.parent))
+from gravityguard_hook_safety import failure_response, emit_failure
+try:
+    from gravityguard_engine.operations import provider_tool_call
+except (ImportError, SyntaxError):
+    def provider_tool_call(name, args, cwd):
+        return {"name": name, "args": args}
+
 # Claude Code tool name -> the engine's (Antigravity) tool name.
 TOOL_MAP = {
     "Write": "write_to_file",
@@ -86,48 +96,26 @@ def _find_project_root(start: Path) -> Optional[Path]:
 
 
 def to_engine_pretool(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Translate a Claude Code PreToolUse event; None for tools the engine has no file rules for."""
-    name = event.get("tool_name", "")
-    if name not in TOOL_MAP:
+    """Normalize file schemas; preserve unsupported calls for an explicit deny."""
+    name = event.get("tool_name") or event.get("toolName") or ""
+    tool_input = event.get("tool_input", event.get("toolInput", {}))
+    if name == "NotebookEdit" and isinstance(tool_input, dict):
+        # Cell insertion has no whole-notebook projection; retain the explicit
+        # adapter that scans the proposed cell source for secrets.
+        name = "write_to_file"
+        tool_input = {"TargetFile": tool_input.get("notebook_path", ""),
+                      "CodeContent": tool_input.get("new_source", "")}
+    # A missing path on a bare read conveys no file access to check.
+    if name in ("Read", "read_file") and tool_input == {}:
         return None
-    tool_input = event.get("tool_input") or {}
-    target = str(tool_input.get("notebook_path" if name == "NotebookEdit" else "file_path", "") or "")
-    if target and not os.path.isabs(target):
-        cwd = str(event.get("cwd") or os.getcwd())
-        target = os.path.abspath(os.path.join(cwd, target))
-    if name == "Read":
-        # Only the live-.env check matters for a read; skip the engine process for every other file.
-        if "env" not in os.path.basename(str(target)).lower():
-            return None
-        args: Dict[str, Any] = {"TargetFile": target}
-    elif name == "Write":
-        args = {"TargetFile": target, "CodeContent": tool_input.get("content", "")}
-    elif name == "NotebookEdit":
-        args = {"TargetFile": target, "CodeContent": tool_input.get("new_source", "")}
-    elif name == "Edit":
-        args = {
-            "TargetFile": target,
-            "TargetContent": tool_input.get("old_string", ""),
-            "ReplacementContent": tool_input.get("new_string", ""),
-            "AllowMultiple": bool(tool_input.get("replace_all", False)),
-        }
-    else:
-        args = {
-            "TargetFile": target,
-            "ReplacementChunks": [
-                {
-                    "TargetContent": edit.get("old_string", ""),
-                    "ReplacementContent": edit.get("new_string", ""),
-                    "AllowMultiple": bool(edit.get("replace_all", False)),
-                }
-                for edit in tool_input.get("edits") or []
-                if isinstance(edit, dict)
-            ],
-        }
+    call = provider_tool_call(name, tool_input, str(event.get("cwd") or os.getcwd()))
+    if call is None:
+        return None
     return {
-        "toolCall": {"name": TOOL_MAP[name], "args": args},
+        "toolCall": call,
         "conversationId": conversation_id(event),
         "workspacePaths": workspace_paths(event),
+        "cwd": str(event.get("cwd") or os.getcwd()),
     }
 
 
@@ -190,7 +178,7 @@ def run_engine(payload: Dict[str, Any], extra_args: Sequence[str] = ()) -> Optio
         answer = json.loads(lines[-1]) if lines else None
     except ValueError:
         answer = None
-    if not isinstance(answer, dict):
+    if proc.returncode != 0 or not isinstance(answer, dict) or answer.get("decision") not in ("allow", "deny", "continue"):
         print(f"[GravityGuard Claude adapter] engine gave no readable answer: {proc.stderr.strip()[:300]}", file=sys.stderr)
         return None
     return answer
@@ -297,21 +285,19 @@ def shell_deny(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 def handle(event: Dict[str, Any], stop: bool) -> Optional[Dict[str, Any]]:
     """Claude Code event in, Claude Code answer out (None = say nothing, let it proceed)."""
-    if not stop and event.get("tool_name") in SHELL_TOOLS:
-        return shell_deny(event)
     if stop:
         # `stop_hook_active` is deliberately ignored: it only says that Claude Code is already continuing because of
         # a Stop hook, and answering "allow" to it would let an agent leave after ONE extra turn without clearing its
         # obligations. The loop is bounded twice instead: the engine's own circuit breaker allows the stop after 5
         # blocked retries (per session), and Claude Code overrides a Stop hook that blocked 8 times in a row.
         answer = run_engine(to_engine_stop(event), ["--stop"])
-        return from_engine_stop(answer) if answer else None
+        return from_engine_stop(answer) if answer else failure_response(stop=True)
     payload = to_engine_pretool(event)
     if payload is None:
         return None
     answer = run_engine(payload)
     if not answer:
-        return emergency_deny(event)
+        return emergency_deny(event) or failure_response()
     return from_engine_pretool(answer)
 
 
@@ -322,13 +308,20 @@ def main(argv: Sequence[str]) -> int:
     try:
         event = json.load(sys.stdin)
     except ValueError:
+        emit_failure(stop="--stop" in argv)
         return 0
     except RecursionError:
-        print("[GravityGuard Claude adapter] hook payload nested too deeply to parse; letting the call proceed", file=sys.stderr)
+        print("[GravityGuard Claude adapter] hook payload nested too deeply to parse", file=sys.stderr)
+        emit_failure(stop="--stop" in argv)
         return 0
     if not isinstance(event, dict):
+        emit_failure(stop="--stop" in argv)
         return 0
-    result = handle(event, stop="--stop" in argv)
+    try:
+        result = handle(event, stop="--stop" in argv)
+    except Exception:
+        emit_failure(stop="--stop" in argv)
+        return 0
     if result is not None:
         print(json.dumps(result, ensure_ascii=False))
     return 0

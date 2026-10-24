@@ -9,28 +9,19 @@ export function renderInsightsTab(vm: GuardianViewModel): string {
   const docKeys = Object.keys(pendingDocs);
   const docGovActive = projectCfg?.governance?.enforceDocObligations === true;
 
-  // Agent Recovery Calculation: Did agent fix a blocked event on next turn?
-  let recoveredCount = 0;
-  let totalBlockedAnalyzed = 0;
-  for (let i = 0; i < eventsList.length; i++) {
-    if (eventsList[i].status === 'BLOCKED') {
-      totalBlockedAnalyzed++;
-      const target = eventsList[i].target;
-      if (target) {
-        const subsequentApproval = eventsList.slice(0, i).some(e => e.target === target && e.status === 'APPROVED');
-        if (subsequentApproval) {
-          recoveredCount++;
-        }
-      }
-    }
-  }
+  const isSecurityRule = (rule: string) => rule.startsWith('G0_') || ['POLICY_INTEGRITY', 'G2_SECURITY_TAMPERING', 'SHELL_SECURITY'].includes(rule);
+  // Only engine-correlated recovery evidence counts; sharing a path is insufficient.
+  const totalBlockedAnalyzed = eventsList.filter(e => e.outcome === 'BLOCKED' && !isSecurityRule(e.ruleId || '')).length;
+  const recoveredCount = eventsList.filter(e => e.outcome === 'RECOVERED' && e.resolvedRuleId && !isSecurityRule(e.resolvedRuleId)).length;
 
   // --- TAB 4: INSIGHTS (TELEMETRY, AGENT RECOVERY, EFFECTIVENESS) ---
   const shortSess = sessionId.length > 10 ? sessionId.slice(0, 8) + '…' : sessionId;
   const eff = (data as any)?.effectiveness || {};
-  const totalBlockedCount = typeof eff.totalBlocked === 'number' ? eff.totalBlocked : totalBlockedAnalyzed;
-  const totalRecoveredCount = typeof eff.totalRecovered === 'number' ? eff.totalRecovered : recoveredCount;
-  const finalRecRate = totalBlockedCount > 0 ? Math.round((totalRecoveredCount / totalBlockedCount) * 100) : 100;
+  const codeStats = Object.entries(eff.ruleStats || {}).filter(([rule]) => !isSecurityRule(rule)).map(([, stat]) => stat as any);
+  const totalBlockedCount = typeof eff.totalCodeBlocked === 'number' ? eff.totalCodeBlocked : (codeStats.length ? codeStats.reduce((sum, s) => sum + (s.blocked || 0), 0) : totalBlockedAnalyzed);
+  const totalRecoveredCount = typeof eff.totalCodeRecovered === 'number' ? eff.totalCodeRecovered : (codeStats.length ? codeStats.reduce((sum, s) => sum + Math.min(s.recovered || 0, s.blocked || 0), 0) : recoveredCount);
+  const finalRecRate = typeof eff.codeFixRate === 'number' ? eff.codeFixRate
+    : (totalBlockedCount > 0 ? Math.min(100, Math.round(totalRecoveredCount / totalBlockedCount * 100)) : 100);
 
   let recoverySubtext = '';
   if (totalBlockedCount === 0) {
@@ -47,13 +38,18 @@ export function renderInsightsTab(vm: GuardianViewModel): string {
     const stat = ruleStats[ruleKey];
     const b = stat?.blocked || 0;
     const r = stat?.recovered || 0;
+    const isSecurityBarrier = isSecurityRule(ruleKey);
     const rate = typeof stat?.recoveryRate === 'number' ? stat.recoveryRate : (b > 0 ? Math.round((r / b) * 100) : 100);
     const med = stat?.medianAttempts || 1;
     let badgeText = t('insights.badgeInsufficient', { n: b });
     let badgeClass = 'badge-neutral';
     let badgeIcon = lucide('circleDot', { size: 9 });
 
-    if (b === 0) {
+    if (isSecurityBarrier && b > 0) {
+      badgeText = t('insights.badgeDeterrence', { n: b });
+      badgeClass = 'badge-allowed';
+      badgeIcon = lucide('shieldCheck', { size: 9 });
+    } else if (b === 0) {
       badgeText = t('insights.badgeNoViolations');
       badgeClass = 'badge-allowed';
       badgeIcon = lucide('checkCircle', { size: 9 });
@@ -86,6 +82,7 @@ export function renderInsightsTab(vm: GuardianViewModel): string {
       rate,
       med,
       isWarning: !!isWarning,
+      isSecurityBarrier,
       badgeText,
       badgeClass,
       badgeIcon
@@ -128,7 +125,7 @@ export function renderInsightsTab(vm: GuardianViewModel): string {
           <div class="recovery-bar-wrap">
             <div class="recovery-bar" style="width: ${finalRecRate}%;"></div>
           </div>
-          <div class="recovery-score">${totalBlockedCount === 0 ? '100%' : `${finalRecRate}%`}</div>
+          <div class="recovery-score">${totalBlockedCount === 0 ? '—' : `${finalRecRate}%`}</div>
         </div>
         <div class="insight-sub">${recoverySubtext}</div>
       </div>
@@ -143,8 +140,8 @@ export function renderInsightsTab(vm: GuardianViewModel): string {
             </div>
             ${st.b > 0 ? `
               <div class="rule-stat-sub">
-                <span>${st.isWarning ? t('insights.ruleWarnings', { count: st.b, rate: st.rate }) : t('insights.ruleInterventions', { blocked: st.b, recovered: st.r, rate: st.rate })}</span>
-                ${!st.isWarning ? `<span>${t('insights.medianAttempts', { attempts: st.med })}</span>` : ''}
+                <span>${st.isWarning ? t('insights.ruleWarnings', { count: st.b, rate: st.rate }) : (st.isSecurityBarrier ? t('insights.ruleDeterrence', { blocked: st.b, rate: st.rate }) : t('insights.ruleInterventions', { blocked: st.b, recovered: st.r, rate: st.rate }))}</span>
+                ${!st.isWarning && !st.isSecurityBarrier ? `<span>${t('insights.medianAttempts', { attempts: st.med })}</span>` : ''}
               </div>
             ` : `<div class="rule-stat-sub text-muted">${t('insights.ruleClean')}</div>`}
           </div>

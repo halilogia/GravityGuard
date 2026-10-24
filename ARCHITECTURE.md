@@ -103,6 +103,8 @@ The Prompt Enhancer talks to **any OpenAI-compatible local gateway** — 9Router
   - Webview sends `clearLogs` and `refresh` messages back to the extension host via `vscode.postMessage()`.
 
 ### 2.4. Python Guard Engine (`engine/gravity-validator.py`)
+- **Security boundary**: `policy_integrity.py` enforces the mandatory security floor; `publication_guard.py` scans Git added text independently of file tools. `governance_control.py` is the trusted extension entrypoint for locked advisory waivers. Review evidence requires `receipt_auth.py` verification using an operator-provisioned key outside the workspace; mandatory review cannot use the advisory retry escape. Host filesystem permissions remain necessary against arbitrary same-user shell writes.
+- **Tool compatibility boundary**: `gravityguard_engine/operations.py` normalizes supported argument schemas into `WRITE`, `EDIT`, `MULTI_EDIT`, or explicit known `READ` operations. Tool names never override mutation arguments. Both provider adapters reuse this module; unsupported file shapes are forwarded intact and denied by the engine. Path-only unknown calls are not assumed to be reads. Wildcard hook registration removes the name-list subscription gap, but cannot intercept a host that does not emit a compatible event.
 - Standalone, highly performant CLI tool written in standard Python (zero external dependencies).
 - Evaluates code mutations using lightweight AST inspection and regex pattern matching:
   - **SRP Violation Check**: Scans for the simultaneous presence of UI elements (e.g. PyQt, Tkinter, Blender `bpy.types.Panel`, DOM manipulations) and Network operations (e.g. `urllib`, `requests`, `aiohttp`, `websocket`) within the same file.
@@ -111,15 +113,37 @@ The Prompt Enhancer talks to **any OpenAI-compatible local gateway** — 9Router
 - **Doc policy**: `gravityguard_engine/doc_policy.py` is the single definition of which files owe a CHANGELOG entry; `project_context.is_doc_governed_target` (Stop-time tracker) and `tools/verify_doc_governance.py` (git pre-commit, also callable from another repository's hook) both use it.
 - **State scope**: obligations and Stop retries are per conversation (`governance.json` → `sessions[<id>]`); the project-wide lists are a monitor-facing union plus legacy entries nobody owns. See `docs/KNOWLEDGE.md` §2.5.
 
-### 2.6. Specialist Review Subsystem (`review_policy.py`, `review_governance.py`)
+### 2.6. Self-Review Subsystem (`review_policy.py`, `review_governance.py`)
 
 Opt-in (`.gravityguard.json` → `review.enabled`), path-based, and split in two so the trigger can be tested without touching state:
 
 - **Trigger — `review_policy.py`.** `should_require_review` fires only for production code suffixes and never for tests (`tests/`, `test_*`, `*.test.ts`, …) or configured `exemptPatterns`. `is_review_enabled` keeps the feature inert until a project asks for it.
-- **Obligation & provenance — `review_governance.py`.** A session's governed writes accumulate into one candidate keyed by `review_id`, with `source_fingerprint` = SHA-256 over the sorted newline-normalized file hashes. `register_review_invocation` records the `review_id`/`nonce`/`source_fingerprint` carried by an observed MCP reviewer call. `evaluate_review_obligations` closes an obligation only when an invocation was observed, a schema-valid receipt exists under `.gravityguard/runtime/reviews/`, the fingerprint **and** nonce match, and the candidate is not stale.
+- **Obligation & candidate fingerprint — `review_governance.py`.** A session's governed writes accumulate into one candidate keyed by `review_id`, with `source_fingerprint` = SHA-256 over the sorted newline-normalized file hashes. The agent reviews its own diff and writes a self-review record to `.gravityguard/self-review/<review_id>.json` (`reviewId`, `sourceFingerprint`, `findings: []`, `notes` ≥ 20 chars). `evaluate_review_obligations` closes an obligation only when that record is schema-valid, its `sourceFingerprint` equals the obligation fingerprint, and the candidate on disk is not stale. Rejections carry a reason: `receipt-missing`, `receipt-invalid-id`, `receipt-findings-invalid`, `receipt-notes-too-short`, `fingerprint-mismatch`, `stale-candidate`.
 - **Two guards.** *Pre-write* (intent): an approved governed write records the obligation. *Final diff guard* (state): at Stop, `record_final_diff_guard` runs `git status --porcelain` and folds in governed code changed out-of-band (e.g. a shell write), best-effort and fail-open.
-- **Hook wiring.** `dispatcher.py` observes MCP calls matching `mcp[_-].*code[_-]review` and registers the invocation; `plugin/hooks.json` carries the `"matcher": "mcp_.*code[_-]review"` PreToolUse group.
-- **Invariant.** A specialist result cannot authorize integration; GravityGuard verifies process evidence, not semantic correctness. No HMAC (single trust boundary; provenance is correlation). See `docs/adr/0001-specialist-review-v1.md`.
+- **Hook wiring & Stage Separation.** While dispatcher.py records candidate obligations on governed file operations, full Self-Review enforcement is decoupled from interactive Stop events and elevated to Stage 4 (pre-push via 	ools/verify_review_governance.py). Furthermore, review obligations are risk-gated: changes modifying fewer than 5 files and 120 lines without touching security-critical or engine files are automatically exempt. When triggered before push, the agent reviews its own diff and produces .gravityguard/self-review/<id>.json. This eliminates bureaucratic interruptions during conversational iteration while ensuring no unreviewed high-risk change reaches GitHub.
+- **Invariant.** A self-review record proves a review step happened against a specific candidate state, not that it was correct. GravityGuard catches *omission*, not malice. History: `docs/adr/0001-specialist-review-v1.md` (superseded).
+
+### 2.7. Categorized 4-Stage Governance Pipeline
+
+To eliminate agent paralysis and cognitive fatigue without compromising security or architectural integrity, GravityGuard partitions all governance checks across four distinct stages:
+
+1. **Stage 1: In-Flight Gatekeeper (PreToolUse Airbag)**
+   - Operates synchronously before filesystem mutation (<5ms latency).
+   - Prevents critical hazards: secret leaks (G0), silent exception suppression (G1), active test tampering/deletion (G2), structural layer violations (G4), and destructive shell commands.
+   - Non-blocking heuristics (G3, OE_SPIKE, ARCH_FILE_GROWTH) emit structured warnings.
+
+2. **Stage 2: Turn End (Stop Advisory)**
+   - Executes at conversation turn completion.
+   - Strictly advisory and non-intrusive: delivers lightweight test evidence reminders (T1) and observes file lifecycle events without blocking conversation progression or imposing repetitive review loops.
+
+3. **Stage 3: Local Git Gate (pre-commit)**
+   - Enforces change integrity at commit time via standalone verification scripts:
+     - 	ools/verify_doc_governance.py: Validates the same-commit rule requiring CHANGELOG.md updates whenever governed production modules are modified.
+     - 	ools/verify_removal_governance.py: Detects and blocks orphaned test deletions (TEST_DELETED_SUBJECT_REMAINS), preventing test suite degradation while permitting legitimate feature retirements.
+
+4. **Stage 4: GitHub Push Gate (pre-push)**
+   - Enforces quality and self-review before code leaves the local machine:
+     - 	ools/verify_review_governance.py: Checks pending self-review receipts (.gravityguard/self-review/<id>.json) for high-risk modifications (≥5 files, ≥120 lines, or changes touching security/engine infrastructure). Low-risk changes are automatically exempt.
 
 ### 2.5. Complexity Heuristics & Their Thresholds (`OE_SPIKE`, `ARCH_FILE_GROWTH`)
 

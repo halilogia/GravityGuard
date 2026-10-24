@@ -13,6 +13,7 @@ import re
 import sys
 import time
 import uuid
+import copy
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple, Set
@@ -228,15 +229,25 @@ def _read_last_journal_entry(permanent_log_path: str) -> Optional[Dict[str, Any]
             size = f.tell()
             if size == 0:
                 return None
-            chunk_size = min(size, 8192)
-            f.seek(size - chunk_size)
-            chunk = f.read(chunk_size).decode("utf-8", errors="ignore")
-            lines = [l.strip() for l in chunk.strip().splitlines() if l.strip()]
-            for line in reversed(lines):
-                try:
-                    return json.loads(line)
-                except Exception:
-                    continue
+            # Checkpoints and large tool payloads may exceed one read block.
+            # Parse only complete lines, extending backwards when necessary.
+            remaining = size
+            buffer = b""
+            while remaining:
+                chunk_size = min(remaining, 8192)
+                remaining -= chunk_size
+                f.seek(remaining)
+                buffer = f.read(chunk_size) + buffer
+                lines = buffer.splitlines()
+                for line in reversed(lines if remaining == 0 else lines[1:]):
+                    if not line.strip():
+                        continue
+                    try:
+                        record = json.loads(line)
+                        if isinstance(record, dict):
+                            return record
+                    except (ValueError, UnicodeDecodeError):
+                        continue
     except Exception as err:
         sys.stderr.write(f"[GravityGuard Journal Read Error] {err}\n")
     return None
@@ -355,6 +366,14 @@ def _apply_event_to_live_state(state: Dict[str, Any], ev: Dict[str, Any]) -> Non
     Applies a single permanent audit record to a live monitor state projection.
     Updates cumulative effectiveness counters, per-rule stats, and active violations.
     """
+    if ev.get("recordType") == "audit_checkpoint":
+        snapshot = ev.get("snapshot", {})
+        if isinstance(snapshot, dict):
+            state["effectiveness"] = copy.deepcopy(snapshot.get("effectiveness", {}))
+            state["activeViolations"] = copy.deepcopy(snapshot.get("activeViolations", {}))
+            state["maintenanceId"] = ev.get("eventId")
+            state["lastAuditSeq"] = ev.get("auditSeq", 0)
+        return
     eff = state.setdefault("effectiveness", {})
     if not isinstance(eff, dict):
         eff = {
@@ -421,28 +440,54 @@ def _apply_event_to_live_state(state: Dict[str, Any], ev: Dict[str, Any]) -> Non
         state["lastAuditSeq"] = seq
 
 
+DETERRENCE_RULES = {
+    "G0_ENV_PROTECTION",
+    "G0_SECRET_LEAK",
+    "POLICY_INTEGRITY",
+    "G2_SECURITY_TAMPERING",
+    "SHELL_SECURITY",
+}
+
+
 def _recompute_effectiveness_rates(state: Dict[str, Any]) -> None:
-    """Recomputes recovery rates and median attempts with invariant checking."""
+    """Recomputes recovery rates, deterrence rates and median attempts with invariant checking."""
     eff = state.get("effectiveness", {})
     tot_b = eff.get("totalBlocked", 0)
     tot_r = eff.get("totalRecovered", 0)
-    if tot_r > tot_b:
-        sys.stderr.write(
-            f"[GravityGuard Invariant Violation] recovered ({tot_r}) > blocked ({tot_b}) - telemetry inconsistency detected\n"
-        )
-    eff["recoveryRate"] = min(100.0, round((tot_r / tot_b * 100), 1)) if tot_b > 0 else 100.0
-
     rule_stats = eff.get("ruleStats", {})
+
+    tot_security_blocked = 0
+    tot_code_b = 0
+    tot_code_r = 0
+
     for r_id, rst in rule_stats.items():
         b = rst.get("blocked", 0)
         r = rst.get("recovered", 0)
-        if r > b:
-            sys.stderr.write(
-                f"[GravityGuard Invariant Violation] rule {r_id}: recovered ({r}) > blocked ({b})\n"
-            )
-        rst["recoveryRate"] = min(100.0, round((r / b * 100), 1)) if b > 0 else 100.0
+        if r_id in DETERRENCE_RULES:
+            rst["isDeterrenceRule"] = True
+            rst["recoveryRate"] = min(100.0, round(r / b * 100, 1)) if b else 100.0
+            rst.pop("deterrenceRate", None)
+            tot_security_blocked += b
+        else:
+            if r > b:
+                sys.stderr.write(
+                    f"[GravityGuard Invariant Violation] rule {r_id}: recovered ({r}) > blocked ({b})\n"
+                )
+            rst["recoveryRate"] = min(100.0, round((r / b * 100), 1)) if b > 0 else 100.0
+            tot_code_b += b
+            tot_code_r += min(r, b)
+
         atts = rst.get("attempts", [])
         rst["medianAttempts"] = sorted(atts)[len(atts) // 2] if atts else 1.0
+
+    # A rejected operation is observable; abandonment or deterrence is not.
+    eff.pop("deterrenceRate", None)
+    eff.pop("totalDeterred", None)
+    eff["totalSecurityBlocked"] = tot_security_blocked
+    eff["totalCodeBlocked"] = tot_code_b
+    eff["totalCodeRecovered"] = tot_code_r
+    eff["codeFixRate"] = min(100.0, round((tot_code_r / tot_code_b * 100), 1)) if tot_code_b > 0 else 100.0
+    eff["recoveryRate"] = min(100.0, round(tot_r / tot_b * 100, 1)) if tot_b > 0 else 100.0
 
 
 def _rebuild_live_state_from_permanent_audit(permanent_log_path: str) -> Dict[str, Any]:
@@ -489,7 +534,7 @@ def _rebuild_live_state_from_permanent_audit(permanent_log_path: str) -> Dict[st
 
     _recompute_effectiveness_rates(state)
 
-    recent_raw = list(raw_events[-50:])
+    recent_raw = [ev for ev in raw_events if ev.get("recordType") != "audit_checkpoint"][-50:]
     recent_raw.reverse()
     recent_live = []
     for ev in recent_raw:
@@ -623,7 +668,7 @@ def log_event(
     """
     event_id = _generate_event_id()
     log_dir = _resolve_log_dir()
-    now_dt = datetime.now()
+    now_dt = datetime.now().astimezone()
     now_iso = now_dt.isoformat()
     now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -729,6 +774,11 @@ def log_event(
             else:
                 live_seq = current_data.get("lastAuditSeq")
                 journal_last_seq = _get_journal_last_seq(permanent_log_path)
+                last_record = _read_last_journal_entry(permanent_log_path)
+                if (last_record and last_record.get("recordType") == "audit_checkpoint"
+                        and current_data.get("maintenanceId") != last_record.get("eventId")):
+                    current_data = _rebuild_live_state_from_permanent_audit(permanent_log_path)
+                    live_seq = current_data.get("lastAuditSeq")
                 if live_seq is None:
                     if journal_last_seq > 0:
                         sys.stderr.write(
@@ -813,7 +863,7 @@ def log_event(
                             resolved_rule_id = primary.get("ruleId")
                             recovery_attempts = primary.get("attempts", 1)
                             try:
-                                first_dt = datetime.fromisoformat(primary.get("firstTimestamp", now_iso))
+                                first_dt = datetime.fromisoformat(primary.get("firstTimestamp", now_iso)).astimezone()
                                 resolution_ms = round((now_dt - first_dt).total_seconds() * 1000, 1)
                             except Exception:
                                 resolution_ms = None
@@ -831,7 +881,7 @@ def log_event(
                                 add_e_id = _generate_event_id()
                                 add_attempts = additional.get("attempts", 1)
                                 try:
-                                    add_first_dt = datetime.fromisoformat(additional.get("firstTimestamp", now_iso))
+                                    add_first_dt = datetime.fromisoformat(additional.get("firstTimestamp", now_iso)).astimezone()
                                     add_res_ms = round((now_dt - add_first_dt).total_seconds() * 1000, 1)
                                 except Exception:
                                     add_res_ms = None

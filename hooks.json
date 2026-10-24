@@ -2,17 +2,7 @@
   "gravityguard": {
     "PreToolUse": [
       {
-        "matcher": "write_file|edit_file|read_file|write_to_file|replace_file_content|multi_replace_file_content|view_file",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python -X utf8 scripts/gravity-validator.py",
-            "timeout": 15
-          }
-        ]
-      },
-      {
-        "matcher": "mcp_.*code[_-]review",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",

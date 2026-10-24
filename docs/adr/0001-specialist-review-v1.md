@@ -1,6 +1,8 @@
 # ADR 0001 — Specialist Review V1
 
-Status: Accepted
+Status: Superseded — replaced by Self-Review with Candidate Fingerprint (the agent
+reviews its own diff and writes `.gravityguard/self-review/<id>.json`; no Swarm
+reviewer, MCP invocation observation, nonce, or HMAC). See `ARCHITECTURE.md` §2.6.
 Date: 2026-10-04
 
 ## Vocabulary (frozen)

@@ -66,6 +66,10 @@
     },
     "commands": [
       {
+        "command": "antigravityBridge.setRouterToken",
+        "title": "GravityGuard: Set Router Token (Secure Storage)"
+      },
+      {
         "command": "antigravityBridge.openConfig",
         "title": "GravityGuard: Yapılandırmayı Aç / Open Configuration (.gravityguard.json)",
         "icon": "$(gear)"
@@ -113,15 +117,17 @@
         "gravityguard.routerToken": {
           "type": "string",
           "default": "",
-          "description": "Bearer token for the local AI gateway. If empty, GRAVITYGUARD_ROUTER_TOKEN or ROUTER_TOKEN env var is used."
+          "description": "Legacy token setting, migrated to SecretStorage on activation. Use GravityGuard: Set Router Token or GRAVITYGUARD_ROUTER_TOKEN."
         },
         "gravityguard.routerHost": {
           "type": "string",
+          "scope": "machine",
           "default": "127.0.0.1",
-          "description": "Hostname of the local AI gateway (9Router, Ollama, LM Studio, llama.cpp — any OpenAI-compatible /v1 endpoint)."
+          "description": "Loopback hostname or HTTPS URL of an OpenAI-compatible gateway. Remote HTTP is rejected."
         },
         "gravityguard.routerPort": {
           "type": "number",
+          "scope": "machine",
           "default": 20128,
           "description": "Port of the local AI gateway."
         },

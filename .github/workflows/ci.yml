@@ -31,9 +31,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
-      # `npm ci` is impossible here: package-lock.json is gitignored, so there
-      # is no lockfile to install from. `npm install` it is.
+      # The committed lockfile pins the dependency tree across platforms.
       - uses: actions/setup-node@v4
         with:
           # Node 22+ is required by the test script's glob argument
@@ -46,7 +47,7 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Build
         run: npm run build
@@ -62,3 +63,6 @@ jobs:
 
       - name: "Doc governance check (§6 Same-Commit rule)"
         run: python tools/verify_doc_governance.py --all
+
+      - name: "Secret gate for added text"
+        run: python tools/check_secrets.py --base HEAD^

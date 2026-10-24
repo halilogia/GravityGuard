@@ -33,7 +33,7 @@ except ImportError:
         def __init__(self, *args, **kwargs):
             pass
         def acquire(self):
-            return True
+            return False  # Display-only fallback; never mutate without the real lock.
         def release(self):
             pass
 
@@ -125,6 +125,12 @@ def discover_all_log_paths(
             add_if_exists(Path(v))
 
     # Global user locations
+    private_archives = Path.home() / ".gravityguard" / "maintenance"
+    if private_archives.is_dir():
+        for archived in private_archives.glob("*/gravityguard_permanent_audit.jsonl"):
+            add_if_exists(archived)
+        for archived in private_archives.glob("snapshots/gravityguard_permanent_audit_*.jsonl"):
+            add_if_exists(archived)
     add_if_exists(Path(os.path.expanduser("~/.gemini/logs/gravityguard_permanent_audit.jsonl")))
     add_if_exists(Path(os.path.expanduser("~/.gemini/logs/gravityguard/gravityguard_permanent_audit.jsonl")))
 
@@ -189,6 +195,8 @@ class LogStreamReader:
 
                         if not isinstance(ev, dict):
                             self.corrupted_lines_count += 1
+                            continue
+                        if ev.get("recordType") == "audit_checkpoint":
                             continue
 
                         # Deduplicate across merged files (composite key) only if multiple sources
@@ -786,7 +794,7 @@ def perform_log_rotation(threshold_mb: float = 10.0) -> None:
         print(f"✅ Dosya boyutu eşik değerin ({threshold_mb:.1f} MB) altında. Rotasyona gerek yok.")
         return
 
-    archive_dir = Path(__file__).resolve().parent.parent / "archives" / "audit-logs"
+    archive_dir = Path.home() / ".gravityguard" / "maintenance" / "snapshots"
     archive_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

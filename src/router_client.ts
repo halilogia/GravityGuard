@@ -1,8 +1,35 @@
 import * as vscode from 'vscode';
 import * as http from 'http';
+import * as https from 'https';
+import { MAX_ROUTER_RESPONSE_BYTES, routerEndpoint } from './router_security';
 import { buildOfflinePrompt, buildSystemPrompt, classifyIntent, IntentMode } from './intent';
 
 export class RouterUnreachableError extends Error {}
+
+let storedRouterToken = '';
+export async function initializeRouterSecrets(context: vscode.ExtensionContext): Promise<void> {
+  const config = vscode.workspace.getConfiguration('gravityguard');
+  storedRouterToken = await context.secrets.get('gravityguard.routerToken') || '';
+  const legacy = config.get<string>('routerToken');
+  if (!storedRouterToken && legacy) {
+    await context.secrets.store('gravityguard.routerToken', legacy);
+    storedRouterToken = legacy;
+  }
+  if (legacy) {
+    const inspected = config.inspect<string>('routerToken');
+    for (const [value, target] of [[inspected?.globalValue, vscode.ConfigurationTarget.Global],
+      [inspected?.workspaceValue, vscode.ConfigurationTarget.Workspace],
+      [inspected?.workspaceFolderValue, vscode.ConfigurationTarget.WorkspaceFolder]] as const) {
+      if (value) await config.update('routerToken', undefined, target);
+    }
+  }
+  context.subscriptions.push(vscode.commands.registerCommand('antigravityBridge.setRouterToken', async () => {
+    const token = await vscode.window.showInputBox({ password: true, prompt: 'GravityGuard router token', ignoreFocusOut: true });
+    if (token === undefined) return;
+    await context.secrets.store('gravityguard.routerToken', token);
+    storedRouterToken = token;
+  }));
+}
 
 export interface EnhancementResult {
   text: string;
@@ -12,9 +39,10 @@ export interface EnhancementResult {
 
 export function getRouterConfig() {
   const config = vscode.workspace.getConfiguration('gravityguard');
-  const host = config.get<string>('routerHost') || process.env.ROUTER_HOST || '127.0.0.1';
-  const port = config.get<number>('routerPort') || (process.env.ROUTER_PORT ? parseInt(process.env.ROUTER_PORT, 10) : 20128);
-  const token = config.get<string>('routerToken') || process.env.GRAVITYGUARD_ROUTER_TOKEN || process.env.ROUTER_TOKEN || '';
+  // Workspace files must not redirect a machine-owned token to another host.
+  const host = config.inspect<string>('routerHost')?.globalValue || process.env.ROUTER_HOST || '127.0.0.1';
+  const port = config.inspect<number>('routerPort')?.globalValue || (process.env.ROUTER_PORT ? parseInt(process.env.ROUTER_PORT, 10) : 20128);
+  const token = storedRouterToken || process.env.GRAVITYGUARD_ROUTER_TOKEN || process.env.ROUTER_TOKEN || '';
   const timeoutMs = config.get<number>('routerTimeoutMs') || parseInt(process.env.ROUTER_TIMEOUT_MS || '', 10) || 12000;
   const configuredModels = config.get<string[]>('models') || [];
   const envModels = (process.env.ROUTER_MODELS || '').split(',').map(m => m.trim()).filter(Boolean);
@@ -70,12 +98,22 @@ export function probeRouter(): Promise<{ ok: boolean; detail: string }> {
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
-    const req = http.request(
-      { hostname: host, port: port, path: '/v1/models', method: 'GET', headers, timeout: 3000 },
+    let endpoint: ReturnType<typeof routerEndpoint>;
+    try { endpoint = routerEndpoint(host, port); }
+    catch { resolve({ ok: false, detail: 'Invalid router endpoint: remote gateways require HTTPS' }); return; }
+    const transport = endpoint.protocol === 'https:' ? https : http;
+    const req = transport.request(
+      { ...endpoint, path: '/v1/models', method: 'GET', headers, timeout: 3000 },
       res => {
         let data = '';
         res.setEncoding('utf8');
-        res.on('data', chunk => (data += chunk));
+        let bytes = 0;
+        res.on('data', chunk => {
+          bytes += Buffer.byteLength(chunk);
+          if (bytes > MAX_ROUTER_RESPONSE_BYTES) { res.destroy(); resolve({ ok: false, detail: 'Router response exceeded limit' }); }
+          else data += chunk;
+        });
+        res.on('error', () => resolve({ ok: false, detail: 'Router response interrupted' }));
         res.on('end', () => {
           if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
             let count = 0;
@@ -124,22 +162,28 @@ export function postChatCompletion(model: string, systemPrompt: string, userProm
       headers['Authorization'] = `Bearer ${token}`;
     }
 
+    const endpoint = routerEndpoint(host, port);
     const options: http.RequestOptions = {
-      hostname: host,
-      port: port,
+      ...endpoint,
       path: '/v1/chat/completions',
       method: 'POST',
       headers: headers,
       timeout: timeoutMs
     };
 
-    const req = http.request(options, (res) => {
+    const transport = endpoint.protocol === 'https:' ? https : http;
+    const req = transport.request(options, (res) => {
       let data = '';
+      let bytes = 0;
 
       res.setEncoding('utf8');
       res.on('data', (chunk) => {
-        data += chunk;
+        bytes += Buffer.byteLength(chunk);
+        if (bytes > MAX_ROUTER_RESPONSE_BYTES) {
+          res.destroy(); reject(new Error('Router response exceeded limit'));
+        } else data += chunk;
       });
+      res.on('error', () => reject(new Error('Router response interrupted')));
 
       res.on('end', () => {
         if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
@@ -149,13 +193,13 @@ export function postChatCompletion(model: string, systemPrompt: string, userProm
             if (content) {
               resolve(content);
             } else {
-              reject(new Error(`Boş içerik alındı: ${data}`));
+              reject(new Error('Router returned no content'));
             }
           } catch (e: any) {
             reject(new Error(`JSON ayrıştırma hatası: ${e.message}`));
           }
         } else {
-          reject(new Error(`HTTP ${res.statusCode}: ${data}`));
+          reject(new Error(`Router HTTP ${res.statusCode}`));
         }
       });
     });

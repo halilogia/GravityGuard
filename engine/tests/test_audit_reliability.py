@@ -13,6 +13,7 @@ import os
 import shutil
 import sys
 import tempfile
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -230,14 +231,15 @@ class TestAuditReliability(unittest.TestCase):
         self.assertGreater(initial_size, 0)
 
         # Run rotation with low threshold so it triggers
-        perform_log_rotation(threshold_mb=0.00001)
+        with patch("tools.telemetry_dashboard.Path.home", return_value=Path(self.test_dir)):
+            perform_log_rotation(threshold_mb=0.00001)
 
         # Active log must NOT have been wiped to 0 bytes
         self.assertTrue(os.path.exists(perm_path))
         self.assertEqual(os.path.getsize(perm_path), initial_size)
 
         # Archive directory should have the snapshot
-        repo_archive_dir = os.path.join(_ROOT_DIR, "archives", "audit-logs")
+        repo_archive_dir = os.path.join(self.test_dir, ".gravityguard", "maintenance", "snapshots")
         self.assertTrue(os.path.isdir(repo_archive_dir))
         archives = [f for f in os.listdir(repo_archive_dir) if f.startswith("gravityguard_permanent_audit_")]
         self.assertGreater(len(archives), 0)

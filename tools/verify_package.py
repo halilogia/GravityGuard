@@ -32,16 +32,19 @@ REQUIRED = [
     "extension/dist/intent.js",
     "extension/engine/gravity-validator.py",
     "extension/engine/async_runner.py",
+    "extension/engine/governance_control.py",
     "extension/package.json",
     "extension/README.md",
     "extension/LICENSE",
     "extension/media/shield.svg",
+    "extension/media/demo.png",
 ]
 
 # Engine files whose content must match the repo byte for byte.
 MUST_MATCH_REPO = [
     "extension/engine/gravity-validator.py",
     "extension/engine/async_runner.py",
+    "extension/engine/governance_control.py",
 ]
 
 def _collect_engine_package_files() -> list[str]:
@@ -58,6 +61,7 @@ REQUIRED.extend(_pkg_files)
 MUST_MATCH_REPO.extend(_pkg_files)
 
 FORBIDDEN_PATTERNS = [
+    (r"^extension/(?:archives|\.claude|\.agents|\.codex|\.githooks|\.ruff_cache)/", "private state, local agent settings or development artifacts"),
     (r"^extension/tests/", "test suite shipped in the artifact"),
     (r"^extension/engine/test_", "engine test suite shipped in the artifact"),
     (r"^extension/engine/tests/", "engine domain test suite shipped in the artifact"),
@@ -73,6 +77,18 @@ FORBIDDEN_PATTERNS = [
     (r"\.bak", "backup file shipped in the artifact"),
     (r"\.env", "environment file shipped in the artifact"),
 ]
+
+
+def allowed_package_path(name: str) -> bool:
+    if name in ("extension.vsixmanifest", "[Content_Types].xml"):
+        return True
+    if name.lower() in {"extension/package.json", "extension/readme.md", "extension/license", "extension/license.txt"}:
+        return True
+    if name.startswith("extension/dist/") and name.endswith(".js"):
+        return True
+    if name.startswith("extension/engine/") and name.endswith(".py") and name in REQUIRED:
+        return True
+    return name in {"extension/media/icon.png", "extension/media/icon.svg", "extension/media/demo.png", "extension/media/demo.svg", "extension/media/shield.svg"}
 
 
 def md5(data: bytes) -> str:
@@ -167,6 +183,8 @@ def main() -> None:
         print("\nYasakli icerik:")
         found_any = False
         for name in names:
+            if not allowed_package_path(name):
+                failures.append(f"package allowlist violation: {name}")
             for pattern, why in FORBIDDEN_PATTERNS:
                 if re.search(pattern, name):
                     found_any = True

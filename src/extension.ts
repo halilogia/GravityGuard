@@ -1,10 +1,11 @@
 import * as vscode from 'vscode';
 import { initI18n, t, setLanguage, getCurrentLanguage } from './i18n';
-import { probeRouter } from './router_client';
+import { probeRouter, initializeRouterSecrets } from './router_client';
 import { handleEnhancePrompt, handleFindSkills, handleOpenConfig } from './commands';
 import { GuardianViewProvider } from './webview/provider';
 
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  await initializeRouterSecrets(context);
   const savedLang = context.globalState.get<string>('gravityguard.language');
   const initialLang = savedLang || 'tr';
   initI18n(initialLang);

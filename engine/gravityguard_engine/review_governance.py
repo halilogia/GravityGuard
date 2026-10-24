@@ -1,27 +1,23 @@
 #!/usr/bin/env python3
 """
-GravityGuard Engine — Review Obligation & Provenance Subsystem.
+GravityGuard Engine — Self-Review Obligation Subsystem.
 
 The invariant this module exists to enforce:
 
-    A specialist result cannot authorize integration.
-    GravityGuard verifies process evidence, not semantic correctness.
+    GravityGuard verifies that a review step happened, not that it was correct.
 
-Concretely, GravityGuard can prove that *a review was performed against a
-specific candidate state*. It cannot prove the review was correct or complete,
-and nothing here pretends otherwise.
-
-Provenance model (no crypto theater): when Lead invokes the Swarm reviewer, the
-PreToolUse hook observes the MCP call and records the ``review_id``, ``nonce``
-and ``source_fingerprint`` it carried. A receipt is accepted only when it (a)
-matches an observed invocation, (b) carries the same fingerprint and nonce, (c)
-is schema-valid, and (d) is not stale — the candidate on disk still hashes to
-the fingerprint the review was made against.
+The goal is catching *omission* (a weaker model forgetting to review), not
+malice. The agent reviews its own diff and writes a short self-review record;
+the record is accepted when it (a) is schema-valid, (b) carries the fingerprint
+of the current candidate, and (c) is not stale — the candidate on disk still
+hashes to the fingerprint the review was made against. Code changed after the
+review (including fixes for its findings) invalidates the record.
 
 Zero external dependencies.
 """
 import hashlib
 import json
+import re
 import subprocess
 import time
 import uuid
@@ -29,13 +25,18 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .governance import _visible_pending, governance_transaction, load_governance_state
-from .review_policy import is_review_enabled, should_require_review
+from .review_policy import (
+    check_review_risk_triggers,
+    is_review_enabled,
+    should_require_review,
+)
 
-#: Where the Swarm reviewer writes receipts, relative to the workspace root.
-RECEIPT_SUBDIR = (".gravityguard", "runtime", "reviews")
+#: Where the agent writes its self-review record, relative to the workspace root.
+#: Deliberately outside ``runtime/`` and ``reviews/``, which are agent-read-only control paths.
+RECEIPT_SUBDIR = (".gravityguard", "self-review")
 
-#: How long an unseen MCP invocation is remembered (seconds).
-INVOCATION_TTL_SECONDS = 3600
+#: Shortest accepted ``notes``; a blank or one-word note is not a review.
+MIN_NOTES_LENGTH = 20
 
 
 def _normalize_newlines(text: str) -> str:
@@ -128,11 +129,11 @@ def record_review_obligation(
             review_id = new_review_id()
             entry: Dict[str, Any] = {
                 "review_id": review_id,
-                "nonce": uuid.uuid4().hex,
+                "conversation_id": cid,
                 "changed_files": {},
                 "timestamp": time.time(),
                 "reason": (
-                    "Governed code changed; an independent code review is required "
+                    "Governed code changed; a self-review of the diff is required "
                     "before the session may stop."
                 ),
             }
@@ -143,50 +144,18 @@ def record_review_obligation(
         changed[rel] = file_hash
         entry["source_fingerprint"] = fingerprint_from_hashes(changed)
         entry["timestamp"] = time.time()
+        if cfg:
+            entry["cfg"] = cfg
 
         pending[review_id] = entry
         session_pending[review_id] = entry
         return dict(entry)
 
 
-def register_review_invocation(
-    review_id: str,
-    nonce: str,
-    source_fingerprint: str,
-    project_root: Optional[Path] = None,
-    conversation_id: Optional[str] = None,
-) -> bool:
-    """Records that the Lead invoked the reviewer for this exact candidate.
-
-    Called from the PreToolUse hook when an MCP reviewer call is observed. This
-    is the correlation anchor: a receipt with no matching invocation is not
-    trusted, even if well-formed.
-    """
-    if not review_id:
-        return False
-    cid = conversation_id or "default"
-    with governance_transaction(project_root) as state:
-        invocations = state.setdefault("review_invocations", [])
-        if not isinstance(invocations, list):
-            invocations = []
-            state["review_invocations"] = invocations
-        now = time.time()
-        invocations[:] = [
-            i for i in invocations
-            if isinstance(i, dict) and (now - i.get("timestamp", now)) < INVOCATION_TTL_SECONDS
-        ]
-        invocations.append({
-            "review_id": review_id,
-            "nonce": nonce or "",
-            "source_fingerprint": source_fingerprint or "",
-            "conversation_id": cid,
-            "timestamp": now,
-        })
-    return True
-
-
 def _load_receipt(project_root: Path, review_id: str) -> Tuple[Optional[dict], Optional[str]]:
-    """Reads and validates the receipt file. Returns ``(receipt, error)``."""
+    """Reads and validates the agent's self-review record. Returns ``(receipt, error)``."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", review_id):
+        return None, "receipt-invalid-id"
     path = Path(project_root).joinpath(*RECEIPT_SUBDIR) / f"{review_id}.json"
     if not path.is_file():
         return None, "receipt-missing"
@@ -199,18 +168,12 @@ def _load_receipt(project_root: Path, review_id: str) -> Tuple[Optional[dict], O
         return None, "receipt-not-an-object"
     if data.get("reviewId") != review_id:
         return None, "receipt-id-mismatch"
-    if not isinstance(data.get("resultHash"), str) or not data["resultHash"]:
-        return None, "receipt-missing-result-hash"
-    if "findingsParsed" not in data:
-        return None, "receipt-missing-schema-field"
+    if not isinstance(data.get("findings"), list):
+        return None, "receipt-findings-invalid"
+    notes = data.get("notes")
+    if not isinstance(notes, str) or len(notes.strip()) < MIN_NOTES_LENGTH:
+        return None, "receipt-notes-too-short"
     return data, None
-
-
-def _has_matching_invocation(state: Dict[str, Any], review_id: str) -> bool:
-    for inv in state.get("review_invocations", []) or []:
-        if isinstance(inv, dict) and inv.get("review_id") == review_id:
-            return True
-    return False
 
 
 def _is_stale(root: Path, entry: Dict[str, Any]) -> bool:
@@ -231,19 +194,17 @@ def _is_stale(root: Path, entry: Dict[str, Any]) -> bool:
 def evaluate_review_obligations(
     project_root: Optional[Path] = None,
     conversation_id: Optional[str] = None,
+    cfg: Optional[dict] = None,
 ) -> Dict[str, Any]:
     """Evaluates each pending review obligation and resolves the satisfied ones.
 
-    Returns ``{"unresolved": {...}, "resolved": [...], "details": {...}}``.
-    An obligation closes only when all of these hold:
-
-    1. an MCP reviewer invocation was observed for this ``review_id``;
-    2. a schema-valid receipt exists;
-    3. the receipt's ``sourceFingerprint`` equals the obligation fingerprint;
-    4. the receipt's ``nonce`` equals the obligation nonce;
-    5. the candidate on disk still hashes to that fingerprint (not stale).
+    Under R1.1 Risk-Gated Review Policy:
+    - Low-risk changes (<5 files, <120 lines, non-security) are auto-exempt (resolved without blocking).
+    - High-risk changes (security paths, dependency changes, large scale) require a matching self-review record.
     """
     root = project_root or Path.cwd()
+    passed_cfg = cfg
+
     unresolved: Dict[str, Any] = {}
     resolved: List[str] = []
 
@@ -252,10 +213,41 @@ def evaluate_review_obligations(
         for review_id, entry in list(pending.items()):
             if not isinstance(entry, dict):
                 continue
-            problems: List[str] = []
 
-            if not _has_matching_invocation(state, review_id):
-                problems.append("reviewer-invocation-not-observed")
+            changed_files = list(entry.get("changed_files", {}).keys())
+
+            # Calculate total line volume of changed files
+            total_lines = 0
+            for rel in changed_files:
+                p = root / rel
+                if p.is_file():
+                    try:
+                        with open(p, "r", encoding="utf-8", errors="ignore") as fp:
+                            total_lines += sum(1 for _ in fp)
+                    except OSError:
+                        pass
+
+            eff_cfg = passed_cfg or entry.get("cfg")
+            if eff_cfg is None:
+                try:
+                    from .project_context import load_gravityguard_config
+                    eff_cfg = load_gravityguard_config("", root)
+                except Exception:
+                    eff_cfg = {}
+
+            is_required, trigger_reason = check_review_risk_triggers(
+                changed_files, eff_cfg, root, total_lines_changed=total_lines
+            )
+
+            # If not risk-triggered, this change is low-risk: auto-exempt!
+            if not is_required:
+                entry["status"] = "exempt"
+                entry["trigger_reason"] = trigger_reason
+                resolved.append(review_id)
+                continue
+
+            entry["trigger_reason"] = trigger_reason
+            problems: List[str] = []
 
             receipt, receipt_err = _load_receipt(root, review_id)
             if receipt_err:
@@ -263,8 +255,6 @@ def evaluate_review_obligations(
             else:
                 if receipt.get("sourceFingerprint") != entry.get("source_fingerprint"):
                     problems.append("fingerprint-mismatch")
-                if entry.get("nonce") and receipt.get("nonce") != entry.get("nonce"):
-                    problems.append("nonce-mismatch")
 
             if _is_stale(root, entry):
                 problems.append("stale-candidate")

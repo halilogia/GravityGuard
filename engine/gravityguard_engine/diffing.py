@@ -6,6 +6,31 @@ Zero external dependencies (difflib SequenceMatcher based, no git CLI required).
 import difflib
 import os
 from typing import List, Set, Tuple
+from .operations import normalize_operation
+
+
+class ProjectionError(ValueError):
+    """A proposed mutation cannot be projected faithfully."""
+
+
+def _replace(content: str, args: dict) -> str:
+    target = args["TargetContent"]
+    if not target:
+        raise ProjectionError("Empty search text requires an explicit insertion adapter")
+    lines = content.splitlines(keepends=True)
+    start = args.get("StartLine", 1) - 1
+    end = args.get("EndLine", len(lines))
+    if start < 0 or end <= start or start >= len(lines) or end > len(lines):
+        raise ProjectionError("Edit line bounds are outside the file")
+    window = "".join(lines[start:end])
+    count = window.count(target)
+    if count == 0:
+        raise ProjectionError("Search text was not found in the requested range")
+    multiple = args.get("AllowMultiple", False)
+    if count > 1 and not multiple:
+        raise ProjectionError("Search text is ambiguous; specify a range or replace_all")
+    changed = window.replace(target, args["ReplacementContent"], -1 if multiple else 1)
+    return "".join(lines[:start]) + changed + "".join(lines[end:])
 
 
 def _text(value) -> str:
@@ -16,60 +41,55 @@ def _text(value) -> str:
 def get_projected_and_old_content(
     target_file: str,
     tool_name: str,
-    args: dict
+    args: dict,
+    allow_virtual: bool = False,
 ) -> Tuple[str, str]:
     """
     Simulates the before and after state of the file without calling any external git CLI.
     Returns: (old_full_content, projected_full_content)
     """
+    operation = normalize_operation(tool_name, args)
+    if operation is not None:
+        args = operation.args
+        tool_name = {"WRITE": "write_to_file", "EDIT": "replace_file_content",
+                     "MULTI_EDIT": "multi_replace_file_content", "READ": "read_file"}[operation.kind]
     existing_content = ""
-    if os.path.exists(target_file):
+    exists = os.path.exists(target_file)
+    if exists:
         try:
-            with open(target_file, "r", encoding="utf-8", errors="ignore") as f:
+            with open(target_file, "r", encoding="utf-8") as f:
                 existing_content = f.read()
-        except (IOError, OSError):
-            existing_content = ""
+        except (OSError, UnicodeError) as exc:
+            raise ProjectionError("Existing file could not be read as UTF-8") from exc
 
     if tool_name in ("write_to_file", "write_file"):
-        new_content = _text(args.get("CodeContent") or args.get("Content") or args.get("content"))
+        new_content = _text(args.get("CodeContent"))
         return existing_content, new_content
 
     if tool_name in ("replace_file_content", "edit_file"):
-        target = _text(args.get("TargetContent") or args.get("Target") or args.get("target"))
-        repl = _text(args.get("ReplacementContent") or args.get("Replacement") or args.get("replacement"))
-        allow_multiple = args.get("AllowMultiple", False)
-        if existing_content:
-            count = -1 if allow_multiple else 1
-            if target and target in existing_content:
-                projected = existing_content.replace(target, repl, count)
-            elif repl:
-                projected = existing_content + "\n" + repl
-            else:
-                projected = existing_content
-            return existing_content, projected
-        else:
-            # File does not exist on disk (mock/virtual payload in tests or new file)
+        target = _text(args.get("TargetContent"))
+        repl = _text(args.get("ReplacementContent"))
+        if exists:
+            return existing_content, _replace(existing_content, args)
+        elif allow_virtual:
+            # Explicit synthetic-fixture mode; production hooks require disk state.
             return target, repl
+        raise ProjectionError("Cannot edit a file that does not exist")
 
     if tool_name == "multi_replace_file_content":
         chunks = args.get("ReplacementChunks")
         if not isinstance(chunks, list):
             chunks = []
-        if existing_content:
+        if exists:
             projected = existing_content
             for chunk in chunks:
-                if isinstance(chunk, dict):
-                    t = _text(chunk.get("TargetContent"))
-                    r = _text(chunk.get("ReplacementContent"))
-                    m = chunk.get("AllowMultiple", False)
-                    if t and t in projected:
-                        c = -1 if m else 1
-                        projected = projected.replace(t, r, c)
+                projected = _replace(projected, chunk)
             return existing_content, projected
-        else:
+        elif allow_virtual:
             old_parts = [_text(chunk.get("TargetContent")) for chunk in chunks if isinstance(chunk, dict)]
             new_parts = [_text(chunk.get("ReplacementContent")) for chunk in chunks if isinstance(chunk, dict)]
             return "\n".join(old_parts), "\n".join(new_parts)
+        raise ProjectionError("Cannot edit a file that does not exist")
 
     return existing_content, existing_content
 

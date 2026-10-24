@@ -74,31 +74,7 @@ from .review_governance import (
     get_unresolved_review_obligations,
     record_final_diff_guard,
     record_review_obligation,
-    register_review_invocation,
 )
-
-#: Matcher for the Swarm reviewer MCP tool, matched against the raw tool name
-#: (which arrives as e.g. ``mcp_swarm-orchestrator_code_review``).
-_MCP_REVIEW_TOOL_RE = re.compile(r"mcp[_-].*code[_-]review", re.IGNORECASE)
-
-
-def _extract_mcp_review_args(args: dict) -> Optional[dict]:
-    """Returns the reviewer arguments if ``args`` look like a code_review call.
-
-    The MCP tool schema is camel-agnostic in practice, so both snake_case and
-    the plain keys are accepted.
-    """
-    if not isinstance(args, dict):
-        return None
-    review_id = args.get("review_id") or args.get("reviewId")
-    if not review_id:
-        return None
-    return {
-        "review_id": str(review_id),
-        "nonce": str(args.get("nonce") or ""),
-        "source_fingerprint": str(args.get("source_fingerprint") or args.get("sourceFingerprint") or ""),
-    }
-
 
 def _project_relative(path: str, root: Path) -> str:
     """Project-relative, forward-slash form of a recorded path (the absolute path when it lies outside the root)."""
@@ -308,20 +284,33 @@ def validate_gravityguard() -> None:
 
             if unresolved_reviews:
                 review_items = []
+                trigger_notes = set()
                 for r_id, info in unresolved_reviews.items():
                     problems = ", ".join(info.get("problems", [])) if isinstance(info, dict) else ""
+                    trig = info.get("trigger_reason", "") if isinstance(info, dict) else ""
+                    if trig:
+                        trigger_notes.add(trig)
                     review_items.append(f"{r_id} [{problems}]" if problems else r_id)
+                trig_suffix = f" [Tetikleyici: {'; '.join(sorted(trigger_notes))}]" if trigger_notes else ""
                 review_warn = (
-                    "Kod İnceleme Yükümlülüğü (R1): Governed kod değişti ancak bağımsız "
-                    "inceleme kanıtı yok. Lead, yapılandırılmış `code-reviewer` uzmanını "
-                    f"çağırmalıdır (review obligation: {', '.join(review_items)})."
+                    f"Kod İnceleme Yükümlülüğü (R1): Yüksek riskli değişiklik tespit edildi{trig_suffix}. "
+                    "Diff'ini 4 noktadan oku: 1) Mantık hatası, 2) Silinen test, 3) Güncellenecek doküman, "
+                    "4) Uydurulmuş fonksiyon/import. Ardından `.gravityguard/self-review/<id>.json` dosyasına "
+                    "parmak izi ('sourceFingerprint': candidate_fingerprint), 'findings': [] ve en az 20 karakterlik "
+                    f"'notes' içeren JSON kaydını yaz (review obligation: {', '.join(review_items)})."
                 )
                 log_event("stop", "WARNING", "workspace", review_warn, rule_id="REVIEW_OBLIGATION_UNRESOLVED", conversation_id=conversation_id)
                 warn_reasons.append(review_warn)
 
             if warn_reasons:
                 increment_session_stop_retries(project_root, conversation_id)
-                full_reason = " | ".join(warn_reasons)
+                status_summary = (
+                    f"Aşama Durumu: [Kod: ✓] "
+                    f"[Test: {'✗' if unresolved_tests else '✓'}] "
+                    f"[Doküman: {'✗' if unresolved_docs else '✓'}] "
+                    f"[İnceleme: {'✗' if unresolved_reviews else '✓'}]"
+                )
+                full_reason = f"{status_summary} | " + " | ".join(warn_reasons)
                 print(json.dumps({"decision": "continue", "reason": full_reason}))
             else:
                 reset_session_stop_retries(project_root, conversation_id)
@@ -356,28 +345,6 @@ def validate_gravityguard() -> None:
         print(json.dumps({"decision": "deny", "reason": shell_reason}))
         sys.exit(0)
 
-    # ========================================================================
-    # MCP Reviewer Observation — provenance anchor (not a file write)
-    # When the Lead calls the Swarm code-reviewer, record the review_id / nonce /
-    # fingerprint it carried. A receipt with no matching invocation is refused.
-    # ========================================================================
-    if isinstance(tool_name, str) and isinstance(args, dict) and _MCP_REVIEW_TOOL_RE.search(tool_name):
-        mcp_review = _extract_mcp_review_args(args)
-        if mcp_review:
-            mcp_root = resolve_project_root(payload)
-            try:
-                register_review_invocation(
-                    mcp_review["review_id"],
-                    mcp_review["nonce"],
-                    mcp_review["source_fingerprint"],
-                    mcp_root,
-                    c_id
-                )
-                _log("APPROVED", tool_name, f"Reviewer invocation observed (review_id={mcp_review['review_id']})", rule_id="REVIEW_INVOCATION")
-            except StateLockTimeout as lock_err:
-                _log("WARNING", tool_name, f"State lock timeout observing reviewer call: {lock_err}", rule_id="STATE_LOCK_TIMEOUT")
-        # Observation is not a file-rule exemption: a reviewer-shaped tool
-        # carrying mutation arguments must still pass semantic validation.
 
     try:
         operation = normalize_operation(tool_name, args)

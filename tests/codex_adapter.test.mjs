@@ -56,8 +56,8 @@ test('to_engine_pretool only runs the engine for .env reads', () => {
   assert.ok(path.isAbsolute(env.toolCall.args.TargetFile));
 });
 
-test('to_engine_pretool ignores unknown tools', () => {
-  assert.equal(call('to_engine_pretool', { tool_name: 'shell', tool_input: { command: 'ls' } }), null);
+test('to_engine_pretool forwards command tools for shared security checks', () => {
+  assert.equal(call('to_engine_pretool', { tool_name: 'shell', tool_input: { command: 'ls' } }).toolCall.args.command, 'ls');
 });
 
 test('conversationId is codex-prefixed with default fallback', () => {
@@ -89,9 +89,9 @@ test('fail-open: missing engine yields no output, exit 0 and a stderr note', () 
   const env = { GRAVITYGUARD_ENGINE: path.join(path.dirname(HOOK), 'does-not-exist.py') };
   const pre = runHook({ tool_name: 'write_file', tool_input: { file_path: ABS, content: 'x' } }, [], env);
   assert.equal(pre.status, 0);
-  assert.equal(pre.stdout.trim(), '');
+  assert.equal(JSON.parse(pre.stdout).hookSpecificOutput.permissionDecision, 'deny');
   assert.match(pre.stderr, /engine not found/);
   const stop = runHook({ session_id: 's' }, ['--stop'], env);
   assert.equal(stop.status, 0);
-  assert.equal(stop.stdout.trim(), '');
+  assert.equal(JSON.parse(stop.stdout).decision, 'block');
 });

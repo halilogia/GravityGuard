@@ -12,6 +12,8 @@ import { buildHtmlDocument, extractRootInnerHtml } from './layout';
 import { updateTaskItemStatus, deleteTaskItem, addTaskItem, archiveCompletedTasks, TaskStatus } from '../tasks';
 import { addAdrItem, addChangelogItem } from '../knowledge';
 import { WebviewLifecycle } from './lifecycle';
+import { MessagePathPolicy } from './message_policy';
+import { waiveAdvisory } from './governance_control';
 
 export class GuardianViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
@@ -26,6 +28,7 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
   private _pollStartTimer?: NodeJS.Timeout;
   private _lifecycle?: WebviewLifecycle;
   private _hostReloadTried: boolean = false;
+  private _messagePaths = new MessagePathPolicy();
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -89,6 +92,15 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
     });
 
     webviewView.webview.onDidReceiveMessage(async (message: { command: string; nonce?: string; path?: string; text?: string; tab?: string; line?: number; status?: string; title?: string; decision?: string }) => {
+      if (!message || typeof message !== 'object' || typeof message.command !== 'string') return;
+      const kinds: Record<string, string> = {
+        updateTaskStatus: 'tasks', deleteTaskItem: 'tasks', archiveCompletedTasks: 'tasks', addTaskItem: 'tasks',
+        addAdr: 'knowledge', addChangelogItem: 'changelog', dismissObligation: 'obligations'
+      };
+      if (kinds[message.command] && !this._messagePaths.permits(kinds[message.command], message.path)) return;
+      if (message.line !== undefined && (!Number.isSafeInteger(message.line) || message.line < 1)) return;
+      if (message.status !== undefined && !['open', 'in_progress', 'done'].includes(message.status)) return;
+      if ([message.text, message.title, message.decision].some(value => value !== undefined && (typeof value !== 'string' || value.length > 100000))) return;
       if (message.command === 'ready') {
         lifecycle.ready(message.nonce);
       } else if (message.command === 'clearLogs' || message.command === 'clearView') {
@@ -128,9 +140,9 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
         await vscode.env.clipboard.writeText(message.text);
         vscode.window.showInformationMessage(t('actions.reasonCopied'));
       } else if (message.command === 'dismissObligation' && message.path) {
-        this.dismissObligation(message.path);
+        await this.dismissObligation(message.path);
       } else if (message.command === 'clearAllObligations') {
-        this.clearAllObligations();
+        await this.clearAllObligations();
       } else if (message.command === 'updateTaskStatus' && message.path && typeof message.line === 'number' && message.status) {
         if (updateTaskItemStatus(message.path, message.line, message.status as TaskStatus)) {
           this._lastDataSig = '';
@@ -308,6 +320,10 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
 
   private buildDocument(view: vscode.WebviewView, nonce: string): { html: string; body: string } {
     const vm = loadGuardianState(this._clearedAfterSeq);
+    this._messagePaths.set('tasks', [...vm.tasks.map(file => file.path), ...(vm.defaultTaskPath ? [vm.defaultTaskPath] : [])]);
+    this._messagePaths.set('knowledge', vm.memory?.knowledge ? [vm.memory.knowledge.path] : []);
+    this._messagePaths.set('changelog', vm.memory?.changelog ? [vm.memory.changelog.path] : []);
+    this._messagePaths.set('obligations', [...Object.keys(vm.pendingTests), ...Object.keys(vm.pendingDocs)]);
     const { eventsList, govData, stopRetries, resolutionIntents, totalObligations } = vm;
     this._lastDataSig = `${getCurrentLanguage()}:${this._clearedAfterSeq}:${eventsList.length}:${eventsList[0]?.timestamp || ''}:${eventsList[0]?.seq || 0}:${govData?.seq || 0}:${stopRetries}:${resolutionIntents.length}:${totalObligations}`;
     const html = buildHtmlDocument({
@@ -344,105 +360,27 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private dismissObligation(targetPath: string): void {
-    const candidatePaths: string[] = [];
-    const wsFolders = vscode.workspace.workspaceFolders;
-    if (wsFolders && wsFolders.length > 0) {
-      candidatePaths.push(path.join(wsFolders[0].uri.fsPath, '.gravityguard', 'runtime', 'governance.json'));
-    }
-    candidatePaths.push(path.join(os.homedir(), '.gravityguard', 'runtime', 'governance.json'));
-    candidatePaths.push(path.join(os.homedir(), '.gemini', 'config', 'plugins', 'gravityguard', '.gravityguard', 'runtime', 'governance.json'));
-
-    const normTarget = targetPath.replace(/\\/g, '/').toLowerCase();
-    let modified = false;
-
-    for (const govFile of candidatePaths) {
-      if (!fs.existsSync(govFile)) {
-        continue;
-      }
-      try {
-        const raw = fs.readFileSync(govFile, 'utf8');
-        const data = JSON.parse(raw);
-        let changed = false;
-
-        if (data.test_obligations?.pending) {
-          for (const key of Object.keys(data.test_obligations.pending)) {
-            if (key.replace(/\\/g, '/').toLowerCase() === normTarget) {
-              delete data.test_obligations.pending[key];
-              changed = true;
-            }
-          }
-        }
-        if (data.doc_obligations?.pending) {
-          for (const key of Object.keys(data.doc_obligations.pending)) {
-            if (key.replace(/\\/g, '/').toLowerCase() === normTarget) {
-              delete data.doc_obligations.pending[key];
-              changed = true;
-            }
-          }
-        }
-        if (changed) {
-          fs.writeFileSync(govFile, JSON.stringify(data, null, 2), 'utf8');
-          modified = true;
-        }
-      } catch (e) {
-        console.warn('[GravityGuard] Failed to dismiss obligation in:', govFile, e);
-      }
-    }
-
-    if (modified) {
+  private async changeAdvisoryObligations(target?: string): Promise<void> {
+    const roots = [...(vscode.workspace.workspaceFolders || []).map(folder => folder.uri.fsPath),
+      os.homedir(), path.join(os.homedir(), '.gemini', 'config', 'plugins', 'gravityguard')];
+    try {
+      await waiveAdvisory(path.join(this._extensionUri.fsPath, 'engine', 'governance_control.py'), roots, target);
       this._lastHtml = '';
       this._lastDataSig = '';
       this.updateHtml(true);
-      vscode.window.showInformationMessage('Yükümlülük kaldırıldı: ' + path.basename(targetPath));
+    } catch (error) {
+      console.warn('[GravityGuard] Advisory state update failed:', error);
+      vscode.window.showErrorMessage(t('actions.governanceWriteFailed'));
     }
   }
 
-  private clearAllObligations(): void {
-    const candidatePaths: string[] = [];
-    const wsFolders = vscode.workspace.workspaceFolders;
-    if (wsFolders && wsFolders.length > 0) {
-      candidatePaths.push(path.join(wsFolders[0].uri.fsPath, '.gravityguard', 'runtime', 'governance.json'));
-    }
-    candidatePaths.push(path.join(os.homedir(), '.gravityguard', 'runtime', 'governance.json'));
-    candidatePaths.push(path.join(os.homedir(), '.gemini', 'config', 'plugins', 'gravityguard', '.gravityguard', 'runtime', 'governance.json'));
-
-    let count = 0;
-    for (const govFile of candidatePaths) {
-      if (!fs.existsSync(govFile)) {
-        continue;
-      }
-      try {
-        const raw = fs.readFileSync(govFile, 'utf8');
-        const data = JSON.parse(raw);
-        let changed = false;
-
-        if (data.test_obligations?.pending && Object.keys(data.test_obligations.pending).length > 0) {
-          count += Object.keys(data.test_obligations.pending).length;
-          data.test_obligations.pending = {};
-          changed = true;
-        }
-        if (data.doc_obligations?.pending && Object.keys(data.doc_obligations.pending).length > 0) {
-          count += Object.keys(data.doc_obligations.pending).length;
-          data.doc_obligations.pending = {};
-          changed = true;
-        }
-        if (data.stop_retries) {
-          data.stop_retries = 0;
-          changed = true;
-        }
-        if (changed) {
-          fs.writeFileSync(govFile, JSON.stringify(data, null, 2), 'utf8');
-        }
-      } catch (e) {
-        console.warn('[GravityGuard] Failed to clear obligations in:', govFile, e);
-      }
-    }
-
-    this._lastHtml = '';
-    this._lastDataSig = '';
-    this.updateHtml(true);
-    vscode.window.showInformationMessage(`Tüm bekleyen yükümlülükler temizlendi (${count} adet).`);
+  private async dismissObligation(targetPath: string): Promise<void> {
+    await this.changeAdvisoryObligations(targetPath);
   }
+
+  private async clearAllObligations(): Promise<void> {
+    await this.changeAdvisoryObligations();
+  }
+
 }
 

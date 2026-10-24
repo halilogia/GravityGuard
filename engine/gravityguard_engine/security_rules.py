@@ -14,6 +14,7 @@ import re
 from collections import Counter
 from pathlib import Path
 from typing import List, Optional, Set, Tuple
+from .operations import normalize_operation, UnsupportedOperation
 
 PLACEHOLDER_KEYWORDS = (
     "example", "your_api_key", "your_token", "your-api-key", "your-key",
@@ -61,7 +62,12 @@ def check_blind_doc_overwrite(
     Forces surgical updates via `replace_file_content` to prevent truncation and invariant loss.
     Brand new files that do not exist on disk are permitted.
     """
-    if tool_name.lower() not in ("write_to_file", "write"):
+    try:
+        operation = normalize_operation(tool_name, {**args, "TargetFile": target_file})
+    except UnsupportedOperation:
+        # Incomplete legacy direct calls still receive the conservative G4 check.
+        operation = None
+    if (operation is None or operation.kind != "WRITE") and tool_name.lower() not in ("write_to_file", "write_file", "write"):
         return False, ""
 
     if not is_doc_or_rule_file(target_file):

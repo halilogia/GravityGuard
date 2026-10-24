@@ -15,7 +15,7 @@ import fnmatch
 import time
 import uuid
 from pathlib import Path
-from typing import List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 #: File suffixes that are never production code, so never review-triggering on
 #: their own. A `.json` config can change behaviour, but review of config is a
@@ -35,6 +35,45 @@ DEFAULT_REVIEW_EXEMPT_PATTERNS = (
     "**/*.test.tsx",
     "**/*.spec.ts",
 )
+
+#: Security & governance sensitive patterns where review is mandatory regardless of scale.
+SECURITY_SENSITIVE_PATTERNS = (
+    "engine/**",
+    "**/engine/**",
+    "plugin/**",
+    "**/plugin/**",
+    ".gravityguard/**",
+    "**/.gravityguard/**",
+    "*security*",
+    "**/*security*",
+    "*auth*",
+    "**/*auth*",
+    "*secret*",
+    "**/*secret*",
+    "*token*",
+    "**/*token*",
+    "*permission*",
+    "**/*permission*",
+    "*hook*",
+    "**/*hook*",
+)
+
+#: Dependency manifests that trigger review on modification.
+DEPENDENCY_MANIFEST_PATTERNS = (
+    "package.json",
+    "package-lock.json",
+    "requirements.txt",
+    "pyproject.toml",
+    "Cargo.toml",
+    "Cargo.lock",
+    "go.mod",
+    "go.sum",
+    "Gemfile",
+    "Gemfile.lock",
+)
+
+DEFAULT_MIN_FILES = 5
+DEFAULT_MIN_LINES = 120
 
 
 def _relative_posix(target_file: str, project_root: Optional[Path]) -> str:
@@ -127,3 +166,61 @@ def is_review_exempt_file(target_file: str, cfg: Optional[dict] = None, project_
 def default_review_id(prefix: str = "rev") -> str:
     """A fresh, filesystem-safe review id (no dependency on the caller)."""
     return f"{prefix}-{int(time.time())}-{uuid.uuid4().hex[:8]}"
+
+
+def check_review_risk_triggers(
+    changed_files: Iterable[str],
+    cfg: Optional[dict] = None,
+    project_root: Optional[Path] = None,
+    total_lines_changed: int = 0,
+) -> Tuple[bool, str]:
+    """Evaluates whether a candidate change set crosses risk thresholds for Self-Review.
+
+    Under ChatGPT's R1.1 Risk-Gated model:
+    - Routine / small changes (<5 files, <120 lines, non-security) return False (SKIP).
+    - Changes touching security/engine, dependencies, or large volume return True.
+    """
+    if not is_review_enabled(cfg):
+        return False, "disabled"
+
+    review_cfg = cfg.get("review", {}) if isinstance(cfg, dict) else {}
+
+    # Strict / Force-All override (e.g. testing or explicit strict mode)
+    if review_cfg.get("forceAll", False) or review_cfg.get("mode") == "strict":
+        return True, "force-all"
+
+    # If risk-gated mode is explicitly disabled, require on all changes
+    if review_cfg.get("riskGated") is False:
+        return True, "all-changes"
+
+    files_list = list(changed_files)
+    if not files_list:
+        return False, "no-files"
+
+    root = project_root
+
+    # 1. Security & Governance sensitive paths (regardless of line count)
+    for f in files_list:
+        rel = _relative_posix(f, root)
+        if _matches_any(rel, list(SECURITY_SENSITIVE_PATTERNS)):
+            return True, f"Güvenlik/yönetişim modülü değişti: {rel}"
+
+    # 2. Dependency / package manifests
+    for f in files_list:
+        rel = _relative_posix(f, root)
+        if _matches_any(rel, list(DEPENDENCY_MANIFEST_PATTERNS)):
+            return True, f"Dış bağımlılık / paket manifestosu değişti: {rel}"
+
+    # 3. Scale threshold (number of files)
+    min_files = review_cfg.get("minFiles", DEFAULT_MIN_FILES)
+    if len(files_list) >= min_files:
+        return True, f"Büyük değişiklik: {len(files_list)} dosya etkilendi (eşik: {min_files})"
+
+    # 4. Scale threshold (number of lines)
+    min_lines = review_cfg.get("minLines", DEFAULT_MIN_LINES)
+    if total_lines_changed >= min_lines:
+        return True, f"Büyük değişiklik: ~{total_lines_changed} satır (eşik: {min_lines})"
+
+    # 5. Low risk -> Skip review
+    return False, "Düşük riskli yerel değişiklik (Review atlandı)"
+

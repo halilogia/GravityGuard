@@ -25,6 +25,16 @@ _HERE = Path(__file__).resolve().parent
 _DEFAULT_ENGINE = _HERE.parent.parent / "engine" / "gravity-validator.py"
 ENGINE_TIMEOUT_SECONDS = 20
 
+# Shared schema classifier is shipped alongside the engine.
+sys.path.insert(0, str(_HERE.parent.parent / "engine"))
+sys.path.insert(0, str(_HERE.parent))
+from gravityguard_hook_safety import failure_response, emit_failure
+try:
+    from gravityguard_engine.operations import provider_tool_call
+except (ImportError, SyntaxError):
+    def provider_tool_call(name, args, cwd):
+        return {"name": name, "args": args}
+
 # Codex tool name -> the engine's (Antigravity) tool name.
 TOOL_MAP = {
     "write_file": "write_to_file",
@@ -62,35 +72,20 @@ def _first(mapping: Dict[str, Any], *keys: str) -> Any:
 
 
 def to_engine_pretool(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Translate a Codex PreToolUse event; None for tools the engine has no file rules for."""
+    """Normalize file schemas; preserve unsupported calls for an explicit deny."""
     name = event.get("tool_name") or event.get("toolName") or ""
-    if name not in TOOL_MAP:
+    tool_input = event.get("tool_input", event.get("toolInput", {}))
+    # A missing path on a bare read conveys no file access to check.
+    if name in ("Read", "read_file") and tool_input == {}:
         return None
-    tool_input = event.get("tool_input") or event.get("toolInput") or {}
-    if not isinstance(tool_input, dict):
+    call = provider_tool_call(name, tool_input, str(event.get("cwd") or os.getcwd()))
+    if call is None:
         return None
-    target = str(_first(tool_input, "file_path", "path", "target_file", "TargetFile") or "")
-    if target and not os.path.isabs(target):
-        cwd = str(event.get("cwd") or os.getcwd())
-        target = os.path.abspath(os.path.join(cwd, target))
-    if name in _READ_TOOLS:
-        # Only the live-.env check matters for a read; skip the engine process for every other file.
-        if "env" not in os.path.basename(target).lower():
-            return None
-        args: Dict[str, Any] = {"TargetFile": target}
-    elif name in _WRITE_TOOLS:
-        args = {"TargetFile": target, "CodeContent": _first(tool_input, "content", "contents", "text")}
-    else:
-        args = {
-            "TargetFile": target,
-            "TargetContent": _first(tool_input, "old_string", "old_str", "search"),
-            "ReplacementContent": _first(tool_input, "new_string", "new_str", "replace"),
-            "AllowMultiple": bool(tool_input.get("replace_all", False)),
-        }
     return {
-        "toolCall": {"name": TOOL_MAP[name], "args": args},
+        "toolCall": call,
         "conversationId": conversation_id(event),
         "workspacePaths": workspace_paths(event),
+        "cwd": str(event.get("cwd") or os.getcwd()),
     }
 
 
@@ -146,7 +141,7 @@ def run_engine(payload: Dict[str, Any], extra_args: Sequence[str] = ()) -> Optio
         answer = json.loads(lines[-1]) if lines else None
     except ValueError:
         answer = None
-    if not isinstance(answer, dict):
+    if proc.returncode != 0 or not isinstance(answer, dict) or answer.get("decision") not in ("allow", "deny", "continue"):
         print(f"[GravityGuard Codex adapter] engine gave no readable answer: {proc.stderr.strip()[:300]}", file=sys.stderr)
         return None
     return answer
@@ -156,12 +151,12 @@ def handle(event: Dict[str, Any], stop: bool) -> Optional[Dict[str, Any]]:
     """Codex event in, Codex answer out (None = say nothing, let it proceed)."""
     if stop:
         answer = run_engine(to_engine_stop(event), ["--stop"])
-        return from_engine_stop(answer) if answer else None
+        return from_engine_stop(answer) if answer else failure_response(stop=True)
     payload = to_engine_pretool(event)
     if payload is None:
         return None
     answer = run_engine(payload)
-    return from_engine_pretool(answer) if answer else None
+    return from_engine_pretool(answer) if answer else failure_response()
 
 
 def main(argv: Sequence[str]) -> int:
@@ -171,16 +166,20 @@ def main(argv: Sequence[str]) -> int:
     try:
         event = json.load(sys.stdin)
     except ValueError:
+        emit_failure(stop="--stop" in argv)
         return 0
     except RecursionError:
+        emit_failure(stop="--stop" in argv)
         print("[GravityGuard Codex adapter] hook payload nested too deeply to parse; letting the call proceed", file=sys.stderr)
         return 0
     if not isinstance(event, dict):
+        emit_failure(stop="--stop" in argv)
         return 0
     try:
         result = handle(event, stop="--stop" in argv)
     except Exception as exc:  # fail-open: never wedge the agent on an adapter bug
         print(f"[GravityGuard Codex adapter] unexpected error: {exc}", file=sys.stderr)
+        emit_failure(stop="--stop" in argv)
         return 0
     if result is not None:
         print(json.dumps(result, ensure_ascii=False))

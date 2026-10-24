@@ -125,7 +125,6 @@ from gravityguard_engine.review_governance import (  # noqa: F401
     new_review_id,
     record_final_diff_guard,
     record_review_obligation,
-    register_review_invocation,
     scan_git_governed_changes,
 )
 

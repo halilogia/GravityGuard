@@ -103,6 +103,27 @@ class TestAuditSubsystem(unittest.TestCase):
         self.assertEqual(ev["status"], "SHADOW_TRIGGER")
         self.assertEqual(ev["outcome"], "SHADOW_OBSERVED")
 
+    def test_security_block_is_not_fabricated_recovery(self):
+        conv = "conv-deterrence"
+        # 1. Agent tries to write to .env -> BLOCKED by G0_ENV_PROTECTION
+        log_event("write", "BLOCKED", ".env", "Attempted write to protected env file", rule_id="G0_ENV_PROTECTION", conversation_id=conv)
+
+        # 2. Agent tries G1 on another file -> BLOCKED, then fixes it -> APPROVED
+        log_event("write", "BLOCKED", "src/api.py", "silent except", rule_id="G1_SILENT_EXCEPTION", conversation_id=conv)
+        log_event("write", "APPROVED", "src/api.py", "fixed except", rule_id="PASS", conversation_id=conv)
+
+        live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
+        with open(live_path, "r", encoding="utf-8") as f:
+            live = json.load(f)
+
+        eff = live["effectiveness"]
+        self.assertEqual(eff["recoveryRate"], 50.0)
+        self.assertEqual(eff["totalSecurityBlocked"], 1)
+        self.assertEqual(eff["codeFixRate"], 100.0)
+        self.assertNotIn("deterrenceRate", eff)
+        self.assertEqual(eff["ruleStats"]["G0_ENV_PROTECTION"]["recoveryRate"], 0.0)
+        self.assertEqual(eff["ruleStats"]["G1_SILENT_EXCEPTION"]["recoveryRate"], 100.0)
+
     def test_rule_specific_causal_isolation(self):
         target = "src/app.py"
         # 1. First block is G1
