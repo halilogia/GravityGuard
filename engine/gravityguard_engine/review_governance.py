@@ -82,6 +82,41 @@ def fingerprint_from_hashes(file_hashes: Dict[str, str]) -> str:
     return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
 
 
+def _git_out(root: Path, *args: str) -> Optional[str]:
+    try:
+        proc = subprocess.run(["git", *args], cwd=str(root), capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as err:
+        _git_err = err
+        return None
+    return proc.stdout.strip() if proc.returncode == 0 and proc.stdout.strip() else None
+
+
+def git_binding(project_root: Optional[Path] = None) -> Dict[str, Optional[str]]:
+    """Current ``{commit, tree}`` (HEAD and HEAD^{tree}); both None outside a repository."""
+    root = Path(project_root or Path.cwd())
+    return {
+        "commit": _git_out(root, "rev-parse", "HEAD"),
+        "tree": _git_out(root, "rev-parse", "HEAD^{tree}"),
+    }
+
+
+def binding_is_stale(binding: Dict[str, Any], project_root: Optional[Path] = None) -> bool:
+    """True when a recorded binding no longer describes the code on disk.
+
+    Stale when the git tree moved, or any bound file's content hash changed
+    (covers uncommitted edits that leave HEAD's tree untouched). A binding
+    without a tree (no git at bind time) is judged on file hashes alone.
+    """
+    root = Path(project_root or Path.cwd())
+    bound_tree = binding.get("tree")
+    if bound_tree and git_binding(root).get("tree") != bound_tree:
+        return True
+    for rel, expected in (binding.get("file_hashes") or {}).items():
+        if read_disk_text_hash(root / rel) != expected:
+            return True
+    return False
+
+
 def new_review_id() -> str:
     return f"rev-{int(time.time())}-{uuid.uuid4().hex[:8]}"
 
@@ -255,6 +290,14 @@ def evaluate_review_obligations(
             else:
                 if receipt.get("sourceFingerprint") != entry.get("source_fingerprint"):
                     problems.append("fingerprint-mismatch")
+                # Optional git binding, checked only here (Stop / pre-push, never on the hook
+                # fast path): a receipt naming the tree/commit it was written against is void
+                # once HEAD moved (rebase, pull, amend).
+                if receipt.get("gitTree") or receipt.get("gitCommit"):
+                    current = git_binding(root)
+                    for key, rkey in (("tree", "gitTree"), ("commit", "gitCommit")):
+                        if receipt.get(rkey) and current.get(key) and receipt[rkey] != current[key]:
+                            problems.append(f"git-{key}-mismatch")
 
             if _is_stale(root, entry):
                 problems.append("stale-candidate")

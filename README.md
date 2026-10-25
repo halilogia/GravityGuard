@@ -118,6 +118,19 @@ The same engine guards Claude Code through a thin adapter in [`plugin/claude-cod
 
 ---
 
+### Security scan (`scan`, Tier 4)
+
+Hooks stay fast (<5 ms, no LLM, no network). Deep checks live in a separate on-demand command that emits evidence-backed findings as SARIF v2.1.0:
+
+```bash
+python engine/governance_control.py scan                # changed files, writes .gravityguard/reports/security-scan.sarif
+python engine/governance_control.py scan --all --format text
+```
+
+Flags: `--diff` (default) / `--all`, `--format sarif|json|text`, `--output <path>`. Exit code `1` when findings exist. Details: [docs/architecture/04-dual-speed-security.md](docs/architecture/04-dual-speed-security.md).
+
+---
+
 ## Türkçe
 
 > **Tasarım felsefesi — modele değil, mekanizmaya güven.** GravityGuard, bir yapay zeka ajanının iyi niyetine güvenilemeyeceği için vardır: *yalnızca metin olarak yaşayan bir kural, bir dilektir.* Bu yüzden her yükümlülük ya ajanın gerçekten diske yazmak zorunda olduğu bir artefakta, ya da — deterministik kılınabildiği her yerde — işlemi doğrudan reddeden bir hava yastığına, linter'a veya kancaya (hook) dayanır. İnisiyatif yok, "bana güven" yok; artefakt oluşana kadar kapı kapalı kalır.
@@ -170,6 +183,17 @@ GravityGuard, herhangi bir dosya değiştirme aracı çalıştırılmadan önce 
 
 ### 🤖 5. Claude Code'da Kullanım
 - Aynı motor, [`plugin/claude-code/`](plugin/claude-code/README.md) altındaki ince bir adaptörle Claude Code'u da korur: `Write` / `Edit` / `MultiEdit` dosya kurallarından geçer, `Stop` kancası oturumu kendi test/doküman yükümlülükleri bitene kadar tutar. Her oturum ayrı izlenir; paralel oturumlar birbirini engellemez. `Bash` ile yazılan dosyalar denetlenmez. Kurulum tek bir `settings.json` parçasıdır.
+
+### Güvenlik taraması (`scan`, Tier 4)
+
+Hook'lar hızlı kalır (<5 ms, LLM/ağ yok). Derin kontroller ayrı, isteğe bağlı bir komuttadır ve kanıtlı bulguları SARIF v2.1.0 olarak üretir:
+
+```bash
+python engine/governance_control.py scan                # değişen dosyalar -> .gravityguard/reports/security-scan.sarif
+python engine/governance_control.py scan --all --format text
+```
+
+Bayraklar: `--diff` (varsayılan) / `--all`, `--format sarif|json|text`, `--output <yol>`. Bulgu varsa çıkış kodu `1`. Ayrıntı: [docs/architecture/04-dual-speed-security.md](docs/architecture/04-dual-speed-security.md).
 
 ---
 

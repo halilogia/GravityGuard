@@ -14,7 +14,8 @@ docs/
 ├── architecture/
 │   ├── 01-overview.md              # 5 Katmanlı Yaşam Döngüsü (L0-L5) & Dual Engine
 │   ├── 02-fail-closed-engine.md    # Fail-Closed Motor, Semantik Normalizasyon & Diff
-│   └── 03-receipt-auth.md          # HMAC Doğrulaması & Kod İnceleme (Review) Makbuzları
+│   ├── 03-receipt-auth.md          # HMAC Doğrulaması & Kod İnceleme (Review) Makbuzları
+│   └── 04-dual-speed-security.md   # Hızlı Hook'lar + Derin `scan` (SARIF, git tree-hash, fix doğrulama)
 ├── rules/
 │   ├── 01-g0-security.md           # G0: Secret Leak, .env Koruması & Politika Bütünlüğü
 │   ├── 02-g1-silent-exceptions.md  # G1: Sessiz Hata Yutma Yasağı & Fallback Desenleri

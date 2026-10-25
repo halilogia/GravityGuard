@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Dual-Speed Security (Tier 4 deep scan)
+- **`engine/gravityguard_engine/security_audit.py`**: evidence-backed `Finding` model, AST-taint + regex rules (GGS001-GGS005), SARIF v2.1.0/JSON/text export with (rule, file, line) dedup, and a fail-before / pass-after fix verification gate (`record_baseline`, `verify_patched`). Never imported by PreToolUse/PostToolUse.
+- **`governance_control.py scan`** (`--diff|--all`, `--format`, `--output`): standalone command, default `.gravityguard/reports/security-scan.sarif`, exit 1 on findings.
+- **`review_governance.py`**: `git_binding` / `binding_is_stale` (HEAD commit + `HEAD^{tree}` + file hashes); receipts with `gitTree`/`gitCommit` are invalidated at Stop/pre-push when HEAD moved; stale reports reset findings to `UNVERIFIED`.
+- Tests: `engine/tests/test_security_audit.py`; docs: `docs/architecture/04-dual-speed-security.md`, README.
+
 ### Local Path Publication Gate
 - **`engine/gravityguard_engine/local_paths.py` + `tools/check_local_paths.py`**: the pre-commit hook now blocks staged ADDED lines that contain a real local user path (`C:\Users\<name>\`, `/Users/<name>/`, `/home/<name>/`, including JSON-escaped forms). Placeholders (`<user>`, `%USERNAME%`, `${USER}`) and system accounts (`Public`, `runner`) pass; the finding prints the user name only, never the rest of the path. Policy in `.gravityguard.json` (`publication.localPaths`: `block` | `warn` | `off`, `publication.allowLocalPaths`: globs) with a one-off escape `GRAVITYGUARD_ALLOW_LOCAL_PATHS=1`. Tests: `engine/tests/test_local_paths.py`.
 

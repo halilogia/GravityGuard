@@ -33,6 +33,10 @@ def waive_advisory(root: Path, target=None) -> int:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "scan":
+        # Tier 4 deep scan: standalone command, never reachable from the hook fast path.
+        from gravityguard_engine.security_audit import main as scan_main
+        sys.exit(scan_main(sys.argv[2:]))
     try:
         payload = json.load(sys.stdin)
         roots = payload["roots"]
