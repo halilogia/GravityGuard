@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Auto-Architecture Report (`docs:arch`)
+- **`tools/generate_architecture.py`** (stdlib only): scans `engine/`, `src/`, `plugin/`, `tests/`; writes `ARCHITECTURE_AUTO_GENERATED.md` (version, date, file/LOC/test metrics, Tier 1 / Tier 4 / governance / UI layer matrix, Mermaid topology, tree). `--output <path>`; `--check` exits 1 with a diff when the file is stale (date line ignored).
+- **`package.json`**: `docs:arch`, `docs:arch:check`. Tests: `engine/tests/test_generate_architecture.py`.
+
 ### Dual-Speed Security (Tier 4 deep scan)
 - **`engine/gravityguard_engine/security_audit.py`**: evidence-backed `Finding` model, AST-taint + regex rules (GGS001-GGS005), SARIF v2.1.0/JSON/text export with (rule, file, line) dedup, and a fail-before / pass-after fix verification gate (`record_baseline`, `verify_patched`). Never imported by PreToolUse/PostToolUse.
 - **`governance_control.py scan`** (`--diff|--all`, `--format`, `--output`): standalone command, default `.gravityguard/reports/security-scan.sarif`, exit 1 on findings.
