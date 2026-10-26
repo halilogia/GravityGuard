@@ -16,117 +16,148 @@ _ENGINE_DIR = os.path.dirname(os.path.abspath(__file__))
 if _ENGINE_DIR not in sys.path:
     sys.path.insert(0, _ENGINE_DIR)
 
-# Re-export public API symbols for backwards compatibility
-from gravityguard_engine import __version__  # noqa: F401
-from gravityguard_engine.project_context import (  # noqa: F401
-    DEFAULT_COMPLEXITY_THRESHOLDS,
-    _COMPLEXITY_THRESHOLD_FLOORS,
-    extract_project_info,
-    harden_streams_to_utf8,
-    is_doc_governed_target,
-    load_gravityguard_config,
-    resolve_complexity_thresholds,
-    resolve_project_root,
-    should_enforce_doc_obligations,
-)
-from gravityguard_engine.audit import (  # noqa: F401
-    _resolve_log_dir,
-    log_event,
-)
-from gravityguard_engine.diffing import (  # noqa: F401
-    extract_diff_and_projected,
-    get_diff_analysis,
-    get_projected_and_old_content,
-)
-from gravityguard_engine.security_rules import (  # noqa: F401
-    PLACEHOLDER_KEYWORDS,
-    _PEM_BODY_RE,
-    check_escape_hatch_tampering,
-    check_g0_secret_leak,
-    check_g1_silent_exception,
-    check_g2_test_integrity,
-    is_elided_pem_fixture,
-    is_placeholder,
-    redact_token,
-)
-from gravityguard_engine.architecture_rules import (  # noqa: F401
-    COHESIVE_MODULE_PATTERNS,
-    _get_base_name,
-    _has_declared_cohesion_marker,
-    _is_exempt_class_ast,
-    analyze_python_srp,
-    analyze_python_srp_regex_fallback,
-    check_arch_file_growth,
-    check_g3_compiler_bypass,
-    check_g4_import_matrix,
-    check_oe_spike,
-    is_cohesive_module_by_filename,
-    is_py_cohesive_monolith,
-    is_ts_cohesive_monolith,
-    record_and_check_cumulative_growth,
-)
-from gravityguard_engine.diagnostics import (  # noqa: F401
-    _CREATE_NO_WINDOW,
-    _hidden_console_kwargs,
-    read_recent_diagnostics,
-    trigger_background_validation,
-)
-from gravityguard_engine.test_evidence import (  # noqa: F401
-    DEFAULT_EXEMPT_PATTERNS,
-    _TEST_FILE_PATTERNS,
-    check_t1_missing_test,
-    check_t2_observable_assertion,
-    check_t3_symbol_to_test_link,
-    evaluate_test_evidence,
-    is_exempt_from_test_evidence,
-    project_has_test_infrastructure,
-    resolve_candidate_test_file,
-)
-from gravityguard_engine.state_lock import (  # noqa: F401
-    StateLock,
-    StateLockTimeout,
-)
-from gravityguard_engine.governance import (  # noqa: F401
-    clear_doc_obligations,
-    clear_governance_state,
-    clear_test_evidence_state,
-    get_governance_file_path,
-    get_session_stop_retries,
-    get_test_evidence_file_path,
-    get_unresolved_doc_obligations,
-    get_unresolved_test_evidence,
-    governance_transaction,
-    increment_session_stop_retries,
-    load_governance_state,
-    load_test_evidence_state,
-    reconcile_obligations_on_disk,
-    record_pending_doc_obligation,
-    record_pending_test_evidence,
-    reset_session_stop_retries,
-    resolve_pending_doc_obligations,
-    resolve_pending_test_evidence,
-    save_governance_state,
-    save_test_evidence_state,
-)
-from gravityguard_engine.dispatcher import (  # noqa: F401
-    run_cli,
-    validate_gravityguard,
-)
-from gravityguard_engine.review_policy import (  # noqa: F401
-    DEFAULT_REVIEW_EXEMPT_PATTERNS,
-    is_review_enabled,
-    is_review_exempt_file,
-    should_require_review,
-)
-from gravityguard_engine.review_governance import (  # noqa: F401
-    evaluate_review_obligations,
-    fingerprint_from_hashes,
-    get_unresolved_review_obligations,
-    new_review_id,
-    record_final_diff_guard,
-    record_review_obligation,
-    scan_git_governed_changes,
-)
+def _log_fatal(exc_text: str) -> None:
+    """Last-resort crash log; must stay import-free so it works when the engine is broken."""
+    from datetime import datetime
+    argv = list(sys.argv)
+    event = next((a for a in argv[1:] if a.startswith("--")), "unknown")
+    entry = f"[{datetime.now().isoformat()}] hook_event={event} argv={argv!r}\n{exc_text}\n"
+    for path in (
+        os.path.expanduser("~/.gemini/config/plugins/gravityguard/logs/gravityguard_errors.log"),
+        os.path.join(".gravityguard", "runtime", "gravityguard_errors.log"),
+    ):
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(entry)
+        except Exception:
+            pass
+
+
+try:
+
+    # Re-export public API symbols for backwards compatibility
+    from gravityguard_engine import __version__  # noqa: F401
+    from gravityguard_engine.project_context import (  # noqa: F401
+        DEFAULT_COMPLEXITY_THRESHOLDS,
+        _COMPLEXITY_THRESHOLD_FLOORS,
+        extract_project_info,
+        harden_streams_to_utf8,
+        is_doc_governed_target,
+        load_gravityguard_config,
+        resolve_complexity_thresholds,
+        resolve_project_root,
+        should_enforce_doc_obligations,
+    )
+    from gravityguard_engine.audit import (  # noqa: F401
+        _resolve_log_dir,
+        log_event,
+    )
+    from gravityguard_engine.diffing import (  # noqa: F401
+        extract_diff_and_projected,
+        get_diff_analysis,
+        get_projected_and_old_content,
+    )
+    from gravityguard_engine.security_rules import (  # noqa: F401
+        PLACEHOLDER_KEYWORDS,
+        _PEM_BODY_RE,
+        check_escape_hatch_tampering,
+        check_g0_secret_leak,
+        check_g1_silent_exception,
+        check_g2_test_integrity,
+        is_elided_pem_fixture,
+        is_placeholder,
+        redact_token,
+    )
+    from gravityguard_engine.architecture_rules import (  # noqa: F401
+        COHESIVE_MODULE_PATTERNS,
+        _get_base_name,
+        _has_declared_cohesion_marker,
+        _is_exempt_class_ast,
+        analyze_python_srp,
+        analyze_python_srp_regex_fallback,
+        check_arch_file_growth,
+        check_g3_compiler_bypass,
+        check_g4_import_matrix,
+        check_oe_spike,
+        is_cohesive_module_by_filename,
+        is_py_cohesive_monolith,
+        is_ts_cohesive_monolith,
+        record_and_check_cumulative_growth,
+    )
+    from gravityguard_engine.diagnostics import (  # noqa: F401
+        _CREATE_NO_WINDOW,
+        _hidden_console_kwargs,
+        read_recent_diagnostics,
+        trigger_background_validation,
+    )
+    from gravityguard_engine.test_evidence import (  # noqa: F401
+        DEFAULT_EXEMPT_PATTERNS,
+        _TEST_FILE_PATTERNS,
+        check_t1_missing_test,
+        check_t2_observable_assertion,
+        check_t3_symbol_to_test_link,
+        evaluate_test_evidence,
+        is_exempt_from_test_evidence,
+        project_has_test_infrastructure,
+        resolve_candidate_test_file,
+    )
+    from gravityguard_engine.state_lock import (  # noqa: F401
+        StateLock,
+        StateLockTimeout,
+    )
+    from gravityguard_engine.governance import (  # noqa: F401
+        clear_doc_obligations,
+        clear_governance_state,
+        clear_test_evidence_state,
+        get_governance_file_path,
+        get_session_stop_retries,
+        get_test_evidence_file_path,
+        get_unresolved_doc_obligations,
+        get_unresolved_test_evidence,
+        governance_transaction,
+        increment_session_stop_retries,
+        load_governance_state,
+        load_test_evidence_state,
+        reconcile_obligations_on_disk,
+        record_pending_doc_obligation,
+        record_pending_test_evidence,
+        reset_session_stop_retries,
+        resolve_pending_doc_obligations,
+        resolve_pending_test_evidence,
+        save_governance_state,
+        save_test_evidence_state,
+    )
+    from gravityguard_engine.dispatcher import (  # noqa: F401
+        run_cli,
+        validate_gravityguard,
+    )
+    from gravityguard_engine.review_policy import (  # noqa: F401
+        DEFAULT_REVIEW_EXEMPT_PATTERNS,
+        is_review_enabled,
+        is_review_exempt_file,
+        should_require_review,
+    )
+    from gravityguard_engine.review_governance import (  # noqa: F401
+        evaluate_review_obligations,
+        fingerprint_from_hashes,
+        get_unresolved_review_obligations,
+        new_review_id,
+        record_final_diff_guard,
+        record_review_obligation,
+        scan_git_governed_changes,
+    )
+
+except BaseException:  # ImportError/SyntaxError in any engine module must not fail silently
+    import traceback
+    _log_fatal(traceback.format_exc())
+    if __name__ != "__main__":
+        raise
+    import json
+    print("[GravityGuard] engine failed to load; see gravityguard_errors.log", file=sys.stderr)
+    print(json.dumps({"decision": "continue" if "--stop" in sys.argv else "deny",
+                      "reason": "[GUARD_UNAVAILABLE]: Engine failed to load"}))
+    sys.exit(0)
 
 # Compatibility alias for private function
 _harden_streams_to_utf8 = harden_streams_to_utf8
@@ -135,4 +166,9 @@ _harden_streams_to_utf8 = harden_streams_to_utf8
 _harden_streams_to_utf8()
 
 if __name__ == "__main__":
-    run_cli()
+    try:
+        run_cli()
+    except Exception:
+        import traceback
+        _log_fatal(traceback.format_exc())
+        raise

@@ -54,7 +54,7 @@ Kullanıcı yeni bir projeye başlandığını belirttiğinde (örneğin: *"Yeni
 
 ## 📂 Varsayılan Proje Konumu ve Kurallar
 
-- Açık kaynak projelerin varsayılan dizini: `C:\Users\Halil Emre\Desktop\GitHub\Public\<ProjeAdı>\`
+- Açık kaynak projelerin varsayılan dizini: `~/Desktop/GitHub/Public/<ProjeAdı>/`
 - Core Docs'a ek olarak teknolojiye uygun temiz bir **`.gitignore`** dosyası da eş zamanlı eklenmelidir.
 
 ---

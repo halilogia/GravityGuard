@@ -803,10 +803,29 @@ def validate_gravityguard() -> None:
     sys.exit(0)
 
 
+def _log_cli_error(tb_text: str) -> None:
+    """Persist a crash traceback to the global and project-local error logs (best effort)."""
+    from datetime import datetime
+    event = next((a for a in sys.argv[1:] if a.startswith("--")), "unknown")
+    entry = f"[{datetime.now().isoformat()}] hook_event={event} argv={sys.argv!r}\n{tb_text}\n"
+    for path in (
+        os.path.expanduser("~/.gemini/config/plugins/gravityguard/logs/gravityguard_errors.log"),
+        os.path.join(".gravityguard", "runtime", "gravityguard_errors.log"),
+    ):
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(entry)
+        except Exception:
+            pass
+
+
 def run_cli() -> None:
     try:
         validate_gravityguard()
     except Exception:
+        import traceback
+        _log_cli_error(traceback.format_exc())
         # Native hosts must receive an explicit result even when persistence or
         # another subsystem fails. Do not echo payloads or exception contents.
         print("[GravityGuard] validation failed; operation was not validated", file=sys.stderr)

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Resilience & Hook Error Logging
+- **`engine/gravity-validator.py`**: Wrapped top-level engine imports in an outer `try/except BaseException` block. Any import or syntax failure in engine modules is caught without silently failing, logs full traceback with timestamp, hook event, and argv to `~/.gemini/config/plugins/gravityguard/logs/gravityguard_errors.log` and `.gravityguard/runtime/gravityguard_errors.log`, and outputs a structured `[GUARD_UNAVAILABLE]` fallback JSON (`continue` on `--stop`, `deny` on PreToolUse).
+- **`engine/gravityguard_engine/dispatcher.py`**: `run_cli()` now formats and logs any unhandled exceptions to the dual error log destinations via `_log_cli_error` before emitting structured fallback JSON.
+
+
 ### Auto-Architecture Report (`docs:arch`)
 - **`tools/generate_architecture.py`** (stdlib only): scans `engine/`, `src/`, `plugin/`, `tests/`; writes `ARCHITECTURE_AUTO_GENERATED.md` (version, date, file/LOC/test metrics, Tier 1 / Tier 4 / governance / UI layer matrix, Mermaid topology, tree). `--output <path>`; `--check` exits 1 with a diff when the file is stale (date line ignored).
 - **`package.json`**: `docs:arch`, `docs:arch:check`. Tests: `engine/tests/test_generate_architecture.py`.

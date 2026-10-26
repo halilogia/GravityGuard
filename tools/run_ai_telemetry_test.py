@@ -250,7 +250,7 @@ def main():
     print("="*50)
 
     # Save report
-    out_file = Path(r"C:\Users\Halil Emre\.gemini\antigravity\scratch\benchmark_report.json")
+    out_file = Path.home() / ".gemini" / "antigravity" / "scratch" / "benchmark_report.json"
     out_file.write_text(json.dumps(telemetry, indent=2), encoding="utf-8")
     print(f"Detailed JSON report saved to: {out_file}")
 

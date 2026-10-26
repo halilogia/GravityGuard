@@ -6,4 +6,4 @@ Bu repo (GravityGuard) anayasal yapay zeka denetçisi ve bağlam koruma platform
 2. **Cerrahi Düzenleme:** Dosyaları baştan sona ezmek yasaktır. Yalnızca hedeflenen blokları cerrahi diff ile güncelle.
 3. **Tek Akışlı Uygulayıcı:** Tek bir görev için birden fazla alt ajan açarak token kotasını tüketme; doğrudan ve sıralı ilerle.
 4. **Test ve Kanıt:** Yapılan her değişiklikten sonra `npm test` çalıştır ve testlerin geçtiğini doğrula.
-5. **Global Anayasa:** [C:\Users\Halil Emre\AGENTS.md](file:///C:/Users/Halil%20Emre/AGENTS.md) ilkeleri geçerlidir.
+5. **Global Anayasa:** `~/AGENTS.md` ilkeleri geçerlidir.
