@@ -248,6 +248,32 @@ def check_g0_secret_leak(added_text: str) -> Tuple[bool, str, Optional[str]]:
     return False, "", warn_reason
 
 
+# Warn-only code patterns drawn from agent-skill security scanners (AST/tool-misuse classes) and hardening checklists.
+# They never block: each one has legitimate uses, so the writer is asked to justify or fix it.
+_STR_BUILD = r"(?:f[\"']|[\"'][^\"'\n]*[\"']\s*(?:%|\+|\.format\b))"
+_UNSAFE_PATTERNS = (
+    (re.compile(r"\bverify\s*=\s*False\b|\brejectUnauthorized\s*:\s*false\b|NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*[\"']?0|InsecureSkipVerify\s*:\s*true"),
+     "TLS sertifika doğrulaması kapatılmış"),
+    (re.compile(r"\bshell\s*=\s*True\b"), "subprocess shell=True (komut enjeksiyonu riski)"),
+    (re.compile(r"\bos\.(?:system|popen)\s*\(\s*" + _STR_BUILD), "os.system/popen'a dinamik oluşturulmuş komut metni"),
+    (re.compile(r"\b(?:eval|exec)\s*\(\s*(?:base64\.|[\w.]*b64decode|atob\b|requests\.|urlopen\b|input\s*\()"), "eval/exec'e kodlanmış, ağdan veya kullanıcıdan gelen girdi"),
+    (re.compile(r"\.\s*(?:execute|executemany)\s*\(\s*" + _STR_BUILD), "SQL sorgusu birleştirme/f-string ile kuruluyor (parametreli sorgu kullanın)"),
+    (re.compile(r"\.innerHTML\s*\+?=(?!=)"), "innerHTML ataması (XSS riski)"),
+    (re.compile(r"Access-Control-Allow-Origin[\"']?\s*[:,=]\s*[\"']\*[\"']", re.IGNORECASE), "CORS joker (*) origin"),
+    (re.compile(r"\bpickle\.loads?\s*\(|\byaml\.load\s*\((?![^)\n]*SafeLoader)"), "güvensiz deserialization (pickle / yaml.load)"),
+    (re.compile(r"\bhashlib\.(?:md5|sha1)\s*\([^\n]*(?:password|passwd|pwd)", re.IGNORECASE), "parola için zayıf özet algoritması (MD5/SHA1)"),
+)
+
+
+def check_unsafe_code_patterns(added_text: str) -> List[str]:
+    """Labels of risky constructs in newly added code (de-duplicated, in declaration order)."""
+    found: List[str] = []
+    for pattern, label in _UNSAFE_PATTERNS:
+        if pattern.search(added_text) and label not in found:
+            found.append(label)
+    return found
+
+
 def check_g1_silent_exception(
     added_lines: List[str],
     added_text: str,

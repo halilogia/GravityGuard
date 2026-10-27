@@ -63,6 +63,7 @@ from .security_rules import (
     check_g0_secret_leak,
     check_g1_silent_exception,
     check_g2_test_integrity,
+    check_unsafe_code_patterns,
     is_protected_env_file,
 )
 from .test_evidence import (
@@ -179,6 +180,14 @@ def validate_gravityguard() -> None:
     if not isinstance(payload, dict):
         print(json.dumps({"decision": "deny", "reason": "[TOOL_SCHEMA_UNSUPPORTED]: Expected a JSON object"}))
         sys.exit(0)
+
+    # Minimal, non-sensitive call identity for crash telemetry (never the arguments or file contents).
+    _call = payload.get("toolCall")
+    _CRASH_CONTEXT.update(
+        stop=bool(payload.get("terminationReason") or "--stop" in sys.argv),
+        tool=str(_call.get("name", "")) if isinstance(_call, dict) else "",
+        conversation_id=str(payload.get("conversationId", "default")),
+    )
 
     # ========================================================================
     # 0. Lifecycle Hook Check: Stop / PostInvocation or CLI --stop flag
@@ -642,6 +651,20 @@ def validate_gravityguard() -> None:
             all_warnings.append(("G3_COMPILER_BYPASS", warn_msg))
 
     # ========================================================================
+    # SEC_UNSAFE_PATTERN — risky constructs in new code: TLS off, shell=True, SQL string-building, innerHTML, pickle (WARN ONLY)
+    # ========================================================================
+    _lower_target = target_file.replace("\\", "/").lower()
+    if not _lower_target.endswith((".md", ".txt", ".rst")) and "/tests/" not in _lower_target and not _lower_target.rsplit("/", 1)[-1].startswith("test_"):
+        unsafe_hits = check_unsafe_code_patterns(added_text)
+        if unsafe_hits:
+            unsafe_msg = f"Yeni kodda riskli yapı tespit edildi: {'; '.join(unsafe_hits)}. Gerekçesiz bırakmayın veya güvenli alternatifi kullanın."
+            if is_rule_shadow("SEC_UNSAFE_PATTERN", cfg):
+                _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {unsafe_msg}", rule_id="SEC_UNSAFE_PATTERN")
+            else:
+                _log("WARNING", target_file, unsafe_msg, rule_id="SEC_UNSAFE_PATTERN")
+                all_warnings.append(("SEC_UNSAFE_PATTERN", unsafe_msg))
+
+    # ========================================================================
     # GUARD 4: G4 — IMPORT MATRIX (BLOCK)
     # ========================================================================
     g4_violated, g4_reason = check_g4_import_matrix(target_file, added_text)
@@ -826,11 +849,15 @@ def validate_gravityguard() -> None:
     sys.exit(0)
 
 
+_CRASH_CONTEXT: dict = {}
+
+
 def _log_cli_error(tb_text: str) -> None:
     """Persist a crash traceback to the global and project-local error logs (best effort)."""
     from datetime import datetime
-    event = next((a for a in sys.argv[1:] if a.startswith("--")), "unknown")
-    entry = f"[{datetime.now().isoformat()}] hook_event={event} argv={sys.argv!r}\n{tb_text}\n"
+    event = next((a for a in sys.argv[1:] if a.startswith("--")), "stop" if _CRASH_CONTEXT.get("stop") else "pre-tool" if _CRASH_CONTEXT else "unknown")
+    who = f" tool={_CRASH_CONTEXT.get('tool', '')!r} conversation={_CRASH_CONTEXT.get('conversation_id', '')!r}" if _CRASH_CONTEXT else ""
+    entry = f"[{datetime.now().isoformat()}] hook_event={event}{who} argv={sys.argv!r}\n{tb_text}\n"
     for path in (
         os.path.expanduser("~/.gemini/config/plugins/gravityguard/logs/gravityguard_errors.log"),
         os.path.join(".gravityguard", "runtime", "gravityguard_errors.log"),
@@ -843,12 +870,31 @@ def _log_cli_error(tb_text: str) -> None:
             pass
 
 
+def _audit_guard_unavailable(exc: BaseException) -> None:
+    """Record the fail-closed denial in the permanent audit stream so engine outages are not blind spots in telemetry.
+
+    Only the exception type/message and the tool name are stored (no payload, arguments or file contents).
+    """
+    try:
+        log_event(
+            "stop" if _CRASH_CONTEXT.get("stop") else (_CRASH_CONTEXT.get("tool") or "unknown"),
+            "BLOCKED",
+            "engine",
+            f"[GUARD_UNAVAILABLE]: {type(exc).__name__}: {str(exc)[:200]}",
+            rule_id="GUARD_UNAVAILABLE",
+            conversation_id=_CRASH_CONTEXT.get("conversation_id") or None,
+        )
+    except Exception as audit_err:  # telemetry must never turn an outage into a second failure
+        sys.stderr.write(f"[GravityGuard] could not audit GUARD_UNAVAILABLE: {type(audit_err).__name__}\n")
+
+
 def run_cli() -> None:
     try:
         validate_gravityguard()
     except Exception:
         import traceback
         _log_cli_error(traceback.format_exc())
+        _audit_guard_unavailable(sys.exc_info()[1])
         # Native hosts must receive an explicit result even when persistence or
         # another subsystem fails. Do not echo payloads or exception contents.
         print("[GravityGuard] validation failed; operation was not validated", file=sys.stderr)
