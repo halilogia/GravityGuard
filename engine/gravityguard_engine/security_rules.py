@@ -111,6 +111,18 @@ _PEM_BODY_RE = re.compile(
 )
 
 
+
+_VENDOR_TOKEN_PATTERNS = [
+    (re.compile(r"\bsk_live_[0-9a-zA-Z]{24,}\b"), "Stripe Canlı Gizli Anahtarı (sk_live_...)"),
+    (re.compile(r"\brk_live_[0-9a-zA-Z]{24,}\b"), "Stripe Kısıtlı Anahtarı (rk_live_...)"),
+    (re.compile(r"\bglpat-[0-9a-zA-Z\-_]{20,}\b"), "GitLab Kişisel Erişim Jetonu (glpat-...)"),
+    (re.compile(r"\bnpm_[0-9a-zA-Z]{36}\b"), "npm Erişim Jetonu (npm_...)"),
+    (re.compile(r"\bhf_[a-zA-Z0-9]{34,}\b"), "Hugging Face Erişim Jetonu (hf_...)"),
+    (re.compile(r"\bSG\.[a-zA-Z0-9_\-]{22}\.[a-zA-Z0-9_\-]{43}\b"), "SendGrid API Anahtarı (SG....)"),
+    (re.compile(r"https://hooks\.slack\.com/services/T[a-zA-Z0-9_]+/B[a-zA-Z0-9_]+/[a-zA-Z0-9_]+"), "Slack Webhook URL"),
+    (re.compile(r"https://discord(?:app)?\.com/api/webhooks/\d+/[a-zA-Z0-9_\-]+"), "Discord Webhook URL"),
+]
+
 def is_elided_pem_fixture(added_text: str, start: int, span: int = 400) -> bool:
     """Determine if a PEM key block is a test/doc placeholder rather than a real key."""
     window = added_text[start:start + span]
@@ -137,7 +149,7 @@ def check_g0_secret_leak(added_text: str) -> Tuple[bool, str, Optional[str]]:
 
     # 1. HIGH-CONFIDENCE BLOCK RULES
     # A) Private Keys (PEM / OpenSSH)
-    pk_match = re.search(r"-----BEGIN (?:RSA |EC |OPENSSH |PGP |DSA )?PRIVATE KEY-----", added_text)
+    pk_match = re.search(r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----", added_text)
     if pk_match and not is_elided_pem_fixture(added_text, pk_match.start()):
         return True, "Özel anahtar (Private Key) başlığı tespit edildi. Private key'ler asla depoya commit edilemez!", None
 
@@ -199,8 +211,25 @@ def check_g0_secret_leak(added_text: str) -> Tuple[bool, str, Optional[str]]:
         if not is_placeholder(raw_token):
             return True, f"AWS Access Key ID tespit edildi: {redact_token(raw_token)}. Ortam değişkeni (AWS_ACCESS_KEY_ID) veya IAM role kullanın.", None
 
+    # H) Other vendor tokens with a fixed, distinctive prefix/shape
+    for vendor_re, vendor_name in _VENDOR_TOKEN_PATTERNS:
+        vendor_match = vendor_re.search(added_text)
+        if vendor_match and not is_placeholder(vendor_match.group(0)):
+            return True, f"{vendor_name} tespit edildi: {redact_token(vendor_match.group(0))}. Ortam değişkeni veya secret manager kullanın.", None
+
     # 2. MEDIUM-CONFIDENCE WARNING RULES (WARN ONLY, Never Blocks)
     warn_reason: Optional[str] = None
+
+    # JWT (header.payload.signature, both JSON parts base64url) and hard-coded credential assignments
+    jwt_match = re.search(r"\beyJ[A-Za-z0-9_\-]{8,}\.eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}", added_text)
+    if jwt_match and not is_placeholder(jwt_match.group(0)):
+        warn_reason = f"JWT belirteci tespit edildi ({redact_token(jwt_match.group(0))}). Sabit token yerine oturum yönetimi kullanın."
+    assign_match = re.search(
+        r"(?i)\w*(?:password|passwd|pwd|secret|api_?key|access_?token|auth_?token|client_?secret)\w*['\"]?\s*[:=]\s*['\"]([^'\"\s]{12,})['\"]",
+        added_text,
+    )
+    if assign_match and not is_placeholder(assign_match.group(1)) and not re.match(r"[\w.]+\(|\$\{|%\(|process\.env|os\.environ", assign_match.group(1)):
+        warn_reason = "Kodda sabit yazılmış parola/gizli anahtar ataması şüphesi tespit edildi. Ortam değişkeni veya secret manager kullanın."
 
     # A) Generic Bearer Token in Added Code
     bearer_match = re.search(r"['\"]?Authorization['\"]?\s*[:=]\s*['\"]Bearer\s+([a-zA-Z0-9_\-\.]{30,})['\"]", added_text, re.IGNORECASE)

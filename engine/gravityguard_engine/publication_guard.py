@@ -2,9 +2,15 @@
 import subprocess
 import re
 from pathlib import Path
-from .security_rules import check_g0_secret_leak
+from .security_rules import check_g0_secret_leak, is_protected_env_file
 
 MAX_SCAN_BYTES = 4 * 1024 * 1024
+_PRIVATE_KEY_FILE = re.compile(r"(?:^|[/\\])(?:id_(?:rsa|dsa|ecdsa|ed25519)|\.aws[/\\]credentials)$", re.I)
+
+
+def _is_protected_path(path: str) -> bool:
+    """Live .env files and private key / cloud credential files must never be published, whatever their content."""
+    return is_protected_env_file(path) or bool(_PRIVATE_KEY_FILE.search(path))
 
 
 def scan_git_secrets(root: Path, staged_only: bool = False, require_repo: bool = False, base: str = "") -> list:
@@ -29,6 +35,11 @@ def scan_git_secrets(root: Path, staged_only: bool = False, require_repo: bool =
             blocked, reason, _ = check_g0_secret_leak(added)
             if blocked:
                 findings.append(f"[G0_SECRET_LEAK]: Git added-text scan: {reason}")
+            names = git("diff", *extra, "--name-only", "-z", "--")
+            if names.returncode:
+                return ["[SECURITY_SCAN_UNAVAILABLE]: Could not list changed files"]
+            if any(raw and _is_protected_path(raw.decode("utf-8", "surrogateescape")) for raw in names.stdout.split(b"\0")):
+                findings.append("[G0_ENV_PROTECTION]: Git change set includes a protected credential file (.env / private key)")
         if not staged_only and not base:
             proc = git("ls-files", "--others", "--exclude-standard", "-z")
             if proc.returncode:
@@ -37,6 +48,9 @@ def scan_git_secrets(root: Path, staged_only: bool = False, require_repo: bool =
                 if not raw:
                     continue
                 file = root / raw.decode("utf-8", "surrogateescape")
+                if _is_protected_path(raw.decode("utf-8", "surrogateescape")):
+                    findings.append("[G0_ENV_PROTECTION]: Untracked file is a protected credential file (.env / private key)")
+                    continue
                 if file.is_symlink() or not file.is_file():
                     continue
                 if file.stat().st_size > MAX_SCAN_BYTES:
