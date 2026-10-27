@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (T0 Dynamic Test Execution & LCOV Coverage Gate)
+- **`engine/gravityguard_engine/test_evidence.py`**: Stop kancasında çalışan, **opt-in** (`.gravityguard.json` → `testEvidence.dynamicExecution: true`; varsayılan kapalı, çünkü projenin kendi test komutunu çalıştırır) T0 kapısı:
+  - `parse_lcov` / `evaluate_lcov_coverage`: `SF`, `DA`, `LF`, `LH`, `BRF`, `BRH` ayrıştırılır (özet satırları yoksa `DA`/`BRDA`'dan türetilir); değişen dosyaların satır kapsamı `testEvidence.minCoveragePercent` (varsayılan %80) altındaysa `T0_COVERAGE_BELOW_THRESHOLD`. Dal kapsamı hesaplanır ve raporlanır, kapıyı tetiklemez. Yalnızca o test koşumunun ürettiği (taze) rapor değerlendirilir.
+  - `detect_test_runner` / `run_dynamic_tests`: `package.json` (`npm test` / vitest), `pytest.ini`·`conftest.py`·`setup.py` (pytest), `Cargo.toml` (`cargo test`) otomatik tespit edilir (`testEvidence.testCommand` ile geçersiz kılınabilir); shell'siz subprocess, zaman aşımında süreç ağacı sonlandırılır (`timeoutSec`, varsayılan 30). Çıkış kodu ≠ 0 → `T0_TEST_RUN_FAILED`, 0 test → `T0_NO_TESTS_EXECUTED`.
+- **`dispatcher.py` / `gravity-validator.py`**: T0 kapısı Stop kancasına bağlandı (bulgular `continue` nedeni olur), API validator'dan yeniden dışa aktarılır.
+- **`engine/tests/test_t0_lcov.py`**: ayrıştırıcı, kapsam, runner tespiti, çıktı sayacı, gerçek subprocess koşumu ve gerçek Stop kancası entegrasyon testleri.
+
 ### Resilience & Hook Error Logging
 - **`engine/gravity-validator.py`**: Wrapped top-level engine imports in an outer `try/except BaseException` block. Any import or syntax failure in engine modules is caught without silently failing, logs full traceback with timestamp, hook event, and argv to `~/.gemini/config/plugins/gravityguard/logs/gravityguard_errors.log` and `.gravityguard/runtime/gravityguard_errors.log`, and outputs a structured `[GUARD_UNAVAILABLE]` fallback JSON (`continue` on `--stop`, `deny` on PreToolUse).
 - **`engine/gravityguard_engine/dispatcher.py`**: `run_cli()` now formats and logs any unhandled exceptions to the dual error log destinations via `_log_cli_error` before emitting structured fallback JSON.

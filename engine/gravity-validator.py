@@ -97,10 +97,15 @@ try:
         check_t1_missing_test,
         check_t2_observable_assertion,
         check_t3_symbol_to_test_link,
+        detect_test_runner,
+        evaluate_lcov_coverage,
+        evaluate_t0_gate,
         evaluate_test_evidence,
         is_exempt_from_test_evidence,
+        parse_lcov,
         project_has_test_infrastructure,
         resolve_candidate_test_file,
+        run_dynamic_tests,
     )
     from gravityguard_engine.state_lock import (  # noqa: F401
         StateLock,

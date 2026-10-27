@@ -66,6 +66,7 @@ from .security_rules import (
     is_protected_env_file,
 )
 from .test_evidence import (
+    evaluate_t0_gate,
     evaluate_test_evidence,
     resolve_candidate_test_file,
 )
@@ -266,6 +267,12 @@ def validate_gravityguard() -> None:
                 log_event("stop", "WARNING", "workspace", t1_warn, rule_id="T1_FINAL_UNRESOLVED", conversation_id=conversation_id)
                 warn_reasons.append(t1_warn)
 
+            # T0: dynamic test run + LCOV gate (opt-in via testEvidence.dynamicExecution)
+            t0_findings = evaluate_t0_gate(str(project_root), cfg)
+            for t0_rule, t0_msg in t0_findings:
+                log_event("stop", "WARNING", "workspace", t0_msg, rule_id=t0_rule, conversation_id=conversation_id)
+                warn_reasons.append(t0_msg)
+
             if unresolved_docs:
                 changed = ", ".join(f"'{_project_relative(p, project_root)}'" for p in unresolved_docs)
                 needed = sorted({d for info in unresolved_docs.values() for d in info.get("required_docs", ["CHANGELOG.md"])})
@@ -306,7 +313,7 @@ def validate_gravityguard() -> None:
                 increment_session_stop_retries(project_root, conversation_id)
                 status_summary = (
                     f"Aşama Durumu: [Kod: ✓] "
-                    f"[Test: {'✗' if unresolved_tests else '✓'}] "
+                    f"[Test: {'✗' if unresolved_tests or t0_findings else '✓'}] "
                     f"[Doküman: {'✗' if unresolved_docs else '✓'}] "
                     f"[İnceleme: {'✗' if unresolved_reviews else '✓'}]"
                 )
