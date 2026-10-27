@@ -12,6 +12,7 @@ resulting receipt live in ``review_governance``; the two are deliberately split
 so the trigger can be tested without touching state.
 """
 import fnmatch
+import re
 import time
 import uuid
 from pathlib import Path
@@ -224,3 +225,124 @@ def check_review_risk_triggers(
     # 5. Low risk -> Skip review
     return False, "Düşük riskli yerel değişiklik (Review atlandı)"
 
+
+
+# ---------------------------------------------------------------------------
+# Zero-context review: risk classification (pure, no I/O)
+# ---------------------------------------------------------------------------
+RISK_LOW = "LOW_RISK"
+RISK_MEDIUM = "MEDIUM_RISK"
+RISK_HIGH = "HIGH_RISK"
+RISK_ORDER = {RISK_LOW: 0, RISK_MEDIUM: 1, RISK_HIGH: 2}
+
+DEFAULT_MAX_FIX_TURNS = 2
+DEFAULT_HIGH_LINES = 150
+DEFAULT_MEDIUM_LINES = 30
+
+_DOC_SUFFIXES = (".md", ".mdx", ".txt", ".rst")
+_LOCKFILE_NAMES = (
+    "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "cargo.lock",
+    "poetry.lock", "go.sum", "gemfile.lock", "composer.lock",
+)
+_PUBLIC_API_PATTERNS = (
+    "api/**", "**/api/**", "openapi*", "**/openapi*",
+    "*.proto", "**/*.proto", "*.d.ts", "**/*.d.ts", "index.ts", "**/index.ts",
+)
+_COMMENT_PREFIXES = ("#", "//", "/*", "*", "*/", "--", "<!--")
+_NEW_FUNCTION_RE = re.compile(
+    r"^\s*(?:(?:async\s+)?def|function|class|fn|func)\s+\w+"
+    r"|^\s*export\s+(?:default\s+)?(?:async\s+)?(?:function|class)\s+\w+"
+    r"|^\s*(?:const|let|var)\s+\w+\s*=\s*(?:async\s*)?\([^)]*\)\s*=>"
+)
+
+
+def is_test_path(rel_path: str) -> bool:
+    parts = rel_path.replace("\\", "/").lower().split("/")
+    name = parts[-1]
+    return (
+        any(part in ("tests", "test", "__tests__") for part in parts[:-1])
+        or name.startswith("test_")
+        or name.endswith(("_test.py", ".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx"))
+    )
+
+
+def is_comment_line(line: str) -> bool:
+    stripped = line.strip()
+    return not stripped or stripped.startswith(_COMMENT_PREFIXES)
+
+
+def is_review_governance_enabled(cfg: Optional[dict]) -> bool:
+    """Zero-context review gate is opt-in: ``reviewGovernance.enabled`` in .gravityguard.json."""
+    section = cfg.get("reviewGovernance") if isinstance(cfg, dict) else None
+    return isinstance(section, dict) and bool(section.get("enabled", False))
+
+
+def get_review_governance_config(cfg: Optional[dict]) -> dict:
+    """Normalized ``reviewGovernance`` settings with safe defaults."""
+    section = cfg.get("reviewGovernance") if isinstance(cfg, dict) else None
+    section = section if isinstance(section, dict) else {}
+
+    def _int(key: str, default: int, minimum: int = 0) -> int:
+        value = section.get(key, default)
+        return value if isinstance(value, int) and not isinstance(value, bool) and value >= minimum else default
+
+    min_risk = section.get("minRisk", RISK_HIGH)
+    if min_risk not in RISK_ORDER:
+        min_risk = RISK_HIGH
+    return {
+        "enabled": bool(section.get("enabled", False)),
+        "minRisk": min_risk,
+        "maxFixTurns": _int("maxFixTurns", DEFAULT_MAX_FIX_TURNS),
+        "highLines": _int("highLines", DEFAULT_HIGH_LINES, 1),
+        "mediumLines": _int("mediumLines", DEFAULT_MEDIUM_LINES, 1),
+        "stagedOnly": bool(section.get("stagedOnly", False)),
+    }
+
+
+def classify_file_risk(
+    rel_path: str,
+    added_lines: List[str],
+    removed_lines: List[str],
+    deleted: bool = False,
+    high_lines: int = DEFAULT_HIGH_LINES,
+    medium_lines: int = DEFAULT_MEDIUM_LINES,
+) -> Tuple[str, str]:
+    """Risk level and reason for one changed file.
+
+    HIGH: security/engine/public-API paths, deleted tests, or a large code change.
+    MEDIUM: ordinary production change over ``medium_lines``, new functions, manifests.
+    LOW: docs, lockfiles, comment/whitespace-only edits, small code edits.
+    """
+    rel = rel_path.replace("\\", "/")
+    name = rel.lower().split("/")[-1]
+    is_test = is_test_path(rel)
+
+    if name in _LOCKFILE_NAMES:
+        return RISK_LOW, "kilit dosyası"
+    if name.endswith(_DOC_SUFFIXES) and name not in DEPENDENCY_MANIFEST_PATTERNS:
+        return RISK_LOW, "dokümantasyon"
+    if deleted and is_test:
+        return RISK_HIGH, "test dosyası silindi"
+
+    changed = len(added_lines) + len(removed_lines)
+    if not any(not is_comment_line(line) for line in (*added_lines, *removed_lines)):
+        return RISK_LOW, "yalnızca yorum/boşluk değişikliği"
+
+    if not is_test:
+        if _matches_any(rel, list(SECURITY_SENSITIVE_PATTERNS)):
+            return RISK_HIGH, "güvenlik/motor çekirdeği yolu"
+        if _matches_any(rel, list(_PUBLIC_API_PATTERNS)):
+            return RISK_HIGH, "public API kontratı"
+    if changed > high_lines and name.endswith(_CODE_SUFFIXES):
+        return RISK_HIGH, f"{changed} satırlık kod değişimi (> {high_lines})"
+    if changed > medium_lines:
+        return RISK_MEDIUM, f"{changed} satır değişti (> {medium_lines})"
+    if any(_NEW_FUNCTION_RE.match(line) for line in added_lines):
+        return RISK_MEDIUM, "yeni fonksiyon/sınıf"
+    if name in DEPENDENCY_MANIFEST_PATTERNS:
+        return RISK_MEDIUM, "bağımlılık manifestosu"
+    return RISK_LOW, "küçük değişiklik"
+
+
+def risk_meets_threshold(risk: str, minimum: str) -> bool:
+    return RISK_ORDER.get(risk, 0) >= RISK_ORDER.get(minimum, RISK_ORDER[RISK_HIGH])

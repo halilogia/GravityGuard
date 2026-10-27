@@ -71,7 +71,9 @@ from .test_evidence import (
     resolve_candidate_test_file,
 )
 from .review_governance import (
+    detect_writer_agent,
     evaluate_review_obligations,
+    evaluate_zero_context_gate,
     get_unresolved_review_obligations,
     record_final_diff_guard,
     record_review_obligation,
@@ -308,6 +310,20 @@ def validate_gravityguard() -> None:
                 )
                 log_event("stop", "WARNING", "workspace", review_warn, rule_id="REVIEW_OBLIGATION_UNRESOLVED", conversation_id=conversation_id)
                 warn_reasons.append(review_warn)
+
+            # Zero-context review gate (opt-in: reviewGovernance.enabled). Independent
+            # reviewer gets only the diff; findings are routed back to this writer.
+            try:
+                zc_gate = evaluate_zero_context_gate(project_root, cfg, conversation_id, detect_writer_agent(payload))
+            except (OSError, StateLockTimeout) as zc_err:
+                zc_gate = {"action": "error", "block": False}
+                log_event("stop", "WARNING", "workspace", f"Zero-context review gate error: {zc_err}", rule_id="ZC_REVIEW_ERROR", conversation_id=conversation_id)
+            if zc_gate["action"] in ("review_required", "fix_required"):
+                zc_warn = f"Bağımsız İnceleme Kapısı ({zc_gate['action']}): {zc_gate['message']}"
+                log_event("stop", "WARNING", "workspace", zc_warn, rule_id="ZC_REVIEW_" + zc_gate["action"].upper(), conversation_id=conversation_id)
+                warn_reasons.append(zc_warn)
+            elif zc_gate["action"] == "escalate":
+                log_event("stop", "WARNING", "workspace", zc_gate["message"], rule_id="ZC_REVIEW_ESCALATE", conversation_id=conversation_id)
 
             if warn_reasons:
                 increment_session_stop_retries(project_root, conversation_id)

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (Zero-Context Review Governance)
+- **`review_policy.py`**: saf risk sınıflandırıcı `classify_file_risk` (HIGH: güvenlik/`engine/**`/public API/silinen test/>150 satır kod; MEDIUM: >30 satır, yeni fonksiyon, bağımlılık manifestosu; LOW: markdown, kilit dosyası, yalnızca yorum, küçük değişiklik) ve `reviewGovernance` yapılandırması (`enabled`, `minRisk`, `maxFixTurns`=2, `highLines`, `mediumLines`, `stagedOnly`). **Opt-in**, varsayılan kapalı.
+- **`review_governance.py`**: `classify_change_risk(repo_root, staged_only)`; diff tabanlı `snapshot_hash` (dosya başına diff + base tree, staged/untracked görünümünden bağımsız); sohbet geçmişi ve yazar kimliği içermeyen `build_review_payload` (diff + Python için AST, diğer diller için hunk bağlamıyla değişen fonksiyon sınırları); `.gravityguard/review-registry.json` oturum kaydı (`session_id` ↔ ajan: antigravity/claude-code/codex/opencode); bulguların (`file`, `line`, `type`, `suggestion`) yazar ajana geri bildirim prompt'u olarak iletilmesi; anti-loop: aynı snapshot idempotent, yazar oturumu başına en fazla `maxFixTurns` otomatik düzeltme, sonra `escalate`.
+- **`dispatcher.py` / `gravity-validator.py`**: Stop kancasına `evaluate_zero_context_gate` bağlandı (`review_required` / `fix_required` → `continue`; `escalate` → engellemez, günlüğe yazılır); API validator'dan yeniden dışa aktarılır.
+
 ### Added (T0 Dynamic Test Execution & LCOV Coverage Gate)
 - **`engine/gravityguard_engine/test_evidence.py`**: Stop kancasında çalışan, **opt-in** (`.gravityguard.json` → `testEvidence.dynamicExecution: true`; varsayılan kapalı, çünkü projenin kendi test komutunu çalıştırır) T0 kapısı:
   - `parse_lcov` / `evaluate_lcov_coverage`: `SF`, `DA`, `LF`, `LH`, `BRF`, `BRH` ayrıştırılır (özet satırları yoksa `DA`/`BRDA`'dan türetilir); değişen dosyaların satır kapsamı `testEvidence.minCoveragePercent` (varsayılan %80) altındaysa `T0_COVERAGE_BELOW_THRESHOLD`. Dal kapsamı hesaplanır ve raporlanır, kapıyı tetiklemez. Yalnızca o test koşumunun ürettiği (taze) rapor değerlendirilir.
