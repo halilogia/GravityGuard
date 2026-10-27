@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Hardened (Shell Rules Wrapped Execution & Secret Readers)
+- **`shell_rules.py` & `shell_danger.py`**: `bash -c`, `sh -c`, `powershell -Command`, `cmd /c` gibi sarmalanmış komutların içine gizlenen tehlikeli kalıpların (`curl | sh`, `rm -rf /`, `iex (irm ...)`) özyinelemeli (recursive) tespiti ve engellenmesi; `_BASE_READERS` içine `findstr` eklenmesi ve `@.env` yönlendirmelerinin yakalanması; `test_shell_dangerous_commands.py` entegrasyon testleri.
+
 ### Added (Security Hardening from Skill Standards Review)
 - **`shell_rules.py`**: yeni `G0_DANGEROUS_COMMAND` denetimi — yüksek güvenli desenler: `curl|wget … | sh/python/node` ve süreç ikamesiyle uzak betik, `iex` ile uzak PowerShell, Base64 gizlenmiş PowerShell (`-enc`) ve `base64 -d | sh`, kök/ana dizini özyinelemeli silme (`rm -fr`, `--no-preserve-root`, `$HOME/*`), Windows sürücü kökü silme/biçimlendirme, ters kabuk (`/dev/tcp`, `nc -e`, `bash -i >&`), fork bomb, kökte `chmod 777`, ham disk yazma (`dd of=/dev/sdX`, `mkfs`). Günlük komutlar (`rm -rf node_modules`, `curl -o`, `chmod 755`) engellenmez. Yeni `G0_CREDENTIAL_PROTECTION`: `~/.ssh/id_*` (`.pub` hariç), `~/.aws/credentials`, `.kube/config`, `.docker/config.json`, `.gnupg` özel anahtarlarının kabuktan okunması reddedilir.
 - **`security_rules.py`**: satıcıya özgü jeton kuralları (Stripe `sk_live_`/`rk_live_`, GitLab `glpat-`, npm, Hugging Face, SendGrid, Slack/Discord webhook URL'leri); genişletilmiş özel anahtar başlığı (`ENCRYPTED/PKCS8/...` varyantları); yalnızca uyarı: JWT ve sabit yazılmış parola/gizli anahtar atamaları (`db_password = "..."`).

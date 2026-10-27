@@ -23,6 +23,10 @@ _DEVICE = re.compile(r"of=/dev/(?:sd[a-z]|nvme\d|hd[a-z]|disk\d)")
 _SUBSTITUTION = re.compile(r"\b(?:ba|z|da)?sh\s+(?:-c\s+)?[\"']?\$\(\s*(?:curl|wget)\b|<\(\s*(?:curl|wget)\b", re.IGNORECASE)
 _REVERSE_SHELL = re.compile(r"/dev/(?:tcp|udp)/|\bbash\s+-i\s*>&", re.IGNORECASE)
 _FORK_BOMB = re.compile(r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:")
+_WRAPPED_EXEC = re.compile(
+    r"\b(?:(?:ba|z|da|k|c)?sh|cmd|powershell|pwsh)(?:\.exe)?\s+(?:-[a-zA-Z]*c[a-zA-Z]*|/[ck])\s+[\"'](.*?)[\"']",
+    re.IGNORECASE | re.DOTALL,
+)
 
 Command = Tuple[str, List[str]]  # (lower-case command word, remaining tokens)
 
@@ -87,8 +91,18 @@ def _stage_reason(base: str, args: List[str]) -> str:
             if token in ("-e", "-enc", "-encodedcommand") and position + 1 < len(args) and _BASE64_BLOB.fullmatch(args[position + 1]):
                 return "Base64-obfuscated PowerShell command"
     elif base in _IEX:
-        if any(a.lower() in ("iwr", "irm") or re.search(r"downloadstring|net\.webclient|invoke-webrequest|invoke-restmethod", a, re.IGNORECASE) for a in args):
+        if any(a.lower().strip("()\"'") in ("iwr", "irm") or re.search(r"downloadstring|net\.webclient|invoke-webrequest|invoke-restmethod", a, re.IGNORECASE) for a in args):
             return "remote PowerShell content executed with Invoke-Expression"
+
+    # Wrapped inline execution (e.g. bash -c "...", powershell -Command "...", cmd /c "...")
+    if base in ("bash", "sh", "zsh", "ksh", "dash", "csh", "powershell", "pwsh", "cmd"):
+        for pos, arg in enumerate(args):
+            flag = arg.lower()
+            if flag in ("-c", "-command", "/c", "/k") and pos + 1 < len(args):
+                inner_cmd = " ".join(args[pos + 1:]).strip("\"'")
+                inner_reason = dangerous_command_reason(inner_cmd)
+                if inner_reason:
+                    return f"wrapped dangerous command ({inner_reason})"
     return ""
 
 
@@ -126,6 +140,12 @@ def dangerous_command_reason(command: str) -> str:
         return "reverse shell"
     if _FORK_BOMB.search(command):
         return "fork bomb"
+    wrapped_match = _WRAPPED_EXEC.search(command)
+    if wrapped_match:
+        inner = wrapped_match.group(1).strip()
+        inner_reason = dangerous_command_reason(inner)
+        if inner_reason:
+            return f"wrapped dangerous command ({inner_reason})"
     for segment in _CHAIN.split(command):
         stages = segment.split("|")
         reason = _pipeline_reason(stages)

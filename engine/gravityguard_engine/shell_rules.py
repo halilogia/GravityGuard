@@ -20,7 +20,7 @@ _CREDENTIAL = re.compile(
 # Verbs that print or copy a file's content (lower-case command words as `parse_command` returns them).
 _BASE_READERS = frozenset({
     "cat", "type", "less", "more", "head", "tail", "grep", "rg", "sed", "awk", "cp", "copy", "xxd", "base64", "source",
-    "get-content", "gc", "select-string", "sls", "copy-item", "cpi", "import-csv", ".",
+    "get-content", "gc", "select-string", "sls", "copy-item", "cpi", "import-csv", "findstr", ".",
 })
 # More verbs that print, copy or ship content; an input redirect (`tr a b < .env`) counts as a read too.
 _EXTRA_READERS = frozenset({
@@ -33,7 +33,7 @@ _GLOB_CHARS = frozenset("*?[")
 
 def _names_protected_file(token: str) -> str:
     """'env' or 'credential' when a command argument is (or can glob-expand to) a protected file, else ''."""
-    base = token.strip("\"'").replace("\\", "/").rsplit("/", 1)[-1]
+    base = token.strip("\"'").lstrip("@").replace("\\", "/").rsplit("/", 1)[-1]
     if _GLOB_CHARS & set(base):
         return "env" if fnmatch.fnmatchcase(".env", base) else ""
     if any(is_protected_env_file(match.group(0)) for match in _ENV.finditer(token)):
