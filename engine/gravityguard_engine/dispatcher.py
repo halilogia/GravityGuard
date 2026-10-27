@@ -30,6 +30,7 @@ from .audit import log_event
 from .state_lock import StateLockTimeout
 from .diagnostics import read_recent_diagnostics, trigger_background_validation
 from .diffing import get_diff_analysis, get_projected_and_old_content, ProjectionError
+from .engine_integrity import engine_source_defect, repair_reason, run_lkg
 from .policy_integrity import MANDATORY_RULES, check_policy_change, is_runtime_control_file
 from .shell_rules import check_shell_command
 from .publication_guard import scan_git_secrets
@@ -137,11 +138,16 @@ def _other_stop_roots(payload: dict, primary: Path) -> List[Path]:
     return roots
 
 
+# A conversation id becomes a directory name below the user's brain folder: only plain identifiers are accepted,
+# never separators or `..` (otherwise a crafted id would make the archiver rewrite an arbitrary `tasks.md`).
+_SAFE_CONVERSATION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
+
+
 def _perform_task_archiving(project_root: Path, conversation_id: str) -> None:
     try:
         from .task_archiver import archive_completed_tasks
         candidates = [project_root / "tasks.md", project_root / "task.md"]
-        if conversation_id and conversation_id != "default":
+        if conversation_id and conversation_id != "default" and _SAFE_CONVERSATION_ID.fullmatch(conversation_id):
             candidates.append(Path.home() / ".gemini" / "antigravity" / "brain" / conversation_id / "tasks.md")
         for t_path in candidates:
             if t_path.is_file():
@@ -167,6 +173,7 @@ def validate_gravityguard() -> None:
     start_time = time.perf_counter()
 
     raw_input = sys.stdin.read() if not sys.stdin.isatty() else ""
+    _CRASH_CONTEXT["raw"] = raw_input  # kept only so a crash can be re-validated by the last-known-good engine (never logged)
     if not raw_input.strip():
         print(json.dumps({"decision": "allow"}))
         sys.exit(0)
@@ -493,6 +500,12 @@ def validate_gravityguard() -> None:
     if policy_reason:
         _log("BLOCKED", target_file, policy_reason, rule_id="POLICY_INTEGRITY")
         print(json.dumps({"decision": "deny", "reason": f"[POLICY_INTEGRITY]: {policy_reason}"}))
+        sys.exit(0)
+    engine_defect = engine_source_defect(target_file, projected_content)
+    if engine_defect:
+        reason = f"'{target_file}' bu yazımdan sonra çalışmaz hâle gelir: {engine_defect}. Doğrulama motoru kendi kaynağında bozuk durumda bırakılamaz."
+        _log("BLOCKED", target_file, reason, rule_id="ENGINE_SELF_INTEGRITY")
+        print(json.dumps({"decision": "deny", "reason": f"🛑 [ENGINE_SELF_INTEGRITY]: {reason}"}))
         sys.exit(0)
     added_lines, added_text, added_line_numbers = get_diff_analysis(old_full_content, projected_content)
 
@@ -888,13 +901,50 @@ def _audit_guard_unavailable(exc: BaseException) -> None:
         sys.stderr.write(f"[GravityGuard] could not audit GUARD_UNAVAILABLE: {type(audit_err).__name__}\n")
 
 
+def _recover_from_crash() -> Optional[dict]:
+    """Keep the guard useful after an engine defect without failing open.
+
+    1. Re-validate the same payload with the last committed engine (full protection, so a half-edited working tree
+       cannot wedge the agent). 2. If that is unavailable too, allow only writes to engine source files so the
+       defect can be repaired (`engine_integrity.repair_reason`). Anything else stays denied by the caller.
+    """
+    raw = _CRASH_CONTEXT.get("raw") or ""
+    if not raw.strip():
+        return None
+    answer = run_lkg(raw, sys.argv)
+    if answer is not None:
+        return {**answer, "_recovery": "GUARD_FALLBACK_LKG"}
+    reason = repair_reason(raw)
+    return {"decision": "allow", "reason": reason, "_recovery": "GUARD_REPAIR_MODE"} if reason else None
+
+
+def _audit_recovery(recovery: str, exc: BaseException) -> None:
+    try:
+        log_event(
+            "stop" if _CRASH_CONTEXT.get("stop") else (_CRASH_CONTEXT.get("tool") or "unknown"),
+            "WARNING",
+            "engine",
+            f"[{recovery}]: engine defect {type(exc).__name__}: {str(exc)[:160]}",
+            rule_id=recovery,
+            conversation_id=_CRASH_CONTEXT.get("conversation_id") or None,
+        )
+    except Exception as audit_err:  # telemetry must never turn a recovery into a failure
+        sys.stderr.write(f"[GravityGuard] could not audit {recovery}: {type(audit_err).__name__}\n")
+
+
 def run_cli() -> None:
     try:
         validate_gravityguard()
-    except Exception:
+    except Exception as crash:
         import traceback
         _log_cli_error(traceback.format_exc())
-        _audit_guard_unavailable(sys.exc_info()[1])
+        recovered = _recover_from_crash()
+        if recovered is not None:
+            recovery = recovered.pop("_recovery")
+            _audit_recovery(recovery, crash)
+            print(json.dumps(recovered))
+            return
+        _audit_guard_unavailable(crash)
         # Native hosts must receive an explicit result even when persistence or
         # another subsystem fails. Do not echo payloads or exception contents.
         print("[GravityGuard] validation failed; operation was not validated", file=sys.stderr)

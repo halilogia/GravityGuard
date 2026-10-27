@@ -169,6 +169,21 @@ except BaseException:  # ImportError/SyntaxError in any engine module must not f
         raise
     import json
     print("[GravityGuard] engine failed to load; see gravityguard_errors.log", file=sys.stderr)
+    _recovered = None
+    try:
+        # Self-protection helpers are stdlib-only and live in a module the broken file does not import.
+        from gravityguard_engine import engine_integrity as _integrity
+        _raw = sys.stdin.read() if not sys.stdin.isatty() else ""
+        _recovered = _integrity.run_lkg(_raw, sys.argv)  # same payload, validated by the last committed engine
+        if _recovered is None:
+            _repair = _integrity.repair_reason(_raw)
+            _recovered = {"decision": "allow", "reason": _repair} if _repair else None
+    except BaseException:
+        import traceback
+        _log_fatal(traceback.format_exc())
+    if _recovered is not None:
+        print(json.dumps(_recovered))
+        sys.exit(0)
     print(json.dumps({"decision": "continue" if "--stop" in sys.argv else "deny",
                       "reason": "[GUARD_UNAVAILABLE]: Engine failed to load"}))
     sys.exit(0)

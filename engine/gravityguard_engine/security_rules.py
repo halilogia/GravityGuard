@@ -225,7 +225,9 @@ def check_g0_secret_leak(added_text: str) -> Tuple[bool, str, Optional[str]]:
     if jwt_match and not is_placeholder(jwt_match.group(0)):
         warn_reason = f"JWT belirteci tespit edildi ({redact_token(jwt_match.group(0))}). Sabit token yerine oturum yönetimi kullanın."
     assign_match = re.search(
-        r"(?i)\w*(?:password|passwd|pwd|secret|api_?key|access_?token|auth_?token|client_?secret)\w*['\"]?\s*[:=]\s*['\"]([^'\"\s]{12,})['\"]",
+        # Unanchored search already finds `password` inside `db_password`; unbounded `\w*` around the keyword was a ReDoS
+        # (cubic time on one long word), so only a short identifier tail is allowed.
+        r"(?i)(?:password|passwd|pwd|secret|api_?key|access_?token|auth_?token|client_?secret)\w{0,40}['\"]?\s*[:=]\s*['\"]([^'\"\s]{12,})['\"]",
         added_text,
     )
     if assign_match and not is_placeholder(assign_match.group(1)) and not re.match(r"[\w.]+\(|\$\{|%\(|process\.env|os\.environ", assign_match.group(1)):

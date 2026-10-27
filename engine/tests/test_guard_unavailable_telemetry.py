@@ -27,6 +27,7 @@ class GuardUnavailableTelemetry(unittest.TestCase):
             "GRAVITYGUARD_LOG_DIR": os.path.join(self.tmp, "audit"),
             "USERPROFILE": self.tmp,
             "HOME": self.tmp,
+            "GRAVITYGUARD_LKG_ACTIVE": "1",  # no last-known-good fallback: this suite checks the fail-closed path itself
         })
         self.env.start()
         dispatcher._CRASH_CONTEXT.clear()
