@@ -31,7 +31,7 @@ from gravityguard_engine.review_governance import (
 )
 from gravityguard_engine.review_policy import RISK_HIGH, RISK_LOW
 
-CFG = {"reviewGovernance": {"enabled": True, "maxFixTurns": 2}}
+CFG = {"reviewGovernance": {"enabled": True, "maxFixTurns": 2, "requireReviewer": True}}
 SESSION = "live-session-1"
 WRITER = "claude-code"
 FINDING = [{"file": "src/service.py", "line": 3, "type": "security", "suggestion": "Validate the input before use."}]

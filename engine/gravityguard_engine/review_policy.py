@@ -296,6 +296,9 @@ def get_review_governance_config(cfg: Optional[dict]) -> dict:
         "highLines": _int("highLines", DEFAULT_HIGH_LINES, 1),
         "mediumLines": _int("mediumLines", DEFAULT_MEDIUM_LINES, 1),
         "stagedOnly": bool(section.get("stagedOnly", False)),
+        # False (default): no reviewer result yet never locks the user out (status local_passed_ai_unavailable).
+        # True: orchestrated mode (e.g. AgentObservatory) - Stop stays blocked until a reviewer result arrives.
+        "requireReviewer": bool(section.get("requireReviewer", False)),
     }
 
 

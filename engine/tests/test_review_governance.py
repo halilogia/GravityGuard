@@ -340,7 +340,7 @@ from gravityguard_engine.review_policy import (
     risk_meets_threshold,
 )
 
-ZC_CFG = {"reviewGovernance": {"enabled": True}}
+ZC_CFG = {"reviewGovernance": {"enabled": True, "requireReviewer": True}}
 PY_BASE = "def alpha(x):\n    return x + 1\n\n\ndef beta(y):\n    return y * 2\n"
 
 
@@ -758,7 +758,7 @@ class TestAntiLoop(_GitRepoCase):
 
 
 class TestZeroContextGate(_GitRepoCase):
-    CFG = {"reviewGovernance": {"enabled": True, "maxFixTurns": 2}}
+    CFG = {"reviewGovernance": {"enabled": True, "maxFixTurns": 2, "requireReviewer": True}}
     FINDING = [{"file": "engine/core.py", "line": 1, "type": "logic", "suggestion": "fix"}]
 
     def gate(self, cfg=None, session="s1", agent="codex"):
@@ -782,8 +782,14 @@ class TestZeroContextGate(_GitRepoCase):
         self.assertEqual(self.gate()["action"], "skip")
         self.write("src/app.py", PY_BASE + "\n\ndef gamma():\n    return 3\n")  # MEDIUM < default HIGH
         self.assertEqual(self.gate()["action"], "skip")
-        medium = {"reviewGovernance": {"enabled": True, "minRisk": RISK_MEDIUM}}
+        medium = {"reviewGovernance": {"enabled": True, "minRisk": RISK_MEDIUM, "requireReviewer": True}}
         self.assertEqual(self.gate(medium)["action"], "review_required")
+
+    def test_no_reviewer_configured_never_blocks(self):
+        self.write("engine/core.py", "x = 1\n")
+        g = self.gate({"reviewGovernance": {"enabled": True}})
+        self.assertEqual((g["action"], g["block"], g["status"]), ("review_unavailable", False, "local_passed_ai_unavailable"))
+        self.assertFalse((self.root / ".gravityguard" / "zero-context-review").exists(), "no payload files for the user")
 
     def test_full_lifecycle_review_fix_escalate(self):
         self.write("engine/core.py", "x = 1\n")
@@ -823,7 +829,7 @@ class TestZeroContextGate(_GitRepoCase):
         self.assertEqual(self.gate()["action"], "review_required")
 
     def test_staged_only_setting(self):
-        cfg = {"reviewGovernance": {"enabled": True, "stagedOnly": True}}
+        cfg = {"reviewGovernance": {"enabled": True, "stagedOnly": True, "requireReviewer": True}}
         self.write("engine/core.py", "x = 1\n")
         self.assertEqual(self.gate(cfg)["action"], "skip")
         _git(self.root, "add", "engine/core.py")
@@ -889,7 +895,7 @@ class TestStopHookIntegration(unittest.TestCase):
     def test_stop_blocks_until_independent_review_then_allows(self):
         with tempfile.TemporaryDirectory() as proj, tempfile.TemporaryDirectory() as logs:
             _git(proj, "init", "-q")
-            Path(proj, ".gravityguard.json").write_text(json.dumps({"reviewGovernance": {"enabled": True}}), encoding="utf-8")
+            Path(proj, ".gravityguard.json").write_text(json.dumps({"reviewGovernance": {"enabled": True, "requireReviewer": True}}), encoding="utf-8")
             Path(proj, "engine").mkdir()
             Path(proj, "engine", "core.py").write_text("x = 1\n", encoding="utf-8")
             _git(proj, "add", "-A")
@@ -941,3 +947,11 @@ class TestZeroContextFacadeExports(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestStandaloneNoReviewerNeverBlocks(unittest.TestCase):
+    """Default (requireReviewer off): no second AI configured must not lock the user out."""
+
+    def test_default_config_does_not_require_reviewer(self):
+        self.assertFalse(get_review_governance_config({"reviewGovernance": {"enabled": True}})["requireReviewer"])
+        self.assertTrue(get_review_governance_config({"reviewGovernance": {"requireReviewer": True}})["requireReviewer"])

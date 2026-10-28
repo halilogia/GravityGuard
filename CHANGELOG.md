@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (Zero-Touch Review, P0)
+- **`review_governance.py` / `review_policy.py`**: tek başına kurulumda (ikinci AI yok) sıfır bağlamlı inceleme kapısı artık kullanıcıyı kilitlemez ve ondan dosya doldurmasını istemez. Yeni `reviewGovernance.requireReviewer` (varsayılan `false`): inceleyici sonucu yoksa kapı `review_unavailable` (`status: local_passed_ai_unavailable`, engellemez) döner ve payload dosyası üretmez. Bir inceleyici gerçekten bulgu yazdıysa `fix_required` yine engeller. Orkestratör modu (AgentObservatory) için `requireReviewer: true` eski bekleme davranışını korur. Testler: `test_review_governance.py` (+2), mevcut kapı testleri `requireReviewer: true` ile güncellendi.
+
 ### Hardened (Shell Rules Wrapped Execution & Secret Readers)
 - **`shell_rules.py` & `shell_danger.py`**: `bash -c`, `sh -c`, `powershell -Command`, `cmd /c` gibi sarmalanmış komutların içine gizlenen tehlikeli kalıpların (`curl | sh`, `rm -rf /`, `iex (irm ...)`) özyinelemeli (recursive) tespiti ve engellenmesi; `_BASE_READERS` içine `findstr` eklenmesi ve `@.env` yönlendirmelerinin yakalanması; `test_shell_dangerous_commands.py` entegrasyon testleri.
 

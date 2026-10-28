@@ -835,7 +835,8 @@ def evaluate_zero_context_gate(
 ) -> Dict[str, Any]:
     """Deterministic gate. ``action`` is one of:
 
-    disabled | skip (risk below threshold / no diff) | passed | review_required |
+    disabled | skip (risk below threshold / no diff) | passed | review_unavailable (no reviewer
+    configured: never blocks) | review_required (only with ``requireReviewer``) |
     fix_required (feedback for the writer) | escalate (fix budget spent: human decides).
     ``block`` is True only for review_required / fix_required.
     """
@@ -864,6 +865,10 @@ def evaluate_zero_context_gate(
                     "message": f"Otomatik düzeltme sınırı doldu ({settings['maxFixTurns']} tur); insan incelemesi gerekli."}
         return {**base, "action": "fix_required", "block": True, "fix_turns": sess["fix_turns"], "findings": snap["findings"],
                 "message": build_feedback_prompt(sess["agent"], snap["findings"], sid, sess["fix_turns"], settings["maxFixTurns"])}
+
+    if not settings["requireReviewer"]:
+        return {**base, "action": "review_unavailable", "status": "local_passed_ai_unavailable",
+                "message": "İkinci AI inceleyicisi yapılandırılmamış (atlandı); yerel kontroller geçerli."}
 
     paths = write_review_payload(root, build_review_payload(root, settings["stagedOnly"], cfg))
     return {**base, "action": "review_required", "block": True,
