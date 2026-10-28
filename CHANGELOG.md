@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed (Complete Dead-Code Elimination of AI Review Subsystem)
 - **Review Subsystem Files Fully Removed**: `review_policy.py`, `review_governance.py` ve ilgili test suite'leri (`test_review_policy.py`, `test_review_governance.py`, `test_live_zero_context_review.py`) depodan tamamen silindi.
 - **Relocated Critical Utilities to `diffing.py`**: Güvenlik denetimi ve diff alma için gerekli olan git durum ve hash yardımcıları (`git_binding`, `binding_is_stale`, `read_disk_text_hash`, `hash_text`) `diffing.py` içine taşındı.
-- **Residual Cleanup**: `gravity-validator.py`, `dispatcher.py`, `security_audit.py` ve test dosyalarındaki tüm eski review bağımlılıkları temizlendi.
+- **Residual Cleanup**: `gravity-validator.py`, `dispatcher.py`, `security_audit.py`, `tools/verify_review_governance.py`, `.githooks/pre-push` ve test dosyalarındaki tüm eski review bağımlılıkları temizlendi.
 - **Verification**: Motorun tüm deterministik güvenlik kalkanı (test delili doğrulama, dokümantasyon senkronizasyonu, secret leak taraması, tehlikeli kabuk komutları, SRP sınırları) 340 birim testin tamamı (340/340, %100 başarı) geçilerek stabil sürüme hazırlandı.
 
 ### Changed (Zero-Touch Review, P0)

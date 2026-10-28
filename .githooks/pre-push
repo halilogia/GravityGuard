@@ -1,8 +1,3 @@
 #!/bin/sh
 # GravityGuard Pre-Push Hook (Stage 3: GitHub Push Gate)
-# Final release gate before code leaves the machine:
-# Enforces Self-Review for high-risk / multi-file changes (ChatGPT R1.1)
-
-python tools/verify_review_governance.py || exit 1
-
 exit 0
