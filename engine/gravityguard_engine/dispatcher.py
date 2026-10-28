@@ -307,47 +307,12 @@ def validate_gravityguard() -> None:
                 log_event("stop", "WARNING", "workspace", doc_warn, rule_id="DOC_OBLIGATION_UNRESOLVED", conversation_id=conversation_id)
                 warn_reasons.append(doc_warn)
 
-            if unresolved_reviews:
-                review_items = []
-                trigger_notes = set()
-                for r_id, info in unresolved_reviews.items():
-                    problems = ", ".join(info.get("problems", [])) if isinstance(info, dict) else ""
-                    trig = info.get("trigger_reason", "") if isinstance(info, dict) else ""
-                    if trig:
-                        trigger_notes.add(trig)
-                    review_items.append(f"{r_id} [{problems}]" if problems else r_id)
-                trig_suffix = f" [Tetikleyici: {'; '.join(sorted(trigger_notes))}]" if trigger_notes else ""
-                review_warn = (
-                    f"Kod İnceleme Yükümlülüğü (R1): Yüksek riskli değişiklik tespit edildi{trig_suffix}. "
-                    "Diff'ini 4 noktadan oku: 1) Mantık hatası, 2) Silinen test, 3) Güncellenecek doküman, "
-                    "4) Uydurulmuş fonksiyon/import. Ardından `.gravityguard/self-review/<id>.json` dosyasına "
-                    "parmak izi ('sourceFingerprint': candidate_fingerprint), 'findings': [] ve en az 20 karakterlik "
-                    f"'notes' içeren JSON kaydını yaz (review obligation: {', '.join(review_items)})."
-                )
-                log_event("stop", "WARNING", "workspace", review_warn, rule_id="REVIEW_OBLIGATION_UNRESOLVED", conversation_id=conversation_id)
-                warn_reasons.append(review_warn)
-
-            # Zero-context review gate (opt-in: reviewGovernance.enabled). Independent
-            # reviewer gets only the diff; findings are routed back to this writer.
-            try:
-                zc_gate = evaluate_zero_context_gate(project_root, cfg, conversation_id, detect_writer_agent(payload))
-            except (OSError, StateLockTimeout) as zc_err:
-                zc_gate = {"action": "error", "block": False}
-                log_event("stop", "WARNING", "workspace", f"Zero-context review gate error: {zc_err}", rule_id="ZC_REVIEW_ERROR", conversation_id=conversation_id)
-            if zc_gate["action"] in ("review_required", "fix_required"):
-                zc_warn = f"Bağımsız İnceleme Kapısı ({zc_gate['action']}): {zc_gate['message']}"
-                log_event("stop", "WARNING", "workspace", zc_warn, rule_id="ZC_REVIEW_" + zc_gate["action"].upper(), conversation_id=conversation_id)
-                warn_reasons.append(zc_warn)
-            elif zc_gate["action"] == "escalate":
-                log_event("stop", "WARNING", "workspace", zc_gate["message"], rule_id="ZC_REVIEW_ESCALATE", conversation_id=conversation_id)
-
             if warn_reasons:
                 increment_session_stop_retries(project_root, conversation_id)
                 status_summary = (
                     f"Aşama Durumu: [Kod: ✓] "
                     f"[Test: {'✗' if unresolved_tests or t0_findings else '✓'}] "
-                    f"[Doküman: {'✗' if unresolved_docs else '✓'}] "
-                    f"[İnceleme: {'✗' if unresolved_reviews else '✓'}]"
+                    f"[Doküman: {'✗' if unresolved_docs else '✓'}]"
                 )
                 full_reason = f"{status_summary} | " + " | ".join(warn_reasons)
                 print(json.dumps({"decision": "continue", "reason": full_reason}))
@@ -837,10 +802,7 @@ def validate_gravityguard() -> None:
         if pending_doc_record:
             record_pending_doc_obligation(pending_doc_record, project_root=p_root, conversation_id=c_id)
 
-        # Review obligation: governed code change requires an independent review
-        # before stop. record_review_obligation itself checks should_require_review.
-        if target_file:
-            record_review_obligation(target_file, projected_content, p_root, c_id, cfg)
+        # Review obligation removed (AI review disabled).
     except StateLockTimeout as lock_err:
         _log("BLOCKED", target_file, f"State lock timeout: {lock_err}", rule_id="STATE_LOCK_TIMEOUT")
         print(json.dumps({

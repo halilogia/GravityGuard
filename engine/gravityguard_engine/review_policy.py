@@ -107,9 +107,7 @@ def _matches_any(rel_path: str, patterns: List[str]) -> bool:
 
 
 def is_review_enabled(cfg: Optional[dict]) -> bool:
-    """Review governance is opt-in, mirroring ``governance.enforceDocObligations``."""
-    if isinstance(cfg, dict) and isinstance(cfg.get("review"), dict):
-        return bool(cfg["review"].get("enabled", False))
+    """Review governance is disabled (AI review feature removed)."""
     return False
 
 
@@ -118,26 +116,8 @@ def should_require_review(
     cfg: Optional[dict] = None,
     project_root: Optional[Path] = None,
 ) -> bool:
-    """True when writing ``target_file`` must be followed by an independent review.
-
-    Rules, in order:
-    1. Review must be enabled in ``.gravityguard.json`` (``review.enabled``).
-    2. A test file never triggers review.
-    3. Only production code suffixes trigger review.
-    4. Any ``review.exemptPatterns`` glob (project-relative) suppresses review.
-    """
-    if not target_file or not is_review_enabled(cfg):
-        return False
-
-    file_lower = target_file.replace("\\", "/").lower()
-    if not file_lower.endswith(_CODE_SUFFIXES):
-        return False
-
-    rel = _relative_posix(target_file, project_root)
-    rel_lower = rel.lower()
-
-    # Test files (child of a tests/ dir, or a test_*/ *_test.* name).
-    parts = rel_lower.split("/")
+    """Review requirement is disabled (AI review feature removed)."""
+    return False
     if any(part in ("tests", "test", "__tests__") for part in parts[:-1]):
         return False
     name = parts[-1] if parts else rel_lower
@@ -272,9 +252,8 @@ def is_comment_line(line: str) -> bool:
 
 
 def is_review_governance_enabled(cfg: Optional[dict]) -> bool:
-    """Zero-context review gate is opt-in: ``reviewGovernance.enabled`` in .gravityguard.json."""
-    section = cfg.get("reviewGovernance") if isinstance(cfg, dict) else None
-    return isinstance(section, dict) and bool(section.get("enabled", False))
+    """Zero-context review gate is disabled (AI review feature removed)."""
+    return False
 
 
 def get_review_governance_config(cfg: Optional[dict]) -> dict:

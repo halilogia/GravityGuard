@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed (AI Review & Self-Review Gate Obligations)
+- **`review_policy.py` & `dispatcher.py`**: Kullanıcı kararı doğrultusunda AI review ve R1 self-review yükümlülükleri tamamen kaldırıldı (`is_review_enabled` ve `is_review_governance_enabled` doğrudan `False`). Stop kapısındaki `unresolved_reviews` ve sıfır bağlamlı bağımsız inceleme kapısı devreden çıkarıldı. Deterministik güvenlik kontrolleri (test delili doğrulama, doküman senkronizasyon yükümlülüğü, secret leak taraması, tehlikeli komut kalkanı, SRP sınırları) aynen korunarak oturum akışı sadeleştirildi.
+
 ### Changed (Zero-Touch Review, P0)
 - **`review_governance.py` / `review_policy.py`**: tek başına kurulumda (ikinci AI yok) sıfır bağlamlı inceleme kapısı artık kullanıcıyı kilitlemez ve ondan dosya doldurmasını istemez. Yeni `reviewGovernance.requireReviewer` (varsayılan `false`): inceleyici sonucu yoksa kapı `review_unavailable` (`status: local_passed_ai_unavailable`, engellemez) döner ve payload dosyası üretmez. Bir inceleyici gerçekten bulgu yazdıysa `fix_required` yine engeller. Orkestratör modu (AgentObservatory) için `requireReviewer: true` eski bekleme davranışını korur. Testler: `test_review_governance.py` (+2), mevcut kapı testleri `requireReviewer: true` ile güncellendi.
 
