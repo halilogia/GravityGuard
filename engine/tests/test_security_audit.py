@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gravityguard_engine.review_governance import binding_is_stale, git_binding, _load_receipt
+from gravityguard_engine.diffing import binding_is_stale, git_binding
 from gravityguard_engine.security_audit import (
     Finding, dedupe, invalidate_stale_report, list_files, load_report, make_finding_id,
     record_baseline, report_findings, run_scan, scan_text, to_sarif, verify_patched,
@@ -180,48 +180,6 @@ class GitBindingTests(unittest.TestCase):
             stale = invalidate_stale_report(report, root)["findings"][0]
             self.assertTrue(stale["stale"])
             self.assertEqual(stale["verification_status"], "UNVERIFIED")
-
-    def test_receipt_bound_to_old_tree_is_a_problem(self):
-        from gravityguard_engine import review_governance as rg
-        with tempfile.TemporaryDirectory() as d:
-            root = Path(d)
-            make_repo(root, {"a.py": "x = 1\n"})
-            binding = git_binding(root)
-            self.assertEqual(len(binding["tree"]), 40)
-            receipts = root / ".gravityguard" / "self-review"
-            receipts.mkdir(parents=True)
-            (receipts / "rev-1.json").write_text(json.dumps({
-                "reviewId": "rev-1", "findings": [], "notes": "n" * 25, "gitTree": "0" * 40}), encoding="utf-8")
-            receipt, err = _load_receipt(root, "rev-1")
-            self.assertIsNone(err)
-            self.assertNotEqual(receipt["gitTree"], binding["tree"])
-            self.assertEqual(rg.git_binding(root)["tree"], binding["tree"])
-
-    def test_evaluate_marks_git_tree_mismatch(self):
-        import os
-        from unittest.mock import patch
-        from gravityguard_engine.review_governance import evaluate_review_obligations, record_review_obligation
-        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, {"GRAVITYGUARD_LOG_DIR": d}):
-            root = Path(d) / "repo"
-            root.mkdir()
-            make_repo(root, {"auth/login.py": "x = 1\n"})
-            cfg = {"review": {"enabled": True, "mode": "always"}}
-            target = root / "auth" / "login.py"
-            entry = record_review_obligation(str(target), "x = 1\n", root, "c1", cfg)
-            if entry is None:
-                self.skipTest("review policy did not require review for the fixture")
-            receipts = root / ".gravityguard" / "self-review"
-            receipts.mkdir(parents=True)
-            rid = entry["review_id"]
-            (receipts / f"{rid}.json").write_text(json.dumps({
-                "reviewId": rid, "findings": [], "notes": "n" * 25,
-                "sourceFingerprint": entry["source_fingerprint"], "gitTree": "0" * 40}), encoding="utf-8")
-            report = evaluate_review_obligations(root, "c1", cfg)
-            problems = report["unresolved"].get(rid, {}).get("problems", []) if report["unresolved"] else []
-            if report["resolved"]:
-                self.skipTest("review auto-exempted by risk policy")
-            self.assertIn("git-tree-mismatch", problems)
-
 
 class FixVerificationTests(unittest.TestCase):
     def setUp(self):

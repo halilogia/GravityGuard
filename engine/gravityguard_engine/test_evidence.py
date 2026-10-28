@@ -183,11 +183,11 @@ def resolve_candidate_test_file(target_file: str, cfg: Optional[dict] = None) ->
 
     primary_expected = candidate_names[0] if candidate_names else f"test_{stem}.py"
 
-    # 1. Search in the same directory
+    # 1. Search in the same directory or current workspace
     for name in candidate_names:
-        candidate = parent_dir / name
-        if candidate.is_file():
-            return str(candidate).replace("\\", "/"), primary_expected
+        for candidate in (parent_dir / name, Path(name)):
+            if candidate.is_file():
+                return str(candidate).replace("\\", "/"), primary_expected
 
     # 2. Search in common test root directories
     search_dirs = [parent_dir]

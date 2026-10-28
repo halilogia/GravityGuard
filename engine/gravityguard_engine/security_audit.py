@@ -281,7 +281,7 @@ def list_files(root: Path, mode: str) -> List[str]:
 
 def scan_paths(root: Path, rels: List[str]) -> Tuple[List[Finding], Dict[str, str]]:
     """Returns ``(findings, {rel: text_hash})`` for the files actually read."""
-    from .review_governance import hash_text
+    from .diffing import hash_text
     findings: List[Finding] = []
     hashes: Dict[str, str] = {}
     for rel in rels:
@@ -300,7 +300,7 @@ def scan_paths(root: Path, rels: List[str]) -> Tuple[List[Finding], Dict[str, st
 # ---------------------------------------------------------------- reports
 
 def build_report(root: Path, findings: List[Finding], file_hashes: Dict[str, str], mode: str) -> Dict[str, Any]:
-    from .review_governance import git_binding
+    from .diffing import git_binding
     return {
         "version": 1, "mode": mode,
         "binding": {**git_binding(root), "file_hashes": file_hashes},
@@ -386,7 +386,7 @@ def load_report(path: Path) -> Dict[str, Any]:
 
 def invalidate_stale_report(report: Dict[str, Any], root: Path) -> Dict[str, Any]:
     """Marks every finding stale (and unverified) once the git tree / file hashes moved on."""
-    from .review_governance import binding_is_stale
+    from .diffing import binding_is_stale
     if binding_is_stale(report.get("binding") or {}, Path(root)):
         for item in report.get("findings", []):
             item["stale"] = True
@@ -427,7 +427,7 @@ def _resolve_test(root: Path, finding: Finding) -> Path:
 
 def record_baseline(finding: Finding, root: Path, runner: TestRunner = default_test_runner) -> Finding:
     """Pre-patch step: the reproduction test must FAIL on the vulnerable code."""
-    from .review_governance import git_binding
+    from .diffing import git_binding
     test = _resolve_test(root, finding)
     code = runner(Path(root).resolve(), test)
     if code == 0:
@@ -439,7 +439,7 @@ def record_baseline(finding: Finding, root: Path, runner: TestRunner = default_t
 
 def verify_patched(finding: Finding, root: Path, runner: TestRunner = default_test_runner) -> Finding:
     """Post-patch step: needs a recorded FAIL baseline, changed code, and a now-PASSING test."""
-    from .review_governance import binding_is_stale
+    from .diffing import binding_is_stale
     if finding.verification_status != "CONFIRMED_EXPLOITABLE" or not finding.baseline:
         raise ValueError("no fail-before baseline recorded; run record_baseline on the unpatched code first")
     if not binding_is_stale(finding.baseline["binding"], Path(root)):
@@ -452,7 +452,7 @@ def verify_patched(finding: Finding, root: Path, runner: TestRunner = default_te
 
 
 def _hash_files(root: Path, rels: List[str]) -> Dict[str, str]:
-    from .review_governance import read_disk_text_hash
+    from .diffing import read_disk_text_hash
     return {rel.lower(): h for rel in rels if (h := read_disk_text_hash(Path(root) / rel)) is not None}
 
 

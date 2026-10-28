@@ -66,7 +66,7 @@ class TestDesignIconRule(unittest.TestCase):
                     stack.enter_context(patch.object(dispatcher, 'resolve_project_root', return_value=Path(directory)))
                     stack.enter_context(patch.object(dispatcher, 'load_gravityguard_config', return_value={}))
                     stack.enter_context(patch.object(dispatcher, 'get_projected_and_old_content', return_value=('', 'const label = "✅";')))
-                    for name in ('reconcile_obligations_on_disk', 'record_review_obligation',
+                    for name in ('reconcile_obligations_on_disk', 
                                  'record_pending_doc_obligation', 'trigger_background_validation'):
                         stack.enter_context(patch.object(dispatcher, name))
                     stack.enter_context(patch.object(dispatcher, 'evaluate_test_evidence', return_value=([], {})))

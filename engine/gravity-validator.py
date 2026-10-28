@@ -137,30 +137,6 @@ try:
         run_cli,
         validate_gravityguard,
     )
-    from gravityguard_engine.review_policy import (  # noqa: F401
-        DEFAULT_REVIEW_EXEMPT_PATTERNS,
-        is_review_enabled,
-        is_review_exempt_file,
-        is_review_governance_enabled,
-        should_require_review,
-    )
-    from gravityguard_engine.review_governance import (  # noqa: F401
-        build_feedback_prompt,
-        build_review_payload,
-        classify_change_risk,
-        compute_snapshot_hash,
-        detect_writer_agent,
-        evaluate_review_obligations,
-        evaluate_zero_context_gate,
-        fingerprint_from_hashes,
-        get_unresolved_review_obligations,
-        new_review_id,
-        record_final_diff_guard,
-        record_review_obligation,
-        record_review_result,
-        register_writer_session,
-        scan_git_governed_changes,
-    )
 
 except BaseException:  # ImportError/SyntaxError in any engine module must not fail silently
     import traceback

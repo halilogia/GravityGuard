@@ -72,14 +72,7 @@ from .test_evidence import (
     evaluate_test_evidence,
     resolve_candidate_test_file,
 )
-from .review_governance import (
-    detect_writer_agent,
-    evaluate_review_obligations,
-    evaluate_zero_context_gate,
-    get_unresolved_review_obligations,
-    record_final_diff_guard,
-    record_review_obligation,
-)
+# Review governance removed
 
 def _project_relative(path: str, root: Path) -> str:
     """Project-relative, forward-slash form of a recorded path (the absolute path when it lies outside the root)."""
@@ -222,7 +215,7 @@ def validate_gravityguard() -> None:
 
             # Defect A fix: Circuit breaker strictly governed by session continuation retries
             session_retries = get_session_stop_retries(project_root, conversation_id)
-            if session_retries >= 5 and not get_unresolved_review_obligations(project_root, conversation_id):
+            if session_retries >= 5:
                 log_event(
                     "stop", "WARNING", "workspace",
                     f"Circuit breaker triggered (retries={session_retries}): allowing stop despite obligations",
@@ -237,22 +230,13 @@ def validate_gravityguard() -> None:
             # Defect B fix: Reconcile obligations with physical filesystem verification
             reconcile_obligations_on_disk(project_root, conversation_id, cfg)
 
-            # FINAL DIFF GUARD (state guard): catch governed code changed on disk
-            # that never passed through the PreToolUse hook (e.g. a shell write).
-            record_final_diff_guard(project_root, conversation_id, cfg)
-
             unresolved_tests = dict(get_unresolved_test_evidence(project_root, conversation_id))
             unresolved_docs = dict(get_unresolved_doc_obligations(project_root, conversation_id))
-            review_report = evaluate_review_obligations(project_root, conversation_id)
-            unresolved_reviews = dict(review_report.get("unresolved", {}))
             for other_root in _other_stop_roots(payload, project_root):
                 other_cfg = load_gravityguard_config("", other_root)
                 reconcile_obligations_on_disk(other_root, conversation_id, other_cfg)
-                record_final_diff_guard(other_root, conversation_id, other_cfg)
                 unresolved_tests.update(get_unresolved_test_evidence(other_root, conversation_id))
                 unresolved_docs.update(get_unresolved_doc_obligations(other_root, conversation_id))
-                other_reviews = evaluate_review_obligations(other_root, conversation_id)
-                unresolved_reviews.update(other_reviews.get("unresolved", {}))
 
             warn_reasons = []
             try:

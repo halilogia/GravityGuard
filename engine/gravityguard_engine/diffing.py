@@ -132,3 +132,71 @@ def extract_diff_and_projected(
     old_c, proj_c = get_projected_and_old_content(target_file, tool_name, args)
     added_lines, added_text, _ = get_diff_analysis(old_c, proj_c)
     return old_c, added_text, proj_c
+
+
+# --- Content Hashing & Git State Utilities (Relocated from review_governance) ---
+import hashlib
+from pathlib import Path
+import subprocess
+from typing import Optional, Dict, Any
+
+def _normalize_newlines(text: str) -> str:
+    """CRLF/CR → LF so a text hash is stable across platforms."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def hash_text(text: str) -> str:
+    """SHA-256 of newline-normalized UTF-8 text."""
+    return hashlib.sha256(_normalize_newlines(text or "").encode("utf-8")).hexdigest()
+
+
+def read_disk_text_hash(path: Path) -> Optional[str]:
+    """Newline-normalized text hash of a file, or None when it cannot be read."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            return hash_text(handle.read())
+    except (IOError, OSError):
+        return None
+
+
+def _norm_rel(target_file: str, project_root: Optional[Path]) -> str:
+    p = Path(str(target_file))
+    if project_root is not None:
+        try:
+            rel = p.resolve().relative_to(Path(project_root).resolve())
+            return rel.as_posix().lower()
+        except (OSError, ValueError):
+            pass
+    return p.as_posix().lower()
+
+
+def fingerprint_from_hashes(file_hashes: Dict[str, str]) -> str:
+    lines = [f"{path}:{file_hashes[path]}" for path in sorted(file_hashes)]
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+
+
+def _git_out(root: Path, *args: str) -> Optional[str]:
+    try:
+        proc = subprocess.run(["git", *args], cwd=str(root), capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return proc.stdout.strip() if proc.returncode == 0 and proc.stdout.strip() else None
+
+
+def git_binding(project_root: Optional[Path] = None) -> Dict[str, Optional[str]]:
+    root = Path(project_root or Path.cwd())
+    return {
+        "commit": _git_out(root, "rev-parse", "HEAD"),
+        "tree": _git_out(root, "rev-parse", "HEAD^{tree}"),
+    }
+
+
+def binding_is_stale(binding: Dict[str, Any], project_root: Optional[Path] = None) -> bool:
+    root = Path(project_root or Path.cwd())
+    bound_tree = binding.get("tree")
+    if bound_tree and git_binding(root).get("tree") != bound_tree:
+        return True
+    for rel, expected in (binding.get("file_hashes") or {}).items():
+        if read_disk_text_hash(root / rel) != expected:
+            return True
+    return False
