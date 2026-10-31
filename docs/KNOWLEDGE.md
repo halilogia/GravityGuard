@@ -14,6 +14,7 @@ This document serves as the persistent engineering knowledge repository for **Gr
 >    - `G1_SILENT_EXCEPTION`: Zero empty catch/except blocks (`except: pass`, `catch {}`).
 >    - `G2_TEST_INTEGRITY`: Zero test deletions, skipping, or bypass escape-hatch injection.
 >    - `G4_IMPORT_MATRIX`: Strict architectural layer boundaries (no reverse/cross-layer imports).
+   - G7_TS_FIRST: Application code must be authored in TypeScript (.ts/.tsx); raw .js/.cjs/.mjs files are blocked unless deterministically recognized as mandatory JS (dist/, uild/, *.config.js, sw.js, *.worker.js) or justified via // @ts-mandatory: <reason> in the top 10 lines (logging feedback to gravityguard_js_feedback.jsonl). Workspace paths under ~/.gemini/antigravity/scratch/<project> strip their host prefix before is_vendor_or_cache evaluation.
 > 3. **Obligations Before Session Stop (L3 Lifecycle Gate)**:
 >    - **Test Obligation (T1)**: Modifying production code requires matching test evidence before session stop.
 >    - **Doc Obligation (§6 Same-Commit Rule)**: Modifying `engine/`, `src/`, `plugin/`, or `rules/` requires updating `CHANGELOG.md` (and `docs/KNOWLEDGE.md` if procedures change).

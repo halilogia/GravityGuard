@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **G7 TypeScript-First Zorunluluğu (DENY), Otomatik Zorunlu JS Tespiti ve AI Feedback Kanalı**: engine/gravityguard_engine/architecture_rules.py ve dispatcher.py:
+  - **Scratch Workspace Bypass Kapatıldı**: Antigravity varsayılan çalışma dizini (~/.gemini/antigravity/scratch/<proje>) içindeki projelerin /.gemini/ ve /scratch/ alt dizgeleri yüzünden is_vendor_or_cache tarafından muaf tutulması düzeltildi.
+  - **G7_TS_FIRST Engelleyici (DENY) Oldu**: Uygulama mantığının .js/.cjs/.mjs olarak yazılması evaluate_g7_ts_first ile engellenir ve .ts/.tsx zorunlu tutulur.
+  - **Deterministik Zorunlu JS Tespiti**: Derleme çıktıları (dist/, uild/, out/), paketler (
+ode_modules/), sıkıştırılmış dosyalar (*.min.js, *.bundle.js), yapılandırma dosyaları (*.config.js, .eslintrc.js, gulpfile.js), Service/Web Worker betikleri (sw.js, *.worker.js) ve test dosyaları (*.test.mjs) otomatik olarak tanınır ve izin verilir.
+  - **AI Zorunlu-JS Feedback Mekanizması (// @ts-mandatory:)**: Otomatik listede olmayan ancak teknik olarak .js kalması zorunlu olan dosyalarda ilk 10 satırda // @ts-mandatory: <en az 15 karakterlik teknik gerekçe> verildiğinde yazmaya izin verilir (G7_TS_MANDATORY_FEEDBACK uyarısı) ve geri bildirim gravityguard_js_feedback.jsonl dosyasına kaydedilir.
+
 - **Universal documentation automation**: Stop-time architecture sync now covers `engine`, `src`, `addons`, `app`, `lib`, `core`, `ui`, `scripts`, `tools`, and `web`. Projects without a generator receive a built-in source/LOC/test inventory in an existing `ARCHITECTURE.md`, with a 200-line managed-block limit and preserved manual content/newlines. Rule and hook/configuration changes require the available KNOWLEDGE document as well as CHANGELOG; the final retry writes idempotent ADR entries (`KNOWLEDGE_AUTO_INJECT`). Removed the redundant generated report; `docs:arch` and `docs:arch:check` now operate on the main architecture document.
 
 - **Doküman otomasyonu (Stop hook)**: `engine/gravityguard_engine/doc_automation.py` + `dispatcher.py`: `engine/`/`src/` değişince `tools/generate_architecture.py --sync` ile `ARCHITECTURE.md` içindeki `ARCH-AUTO` bloğu güncellenir (≤200 satır, elle yazılan içerik korunur, hata oturumu kırmaz); Stop doküman borcu mesajı çift başlık için cerrahi edit_file talimatı verir; son Stop denemesinde yalnız CHANGELOG borcu kalmışsa ilk `## [Unreleased]` altına git özetinden tek satırlık kayıt eklenir (`CHANGELOG_AUTO_INJECT`); `CHANGELOG.md` varsa doküman yükümlülüğü varsayılan açıktır (`project_context.should_enforce_doc_obligations`) ve `DOC_OBLIGATION_PENDING` audit kaydı yazılır.
