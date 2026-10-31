@@ -33,6 +33,8 @@ REQUIRED = [
     "extension/engine/gravity-validator.py",
     "extension/engine/async_runner.py",
     "extension/engine/governance_control.py",
+    "extension/engine/hook_proposal_control.py",
+    "extension/engine/gravityguard_cli.py",
     "extension/package.json",
     "extension/README.md",
     "extension/LICENSE",
@@ -45,6 +47,8 @@ MUST_MATCH_REPO = [
     "extension/engine/gravity-validator.py",
     "extension/engine/async_runner.py",
     "extension/engine/governance_control.py",
+    "extension/engine/hook_proposal_control.py",
+    "extension/engine/gravityguard_cli.py",
 ]
 
 def _collect_engine_package_files() -> list[str]:

@@ -27,6 +27,13 @@ _EXTRA_READERS = frozenset({
     "sort", "cut", "tr", "paste", "nl", "od", "strings", "bat", "dd", "tac", "rev", "fold", "column", "jq", "yq",
     "scp", "rsync", "tar", "zip", "7z", "curl", "wget", "nc", "ncat",
 })
+# Approving or reverting an agent's hook proposal is the user's decision: an agent may not run the trusted command.
+_TRUSTED_HOOK_ACTION = re.compile(
+    r"python[\w.]*(?:\s+-\S+)*\s+[\"']?[^\s\"']*hook_proposal_control"
+    r"|gravityguard(?:_cli\.py|\.cmd)?[\"']?\s+hooks\s+(?:approve|revert)\b"
+    r"|hook_proposals\b[^\n]*\b(?:approve|revert)\s*\(",
+    re.I,
+)
 _REDIRECT_IN = re.compile(r"<\s*([^\s<>|;&]+)")
 _GLOB_CHARS = frozenset("*?[")
 
@@ -70,6 +77,9 @@ def check_shell_command(args: dict) -> str:
     blocked, reason, _ = check_g0_secret_leak(command)
     if blocked:
         return f"[G0_SECRET_LEAK]: {reason}"
+    if _TRUSTED_HOOK_ACTION.search(command):
+        return ("[POLICY_INTEGRITY]: Hook proposals are approved or reverted only by the user "
+                "(GravityGuard panel or the user's own terminal)")
     danger = dangerous_command_reason(command)
     if danger:
         return f"[G0_DANGEROUS_COMMAND]: Blocked {danger}"

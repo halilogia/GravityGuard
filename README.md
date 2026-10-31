@@ -118,6 +118,13 @@ The same engine guards Claude Code through a thin adapter in [`plugin/claude-cod
 
 ---
 
+### Hook proposals (agents propose, you approve)
+
+Agents cannot write `.claude/settings.json` or `.agents/hooks.json`. When you complain about a repeating mistake, the
+agent writes a proposal to `.gravityguard/proposals/hooks/<id>.json`; you review the diff in the **Hooks** tab and
+click **Approve** (or run `gravityguard hooks approve <id>` in your own terminal). Every decision is receipted and
+`gravityguard hooks revert <id>` undoes an install. Details: `docs/operations/hook-proposals.md`.
+
 ### Security scan (`scan`, Tier 4)
 
 Hooks stay fast (<5 ms, no LLM, no network). Deep checks live in a separate on-demand command that emits evidence-backed findings as SARIF v2.1.0:
@@ -183,6 +190,13 @@ GravityGuard, herhangi bir dosya değiştirme aracı çalıştırılmadan önce 
 
 ### 🤖 5. Claude Code'da Kullanım
 - Aynı motor, [`plugin/claude-code/`](plugin/claude-code/README.md) altındaki ince bir adaptörle Claude Code'u da korur: `Write` / `Edit` / `MultiEdit` dosya kurallarından geçer, `Stop` kancası oturumu kendi test/doküman yükümlülükleri bitene kadar tutar. Her oturum ayrı izlenir; paralel oturumlar birbirini engellemez. `Bash` ile yazılan dosyalar denetlenmez. Kurulum tek bir `settings.json` parçasıdır.
+
+### Kanca önerileri (ajan önerir, siz onaylarsınız)
+
+Ajan `.claude/settings.json` ya da `.agents/hooks.json` dosyasına yazamaz. Tekrarlayan bir hatadan yakındığınızda ajan
+`.gravityguard/proposals/hooks/<id>.json` önerisi yazar; **Kancalar** sekmesinde farkı görüp **Onayla ve kur**'a
+basarsınız (ya da kendi terminalinizde `gravityguard hooks approve <id>`). Her karar kayda geçer;
+`gravityguard hooks revert <id>` kurulumu geri alır. Ayrıntı: `docs/operations/hook-proposals.md`.
 
 ### Güvenlik taraması (`scan`, Tier 4)
 

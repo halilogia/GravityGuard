@@ -20,6 +20,8 @@ G0 kuralları, GravityGuard'ın **en yüksek öncelikli ve zorunlu güvenlik tab
 - **Kapsam**:
   - Ajanın `.gravityguard.json` dosyasında G0 kurallarını `shadow` yapması yasaktır.
   - Ajanın `hooks.json` veya eklenti çalışma kancalarını değiştirmesi/silmesi engellenir.
+  - Ajan yeni bir kanca isterse `.gravityguard/proposals/hooks/<id>.json` önerisi yazar; kurulumu kullanıcı onaylar
+    (`docs/operations/hook-proposals.md`). Onay ve geri alma komutları ajan kabuğunda reddedilir.
 
 ---
 

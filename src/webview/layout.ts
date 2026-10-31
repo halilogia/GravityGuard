@@ -14,7 +14,8 @@ import {
   renderInsightsTab,
   renderSkillsTab,
   renderTasksTab,
-  renderKnowledgeTab
+  renderKnowledgeTab,
+  renderHooksTab
 } from './tabs';
 
 export interface LayoutParams {
@@ -48,6 +49,9 @@ export function buildHtmlDocument(p: LayoutParams): string {
   const openTasks = countOpenTasks(vm.tasks || []);
   const knowledgeHtml = renderKnowledgeTab(vm);
   const memoryAdrsCount = vm.memory?.knowledge?.totalAdrs || 0;
+  const hookData = vm.hookProposals || { pending: [], installed: [] };
+  const hooksHtml = renderHooksTab(hookData);
+  const pendingHooks = hookData.pending.length;
 
   // --- RENDER MAIN WEBVIEW HTML ---
   const htmlContent = `
@@ -95,6 +99,7 @@ ${WEBVIEW_STYLES}
           <button class="tab-btn ${activeTab === 'knowledge' ? 'active' : ''}" id="btn-knowledge" data-action="setTab" data-tab="knowledge">${lucide('bookOpen', { size: 11 })} ${t('tabs.knowledge')}${memoryAdrsCount > 0 ? `<span class="badge-counter" style="background: rgba(56, 189, 248, 0.25); color: #38bdf8;">${memoryAdrsCount}</span>` : ''}</button>
           <button class="tab-btn ${activeTab === 'obligations' ? 'active' : ''}" id="btn-obligations" data-action="setTab" data-tab="obligations">${lucide('clipboardList', { size: 11 })} ${t('tabs.obligations')}${totalObligations > 0 ? `<span class="badge-counter">${totalObligations}</span>` : ''}</button>
           <button class="tab-btn ${activeTab === 'skills' ? 'active' : ''}" id="btn-skills" data-action="setTab" data-tab="skills">${lucide('sparkles', { size: 11 })} ${t('tabs.skills')}<span class="badge-counter" style="background: rgba(56, 189, 248, 0.25); color: #38bdf8;">${skillsList.length}</span></button>
+          <button class="tab-btn ${activeTab === 'hooks' ? 'active' : ''}" id="btn-hooks" data-action="setTab" data-tab="hooks">${lucide('plug', { size: 11 })} ${t('tabs.hooks')}${pendingHooks > 0 ? `<span class="badge-counter" style="background: rgba(245, 158, 11, 0.3); color: #f59e0b;">${pendingHooks}</span>` : ''}</button>
           <button class="tab-btn ${activeTab === 'rules' ? 'active' : ''}" id="btn-rules" data-action="setTab" data-tab="rules">${lucide('sliders', { size: 11 })} ${t('tabs.rules')}</button>
           <button class="tab-btn ${activeTab === 'insights' ? 'active' : ''}" id="btn-insights" data-action="setTab" data-tab="insights">${lucide('barChart', { size: 11 })} ${t('tabs.insights')}</button>
         </div>
@@ -111,6 +116,9 @@ ${WEBVIEW_STYLES}
         </div>
         <div id="tab-obligations" class="tab-pane ${activeTab === 'obligations' ? 'active' : ''}">
           ${obligationsHtml}
+        </div>
+        <div id="tab-hooks" class="tab-pane ${activeTab === 'hooks' ? 'active' : ''}">
+          ${hooksHtml}
         </div>
         <div id="tab-rules" class="tab-pane ${activeTab === 'rules' ? 'active' : ''}">
           ${rulesHtml}

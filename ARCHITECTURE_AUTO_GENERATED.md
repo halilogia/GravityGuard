@@ -1,21 +1,21 @@
 # GravityGuard — Otomatik Mimari Raporu
 
-> Üretim tarihi: 2026-10-25
+> Üretim tarihi: 2026-10-31
 > GravityGuard sürümü: 1.4.18
 > Bu dosya `npm run docs:arch` ile üretilir; elle düzenlemeyin.
 
 ## Genel Metrikler
 
-- Toplam dosya: **109**
-- Dolu satır (non-empty LOC): **22316**
-- Test dosyası: **39**, test sayısı: **428**
+- Toplam dosya: **119**
+- Dolu satır (non-empty LOC): **24187**
+- Test dosyası: **44**, test sayısı: **476**
 
 | Alan | Dosya | Dolu satır |
 |---|---:|---:|
-| `engine` | 27 | 10171 |
+| `engine` | 30 | 11061 |
 | `plugin` | 10 | 651 |
-| `src` | 32 | 5635 |
-| `tests` | 40 | 5859 |
+| `src` | 34 | 5937 |
+| `tests` | 45 | 6538 |
 
 ## Bileşen & Veri Akışı
 
@@ -62,11 +62,11 @@ flowchart LR
 
 | Katman | Sorumluluk | Dosya | Dolu satır |
 |---|---|---:|---:|
-| Tier 1 Fast-Path Guardrail | Hızlı, deterministik kural kapıları (her araç çağrısında) | 5 | 1046 |
+| Tier 1 Fast-Path Guardrail | Hızlı, deterministik kural kapıları (her araç çağrısında) | 5 | 1158 |
 | Tier 4 Deep-Path Güvenlik Denetçisi | Derin tarama: taint tracking, SARIF v2.1.0, git tree-hash bağlama | 1 | 417 |
-| Yönetişim & Yaşam Döngüsü | Kapılar, inceleme, görev arşivi, test kanıtı, doküman politikası | 5 | 1741 |
-| Extension UI & Client | VS Code uzantısı: komutlar, niyet, webview, görevler | 24 | 3874 |
-| Testler | Python + Node test paketleri (428 test) | 39 | 5859 |
+| Yönetişim & Yaşam Döngüsü | Kapılar, inceleme, görev arşivi, test kanıtı, doküman politikası | 4 | 1724 |
+| Extension UI & Client | VS Code uzantısı: komutlar, niyet, webview, görevler | 26 | 4124 |
+| Testler | Python + Node test paketleri (476 test) | 44 | 6538 |
 
 ## Dizin Ağacı
 
@@ -81,17 +81,18 @@ flowchart LR
 │   │   ├── diffing.py
 │   │   ├── dispatcher.py
 │   │   ├── doc_policy.py
+│   │   ├── engine_integrity.py
 │   │   ├── governance.py
+│   │   ├── hook_proposals.py
 │   │   ├── local_paths.py
 │   │   ├── operations.py
 │   │   ├── policy_integrity.py
 │   │   ├── project_context.py
 │   │   ├── publication_guard.py
 │   │   ├── removal_observer.py
-│   │   ├── review_governance.py
-│   │   ├── review_policy.py
 │   │   ├── security_audit.py
 │   │   ├── security_rules.py
+│   │   ├── shell_danger.py
 │   │   ├── shell_rules.py
 │   │   ├── state_lock.py
 │   │   ├── task_archiver.py
@@ -105,25 +106,31 @@ flowchart LR
 │   │   ├── test_claude_adapter.py
 │   │   ├── test_doc_overwrite_guard.py
 │   │   ├── test_doc_policy.py
+│   │   ├── test_engine_self_protection.py
 │   │   ├── test_env_protection.py
 │   │   ├── test_generate_architecture.py
 │   │   ├── test_governance.py
 │   │   ├── test_governance_control.py
+│   │   ├── test_guard_unavailable_telemetry.py
+│   │   ├── test_hook_proposals.py
 │   │   ├── test_local_paths.py
 │   │   ├── test_operations.py
 │   │   ├── test_project_context.py
 │   │   ├── test_removal_observer.py
-│   │   ├── test_review_governance.py
-│   │   ├── test_review_policy.py
 │   │   ├── test_security_audit.py
 │   │   ├── test_security_hardening.py
 │   │   ├── test_security_rules.py
+│   │   ├── test_shell_dangerous_commands.py
 │   │   ├── test_state_lock.py
+│   │   ├── test_t0_lcov.py
 │   │   ├── test_task_archiver.py
-│   │   └── test_test_evidence.py
+│   │   ├── test_test_evidence.py
+│   │   └── test_unsafe_code_patterns.py
 │   ├── async_runner.py
 │   ├── governance_control.py
 │   ├── gravity-validator.py
+│   ├── gravityguard_cli.py
+│   ├── hook_proposal_control.py
 │   └── test_gravity_validator.py
 ├── plugin/
 │   ├── claude-code/
@@ -151,6 +158,7 @@ flowchart LR
 │   │   │   ├── insights.ts
 │   │   │   └── stream.ts
 │   │   ├── tabs/
+│   │   │   ├── hooks.ts
 │   │   │   ├── insights.ts
 │   │   │   ├── knowledge.ts
 │   │   │   ├── live.ts
@@ -160,6 +168,7 @@ flowchart LR
 │   │   │   └── tasks.ts
 │   │   ├── client.ts
 │   │   ├── governance_control.ts
+│   │   ├── hook_proposals.ts
 │   │   ├── html_utils.ts
 │   │   ├── layout.ts
 │   │   ├── lifecycle.ts
@@ -182,6 +191,7 @@ flowchart LR
 └── tests/
     ├── agent_identity.test.mjs
     ├── codex_adapter.test.mjs
+    ├── hook_proposals.test.mjs
     ├── i18n.test.mjs
     ├── icons.test.mjs
     ├── intent-corpus.test.mjs

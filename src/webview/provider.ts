@@ -14,6 +14,7 @@ import { addAdrItem, addChangelogItem } from '../knowledge';
 import { WebviewLifecycle } from './lifecycle';
 import { MessagePathPolicy } from './message_policy';
 import { waiveAdvisory } from './governance_control';
+import { HookProposalCache, hookFilesSignature, runHookControl, splitHookFile } from './hook_proposals';
 
 export class GuardianViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
@@ -29,6 +30,7 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
   private _lifecycle?: WebviewLifecycle;
   private _hostReloadTried: boolean = false;
   private _messagePaths = new MessagePathPolicy();
+  private _hookCache?: HookProposalCache;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -95,7 +97,8 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
       if (!message || typeof message !== 'object' || typeof message.command !== 'string') return;
       const kinds: Record<string, string> = {
         updateTaskStatus: 'tasks', deleteTaskItem: 'tasks', archiveCompletedTasks: 'tasks', addTaskItem: 'tasks',
-        addAdr: 'knowledge', addChangelogItem: 'changelog', dismissObligation: 'obligations'
+        addAdr: 'knowledge', addChangelogItem: 'changelog', dismissObligation: 'obligations',
+        approveHookProposal: 'hookProposals', rejectHookProposal: 'hookProposals', revertHookProposal: 'hookReceipts'
       };
       if (kinds[message.command] && !this._messagePaths.permits(kinds[message.command], message.path)) return;
       if (message.line !== undefined && (!Number.isSafeInteger(message.line) || message.line < 1)) return;
@@ -141,6 +144,8 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
         vscode.window.showInformationMessage(t('actions.reasonCopied'));
       } else if (message.command === 'dismissObligation' && message.path) {
         await this.dismissObligation(message.path);
+      } else if (['approveHookProposal', 'rejectHookProposal', 'revertHookProposal'].includes(message.command) && message.path) {
+        await this.hookAction(message.command, message.path, message.text);
       } else if (message.command === 'clearAllObligations') {
         await this.clearAllObligations();
       } else if (message.command === 'updateTaskStatus' && message.path && typeof message.line === 'number' && message.status) {
@@ -315,7 +320,7 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
 
   private currentSignature(): string {
     const { eventsList, govData, stopRetries, resolutionIntents, totalObligations } = loadGuardianState(this._clearedAfterSeq);
-    return `${getCurrentLanguage()}:${this._clearedAfterSeq}:${eventsList.length}:${eventsList[0]?.timestamp || ''}:${eventsList[0]?.seq || 0}:${govData?.seq || 0}:${stopRetries}:${resolutionIntents.length}:${totalObligations}`;
+    return `${getCurrentLanguage()}:${this._clearedAfterSeq}:${eventsList.length}:${eventsList[0]?.timestamp || ''}:${eventsList[0]?.seq || 0}:${govData?.seq || 0}:${stopRetries}:${resolutionIntents.length}:${totalObligations}:${hookFilesSignature(this.hookRoots())}`;
   }
 
   private buildDocument(view: vscode.WebviewView, nonce: string): { html: string; body: string } {
@@ -324,8 +329,11 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
     this._messagePaths.set('knowledge', vm.memory?.knowledge ? [vm.memory.knowledge.path] : []);
     this._messagePaths.set('changelog', vm.memory?.changelog ? [vm.memory.changelog.path] : []);
     this._messagePaths.set('obligations', [...Object.keys(vm.pendingTests), ...Object.keys(vm.pendingDocs)]);
+    vm.hookProposals = this.hookCache().current(this.hookRoots());
+    this._messagePaths.set('hookProposals', vm.hookProposals.pending.map(view => view.path));
+    this._messagePaths.set('hookReceipts', vm.hookProposals.installed.map(r => path.join(r.root, '.gravityguard', 'runtime', 'hook-receipts', `${r.id}.json`)));
     const { eventsList, govData, stopRetries, resolutionIntents, totalObligations } = vm;
-    this._lastDataSig = `${getCurrentLanguage()}:${this._clearedAfterSeq}:${eventsList.length}:${eventsList[0]?.timestamp || ''}:${eventsList[0]?.seq || 0}:${govData?.seq || 0}:${stopRetries}:${resolutionIntents.length}:${totalObligations}`;
+    this._lastDataSig = `${getCurrentLanguage()}:${this._clearedAfterSeq}:${eventsList.length}:${eventsList[0]?.timestamp || ''}:${eventsList[0]?.seq || 0}:${govData?.seq || 0}:${stopRetries}:${resolutionIntents.length}:${totalObligations}:${hookFilesSignature(this.hookRoots())}`;
     const html = buildHtmlDocument({
       vm,
       skills: scanAllSkills(vm.workspaceRoot),
@@ -382,5 +390,53 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
     await this.changeAdvisoryObligations();
   }
 
-}
+  private hookRoots(): string[] {
+    return (vscode.workspace.workspaceFolders || []).map(folder => folder.uri.fsPath);
+  }
 
+  private hookScript(): string {
+    return path.join(this._extensionUri.fsPath, 'engine', 'hook_proposal_control.py');
+  }
+
+  private hookCache(): HookProposalCache {
+    if (!this._hookCache) {
+      this._hookCache = new HookProposalCache(this.hookScript(), () => {
+        this._lastDataSig = '';
+        this.updateHtml(true);
+      });
+    }
+    return this._hookCache;
+  }
+
+  /** User clicked Approve / Reject / Revert: confirm in a modal, then run the trusted engine command. */
+  private async hookAction(command: string, file: string, sha?: string): Promise<void> {
+    const where = splitHookFile(file);
+    const roots = this.hookRoots();
+    if (!where) return;
+    const data = this.hookCache().current(roots);
+    const pending = data.pending.find(view => view.id === where.id && view.root === where.root);
+    const installed = data.installed.find(receipt => receipt.id === where.id && receipt.root === where.root);
+    const action = command === 'approveHookProposal' ? 'approve' : command === 'rejectHookProposal' ? 'reject' : 'revert';
+    if (action !== 'reject') {
+      const targetFile = action === 'approve' ? pending?.target_file : installed?.target_file;
+      const yes = t('hooks.confirmButton');
+      const choice = await vscode.window.showWarningMessage(
+        t(action === 'approve' ? 'hooks.confirmApprove' : 'hooks.confirmRevert', { id: where.id, file: targetFile || '?' }),
+        { modal: true, detail: action === 'approve' ? pending?.diff : undefined }, yes);
+      if (choice !== yes) return;
+    }
+    try {
+      const answer = await runHookControl(this.hookScript(), { action, roots, root: where.root, id: where.id, sha256: sha || '' });
+      if (!answer?.ok) throw new Error(answer?.error || 'unknown error');
+      const notice = action === 'approve' ? t('hooks.installed', { file: answer.target_file })
+        : action === 'reject' ? t('hooks.rejected', { id: where.id }) : t('hooks.reverted', { id: where.id });
+      vscode.window.showInformationMessage(notice);
+    } catch (error: any) {
+      vscode.window.showErrorMessage(t('hooks.failed', { error: error?.message || String(error) }));
+    }
+    this._hookCache?.invalidate();
+    this._lastDataSig = '';
+    this.updateHtml(true);
+  }
+
+}

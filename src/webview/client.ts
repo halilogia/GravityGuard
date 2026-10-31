@@ -92,6 +92,10 @@ export function buildClientScript(nonce: string, activeTab: string): string {
             } else if (action === 'dismissObligation') {
               const filePath = target.getAttribute('data-path');
               if (filePath) vscode.postMessage({ command: 'dismissObligation', path: filePath });
+            } else if (action === 'approveHookProposal' || action === 'rejectHookProposal' || action === 'revertHookProposal') {
+              const filePath = target.getAttribute('data-path');
+              const sha = target.getAttribute('data-text') || undefined;
+              if (filePath) vscode.postMessage({ command: action, path: filePath, text: sha });
             } else if (action === 'clearAllObligations') {
               vscode.postMessage({ command: 'clearAllObligations' });
             } else if (action === 'toggleDetail') {

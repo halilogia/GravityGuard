@@ -15,7 +15,8 @@ export const resources = {
         insights: 'Analiz',
         skills: 'Beceriler',
         tasks: 'Görevler',
-        knowledge: 'Hafıza'
+        knowledge: 'Hafıza',
+        hooks: 'Kancalar'
       },
       current: {
         title: 'SON İŞLEM',
@@ -150,6 +151,28 @@ export const resources = {
         configOpenError: 'Yapılandırma dosyası açılamadı: {{error}}',
         configNoWorkspaceNotice: 'Açık bir çalışma alanı bulunamadı; kullanıcı düzeyindeki yapılandırma (~/.gravityguard.json) açılıyor.',
         reasonCopied: 'Kural engelleme nedeni panoya kopyalandı.'
+      },
+      hooks: {
+        title: 'Bekleyen kanca önerileri',
+        empty: 'Bekleyen öneri yok. Ajanlar önerilerini .gravityguard/proposals/hooks/ klasörüne yazar; burada onaylarsınız.',
+        approve: 'Onayla ve kur',
+        reject: 'Reddet',
+        revert: 'Geri al',
+        invalid: 'Kurulamaz',
+        installedTitle: 'Kurulu öneriler',
+        complaint: 'Şikâyet',
+        rationale: 'Gerekçe',
+        command: 'Komut',
+        test: 'Test',
+        target: 'Dosya',
+        confirmApprove: '"{{id}}" kancası {{file}} dosyasına eklensin mi?',
+        confirmRevert: '"{{id}}" kancası {{file}} dosyasından kaldırılsın mı?',
+        confirmButton: 'Evet',
+        installed: 'Kanca kuruldu: {{file}}',
+        rejected: 'Öneri reddedildi: {{id}}',
+        reverted: 'Kanca geri alındı: {{id}}',
+        failed: 'Kanca işlemi yapılamadı: {{error}}',
+        cliHint: 'Terminalden: gravityguard hooks list | approve <id> | reject <id> | revert <id>'
       },
       obligations: {
         title: 'Aktif Yönetişim & Yükümlülük Durumu',
@@ -293,7 +316,8 @@ export const resources = {
         insights: 'Insights',
         skills: 'Skills',
         tasks: 'Tasks',
-        knowledge: 'Memory'
+        knowledge: 'Memory',
+        hooks: 'Hooks'
       },
       current: {
         title: 'CURRENT ACTION',
@@ -428,6 +452,28 @@ export const resources = {
         configOpenError: 'Could not open configuration file: {{error}}',
         configNoWorkspaceNotice: 'No active workspace found; opening user-level configuration (~/.gravityguard.json).',
         reasonCopied: 'Rule violation reason copied to clipboard.'
+      },
+      hooks: {
+        title: 'Pending hook proposals',
+        empty: 'No pending proposals. Agents write them to .gravityguard/proposals/hooks/; you approve them here.',
+        approve: 'Approve and install',
+        reject: 'Reject',
+        revert: 'Revert',
+        invalid: 'Cannot install',
+        installedTitle: 'Installed proposals',
+        complaint: 'Complaint',
+        rationale: 'Rationale',
+        command: 'Command',
+        test: 'Test',
+        target: 'File',
+        confirmApprove: 'Add the "{{id}}" hook to {{file}}?',
+        confirmRevert: 'Remove the "{{id}}" hook from {{file}}?',
+        confirmButton: 'Yes',
+        installed: 'Hook installed: {{file}}',
+        rejected: 'Proposal rejected: {{id}}',
+        reverted: 'Hook reverted: {{id}}',
+        failed: 'Hook action failed: {{error}}',
+        cliHint: 'From a terminal: gravityguard hooks list | approve <id> | reject <id> | revert <id>'
       },
       obligations: {
         title: 'Active Governance & Obligations State',

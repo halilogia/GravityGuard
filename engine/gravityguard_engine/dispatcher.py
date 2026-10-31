@@ -406,7 +406,9 @@ def validate_gravityguard() -> None:
         sys.exit(0)
 
     if is_runtime_control_file(target_file):
-        reason = "[POLICY_INTEGRITY]: Installed guard hooks, receipts and runtime state require a trusted host action"
+        reason = ("[POLICY_INTEGRITY]: Installed guard hooks, receipts and runtime state require a trusted host action. "
+                  "To add a hook, write a proposal to .gravityguard/proposals/hooks/<id>.json "
+                  "(docs/operations/hook-proposals.md); the user approves it.")
         _log("BLOCKED", target_file, reason, rule_id="POLICY_INTEGRITY")
         print(json.dumps({"decision": "deny", "reason": reason}))
         sys.exit(0)

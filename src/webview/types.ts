@@ -1,5 +1,6 @@
 import type { TaskFile } from '../tasks';
 import type { MemoryHubData } from '../knowledge';
+import type { HookProposalData } from './hook_proposals';
 
 export interface LogEvent {
   status?: string;
@@ -43,4 +44,5 @@ export interface GuardianViewModel {
   tasks: TaskFile[]; // checkbox task files discovered for the project roots / active conversation
   defaultTaskPath?: string; // fallback path to create/append tasks when no file exists or for quick-add
   memory?: MemoryHubData; // Knowledge & ADR & Changelog memory hub data
+  hookProposals?: HookProposalData; // agent hook proposals awaiting the user, and installed ones
 }
