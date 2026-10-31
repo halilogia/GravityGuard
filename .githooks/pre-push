@@ -1,3 +1,84 @@
-#!/bin/sh
-# GravityGuard Pre-Push Hook (Stage 3: GitHub Push Gate)
+#!/usr/bin/env bash
+# =============================================================================
+# Universal Pre-Push Quality Gate (Zero-Fail GitHub Actions)
+# Prevents broken commits from reaching GitHub, eliminating CI failure emails.
+# =============================================================================
+
+echo "================================================================="
+echo "🛡️  [Pre-Push Gate] GitHub'a push oncesi yerel kontroller yapiliyor..."
+echo "================================================================="
+
+# 1. GIZLI ANAHTAR / TOKEN SIZINTI KONTROLU
+echo " [1/2] Gizli anahtar / token sizintisi taraniyor..."
+SECRET_REGEX="sk-ant-|ghp_[0-9a-zA-Z]{36}|AKIA[0-9A-Z]{16}|sk-proj-"
+if git grep -EI "$SECRET_REGEX" HEAD -- ':!*.lock' ':!package-lock.json' ':!.github/workflows/*' ':!.git*' 2>/dev/null; then
+    echo ""
+    echo "❌ [Pre-Push Gate] HATA: HEAD commitinde gizli API anahtari veya token tespit edildi!"
+    echo "   Guvenlik sizintisini ve GitHub CI patlamasini onlemek icin push IPTAL EDILDI."
+    echo "================================================================="
+    exit 1
+fi
+
+# 2. PROJE TEST VE DERLEME DOGRULAMASI
+echo " [2/2] Yerel testler ve kalite kontrolleri calistiriliyor..."
+
+# Node.js / TypeScript Projeleri
+if [ -f "package.json" ]; then
+    if npm run 2>/dev/null | grep -q " check$"; then
+        echo "   -> 'npm run check' calistiriliyor..."
+        if ! npm run check; then
+            echo ""
+            echo "❌ [Pre-Push Gate] HATA: 'npm run check' basarisiz oldu!"
+            echo "   Kod yerel testleri gecemedigi icin push IPTAL EDILDI."
+            echo "   (GitHub Actions'in patlamasi ve hata maili atmasi engellendi)."
+            echo "================================================================="
+            exit 1
+        fi
+    elif npm run 2>/dev/null | grep -q " test$"; then
+        if ! grep -q "echo \"Error: no test specified\"" package.json 2>/dev/null; then
+            echo "   -> 'npm test' calistiriliyor..."
+            if ! npm test; then
+                echo ""
+                echo "❌ [Pre-Push Gate] HATA: 'npm test' basarisiz oldu!"
+                echo "   Push IPTAL EDILDI (GitHub CI hata maili engellendi)."
+                echo "================================================================="
+                exit 1
+            fi
+        fi
+    fi
+fi
+
+# Python Projeleri
+if [ -d "tests" ] && [ ! -f "package.json" ]; then
+    echo "   -> Python test paketi calistiriliyor..."
+    if command -v python >/dev/null 2>&1; then
+        PY_BIN="python"
+    else
+        PY_BIN="python3"
+    fi
+
+    if ! "$PY_BIN" -m unittest discover -s tests -p "test_*.py"; then
+        echo ""
+        echo "❌ [Pre-Push Gate] HATA: Python testleri basarisiz oldu!"
+        echo "   Push IPTAL EDILDI (GitHub CI hata maili engellendi)."
+        echo "================================================================="
+        exit 1
+    fi
+fi
+
+# Rust Projeleri
+if [ -f "Cargo.toml" ] && command -v cargo >/dev/null 2>&1; then
+    echo "   -> 'cargo test' calistiriliyor..."
+    if ! cargo test; then
+        echo ""
+        echo "❌ [Pre-Push Gate] HATA: 'cargo test' basarisiz oldu!"
+        echo "   Push IPTAL EDILDI (GitHub CI hata maili engellendi)."
+        echo "================================================================="
+        exit 1
+    fi
+fi
+
+echo ""
+echo "✅ [Pre-Push Gate] Tum kontroller basariyla gecti. Push GitHub'a iletiliyor."
+echo "================================================================="
 exit 0

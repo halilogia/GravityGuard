@@ -489,8 +489,15 @@ def check_arch_file_growth(
             f"toplam satır sayısı {monolith_loc} sınırını aşıyor ({projected_loc} LOC)"
         )
     elif not old_full_content.strip():
-        # A new module's size is the result of modularisation, not accumulation
-        pass
+        # New file creation: do not bypass if initial size exceeds monolith or single-write threshold
+        if projected_loc >= monolith_loc:
+            reasons.append(
+                f"yeni oluşturulan dosya başlangıç monolit sınırını ({monolith_loc} LOC) aşıyor ({projected_loc} LOC)"
+            )
+        elif added_count >= single_write_loc:
+            reasons.append(
+                f"yeni dosyaya tek seferde büyük kod bloğu yazıldı (+{added_count} LOC)"
+            )
     else:
         if old_loc >= creep_base_loc and added_count >= creep_added_loc:
             reasons.append(

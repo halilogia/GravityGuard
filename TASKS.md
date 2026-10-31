@@ -17,6 +17,7 @@
 - [ ] README için gerçek ekran kaydı (GIF/MP4) ile `media/demo.svg`'yi tamamla
 
 ## ✅ Tamamlananlar
+- [x] Web SRP & HTML Bütçeleri: monolitik HTML ve devasa gömülü JS/CSS bloklarını engelleyen deterministik denetleyici (`web_srp_analyzer.py`), yeni dosya monolit bypass'ının kapatılması ve 11 birim testinin tamamlanması
 - [x] README vitrini: değer önerisi, animasyonlu demo, Claude Code hızlı başlangıcı
 - [x] GitHub topics (14), homepage ve açıklama güncellendi
 - [x] v1.4.18 release yayımlandı (`.vsix` ekli)

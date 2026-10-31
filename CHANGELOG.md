@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (Web SRP & HTML Separation of Concerns Budgets)
+- **`engine/gravityguard_engine/web_srp_analyzer.py`**: Web projelerinde monolitik HTML dosyalarının ve devasa gömülü JS/CSS bloklarının oluşmasını engelleyen deterministik bütçe denetleyici (Separation of Concerns).
+  - `WEB_INLINE_JS_BUDGET`: Çalıştırılabilir gömülü JS > 30 LOC veya > 2048 bayt (2 KiB) -> **DENY** (> 10 LOC -> WARN). Harici betikler (`<script src="...">`) ve veri şablonları (`application/json`, `application/ld+json`, `importmap`, `speculationrules`) bütçeden muaftır.
+  - `WEB_INLINE_CSS_BUDGET`: Gömülü `<style>` CSS > 60 LOC veya > 4096 bayt (4 KiB) -> **DENY** (> 20 LOC -> WARN).
+  - `WEB_MIXED_RESPONSIBILITIES`: Aynı HTML dosyasında hem JS (> 10 LOC) hem de CSS (> 20 LOC) bir arada gömüldüğünde -> **DENY** (SoC ihlali).
+  - `WEB_DOCUMENT_SIZE`: HTML > 350 LOC -> WARN, HTML > 600 LOC ve gömülü stil/betik sorumluluk birikimi -> **DENY**.
+  - Yorum içi kaçış mekanizması: `<!-- srp: allow-monolith -->` veya `<!-- noqa: srp -->` desteği.
+- **`architecture_rules.py`**: Yeni dosya oluşturma (`not old_full_content.strip()`) bypass'ı kapatıldı (`ARCH_FILE_SIZE` denetimi: başlangıç boyutu tek seferde monolitik sınırını veya tek yazma sınırını aşamaz).
+- **`dispatcher.py`**: GUARD 7'ye `.html` / `.htm` Web SRP yönlendirmesi eklendi; `.mjs` ve `.cjs` uzantıları TS/JS kontrol kapsamına alındı.
+- **Testler**: `engine/tests/test_web_srp.py` (11 birim testi: temiz HTML izni, JS satır/bayt bütçesi aşımı, CSS satır/bayt bütçesi aşımı, SoC karma sorumluluk engellemesi, 600+ LOC monolit HTML engellemesi, harici src/JSON muafiyeti, kaçış etiketi). Tüm motor testleri (362 test) eksiksiz geçti.
+
 ### Added (Agent Hook Proposals, user approval)
 - **`engine/gravityguard_engine/hook_proposals.py`**: ajan kanca kuramaz ama önerebilir. Öneri `.gravityguard/proposals/hooks/<id>.json` dosyasıdır (hedef `claude` → `.claude/settings.json` / `settings.local.json`, `antigravity` → `.agents/hooks.json`; olay, matcher, komut, gerekçe, şikâyet, test komutu). Doğrulama: yalnızca ekleme (bilinmeyen alan ve zaten kurulu komut reddedilir), GravityGuard'ın kendi kancalarına/onay araçlarına dokunan komut reddedilir, `PreToolUse`/`PermissionRequest` önerilemez (izin sorusunu atlatabilir), komut yalnızca proje dosyası okur (`cat`/`type`/`Get-Content`/`head`/`tail`) ya da projedeki var olan bir betiği çalıştırır (satır içi kod, `curl`/`wget`, dosyaya yönlendirme, `$(...)` yasak), `G0_*` sır/`.env`/tehlikeli komut kuralları geçerli. Onay, kullanıcının gördüğü içeriğin SHA-256 özetine bağlıdır; hedef dosya mevcut ayarlar korunarak birleştirilir ve atomik yazılır. Her karar `.gravityguard/runtime/hook-receipts/<id>.json` kaydına ve denetim günlüğüne (`HOOK_PROPOSAL_APPROVED` / `_REJECTED` / `_REVERTED`) düşer; geri alma yalnızca onayın eklediği girdiyi siler, elle değiştirilmiş kancaya dokunmaz.
 - **Kullanıcı tarafı**: panelde yeni **Kancalar** sekmesi (bekleyen öneri sayısı rozeti, şikâyet/gerekçe/komut/diff, Onayla ve kur + VS Code onay penceresi, Reddet, kurulu öneriler için Geri al) ve `gravityguard hooks list|show|approve|reject|revert` komutu (`bin/gravityguard`, `bin/gravityguard.cmd`, `engine/gravityguard_cli.py`; `approve`/`revert` etkileşimli terminal ve kimliğin elle yazılmasını ister). Panel `engine/hook_proposal_control.py` üzerinden çalışır.

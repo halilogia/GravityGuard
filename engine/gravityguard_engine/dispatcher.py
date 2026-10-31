@@ -543,7 +543,7 @@ def validate_gravityguard() -> None:
 
 
     is_python = file_lower.endswith(".py")
-    is_ts = file_lower.endswith((".ts", ".tsx", ".js", ".jsx"))
+    is_ts = file_lower.endswith((".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"))
 
     # ========================================================================
     # GUARD 1: G1 — SILENT EXCEPTION (BLOCK)
@@ -699,10 +699,30 @@ def validate_gravityguard() -> None:
             all_warnings.append(("ARCH_FILE_GROWTH", arch_msg))
 
     # ========================================================================
-    # GUARD 7: EXISTING SRP (Single Responsibility Principle)
+    # GUARD 7: EXISTING SRP (Single Responsibility Principle & Web SRP)
     # ========================================================================
     if not is_test_file:
-        if is_python:
+        if file_lower.endswith((".html", ".htm")):
+            from .web_srp_analyzer import analyze_html_srp
+            is_violation, rule_id, reason_msg, web_warnings = analyze_html_srp(projected_content, file_path=target_file)
+            for wid, wmsg in web_warnings:
+                if is_rule_shadow(wid, cfg):
+                    _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {wmsg}", rule_id=wid)
+                else:
+                    _log("WARNING", target_file, wmsg, rule_id=wid)
+                    all_warnings.append((wid, wmsg))
+            if is_violation:
+                if is_rule_shadow(rule_id, cfg):
+                    _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {reason_msg}", rule_id=rule_id)
+                else:
+                    _log("BLOCKED", target_file, reason_msg, rule_id=rule_id)
+                    print(json.dumps({
+                        "decision": "deny",
+                        "reason": f"🛑 [{rule_id}]: '{target_file}' - {reason_msg}"
+                    }))
+                    sys.exit(0)
+
+        elif is_python:
             is_violation, reason = analyze_python_srp(projected_content, file_path=target_file)
             if is_violation:
                 if is_rule_shadow("SRP_BOUNDARY", cfg):
