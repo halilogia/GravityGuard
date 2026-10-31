@@ -469,7 +469,7 @@ def _recompute_effectiveness_rates(state: Dict[str, Any]) -> None:
             rst.pop("deterrenceRate", None)
             tot_security_blocked += b
         else:
-            if r > b:
+            if r > b > 0:
                 sys.stderr.write(
                     f"[GravityGuard Invariant Violation] rule {r_id}: recovered ({r}) > blocked ({b})\n"
                 )

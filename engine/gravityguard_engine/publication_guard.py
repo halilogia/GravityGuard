@@ -4,8 +4,13 @@ import re
 from pathlib import Path
 from .security_rules import check_g0_secret_leak, is_protected_env_file
 
-MAX_SCAN_BYTES = 4 * 1024 * 1024
+MAX_SCAN_BYTES = 16 * 1024 * 1024
 _PRIVATE_KEY_FILE = re.compile(r"(?:^|[/\\])(?:id_(?:rsa|dsa|ecdsa|ed25519)|\.aws[/\\]credentials)$", re.I)
+
+
+def _is_binary_chunk(data: bytes) -> bool:
+    """True when the leading chunk contains NUL bytes (actual binary asset/media/model)."""
+    return b"\x00" in data[:8192]
 
 
 def _is_protected_path(path: str) -> bool:
@@ -27,7 +32,7 @@ def scan_git_secrets(root: Path, staged_only: bool = False, require_repo: bool =
             return ["[SECURITY_SCAN_UNAVAILABLE]: Invalid base revision"]
         switches = [(base, "HEAD")] if base else [("--cached",)] if staged_only else [("--cached",), ()]
         for extra in switches:
-            proc = git("diff", *extra, "--no-ext-diff", "--no-textconv", "--text", "--unified=0", "--")
+            proc = git("diff", *extra, "--no-ext-diff", "--no-textconv", "--unified=0", "--")
             if proc.returncode or len(proc.stdout) > MAX_SCAN_BYTES:
                 return ["[SECURITY_SCAN_UNAVAILABLE]: Git diff failed or exceeded the scan limit"]
             added = "\n".join(line[1:] for line in proc.stdout.decode("utf-8", "replace").splitlines()
@@ -53,9 +58,14 @@ def scan_git_secrets(root: Path, staged_only: bool = False, require_repo: bool =
                     continue
                 if file.is_symlink() or not file.is_file():
                     continue
-                if file.stat().st_size > MAX_SCAN_BYTES:
-                    return ["[SECURITY_SCAN_UNAVAILABLE]: Untracked file exceeds the scan limit"]
-                blocked, reason, _ = check_g0_secret_leak(file.read_bytes().decode("utf-8", "replace"))
+                with file.open("rb") as fh:
+                    head = fh.read(8192)
+                    if _is_binary_chunk(head):
+                        continue
+                    if file.stat().st_size > MAX_SCAN_BYTES:
+                        return ["[SECURITY_SCAN_UNAVAILABLE]: Untracked file exceeds the scan limit"]
+                    raw_bytes = head + fh.read()
+                blocked, reason, _ = check_g0_secret_leak(raw_bytes.decode("utf-8", "replace"))
                 if blocked:
                     findings.append(f"[G0_SECRET_LEAK]: Untracked-file scan: {reason}")
         return findings

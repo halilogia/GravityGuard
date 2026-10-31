@@ -385,6 +385,11 @@ class TestAdapterRobustness(unittest.TestCase):
 
 class TestShellDeny(unittest.TestCase):
     def setUp(self):
+        self._tmp_log = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp_log.cleanup)
+        self._env_patch = mock.patch.dict(os.environ, {"GRAVITYGUARD_LOG_DIR": self._tmp_log.name})
+        self._env_patch.start()
+        self.addCleanup(self._env_patch.stop)
         self.addCleanup(os.environ.pop, adapter.FAIL_OPEN_ENV, None)
         os.environ.pop(adapter.FAIL_OPEN_ENV, None)
 

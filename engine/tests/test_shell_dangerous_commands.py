@@ -243,6 +243,11 @@ class TestPublicationGuardFiles(unittest.TestCase):
         (self.root / "app.py").write_text("print('hi')\n", encoding="utf-8")
         self.assertEqual(scan_git_secrets(self.root), [])
 
+    def test_large_untracked_binary_asset_passes_without_exceeding_scan_limit(self):
+        # 5 MB binary asset containing NUL bytes in its header (e.g. .glb / .blend / .pck)
+        (self.root / "model.glb").write_bytes(b"glTF\x00\x02\x00\x00" + b"x" * (5 * 1024 * 1024))
+        self.assertEqual(scan_git_secrets(self.root), [])
+
 
 if __name__ == "__main__":
     unittest.main()

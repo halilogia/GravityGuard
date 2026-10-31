@@ -15,6 +15,14 @@ import io
 from unittest.mock import patch
 
 class TestEnvProtection(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self._tmp_log = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp_log.cleanup)
+        self._env_patch = patch.dict(os.environ, {"GRAVITYGUARD_LOG_DIR": self._tmp_log.name})
+        self._env_patch.start()
+        self.addCleanup(self._env_patch.stop)
+
     def test_is_protected_env_file(self):
         # Protected files
         self.assertTrue(is_protected_env_file(".env"))

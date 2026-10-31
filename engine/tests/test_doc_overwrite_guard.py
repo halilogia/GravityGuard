@@ -17,6 +17,9 @@ from gravityguard_engine.dispatcher import validate_gravityguard
 class TestDocOverwriteGuard(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
+        self._env_patch = patch.dict(os.environ, {"GRAVITYGUARD_LOG_DIR": os.path.join(self.temp_dir, "logs")})
+        self._env_patch.start()
+        self.addCleanup(self._env_patch.stop)
         self.existing_doc = Path(self.temp_dir) / "README.md"
         self.existing_doc.write_text("# My Project\nOriginal Content\n", encoding="utf-8")
 

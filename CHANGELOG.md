@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Weekly Audit Maintenance & Publication Guard Hardening (`publication_guard.py`, `audit.py`)**:
+  - `publication_guard.py`: Exempted genuine binary assets (files containing NUL bytes in their first 8 KB header, e.g. `.glb`, `.blend`, `.pck`, `.png`) from untracked content/size secret scanning while preserving `.env` / private key path checks and text-file scanning even under binary extensions; removed `--text` from `git diff` so binary diffs do not blow up diff output, and raised `MAX_SCAN_BYTES` from 4 MiB to 16 MiB.
+  - `audit.py`: Prevented false `[GravityGuard Invariant Violation]` stderr noise on advisory/pending rules (`b == 0` with legacy recovery records).
+  - Isolated `GRAVITYGUARD_LOG_DIR` in `test_claude_adapter.py` (`TestShellDeny`), `test_env_protection.py`, and `test_doc_overwrite_guard.py` so unit test runs never pollute `~/.gemini/logs/gravityguard_permanent_audit.jsonl`.
+
 - **Test Evidence Anti-Overengineering (`test_evidence.py`)**:
   - Expanded `DEFAULT_EXEMPT_PATTERNS` to exempt i18n/translation dictionaries (`lang-*`, `i18n`, `locale`, `locales`, `translations`), scratch/temporary files (`scratch*`, `tmp_*`, `temp_*`), pure UI/DOM/TUI/View layers (`/ui/`, `/views/`, `/components/`, `/web/`, `tui.ts`, `tree.ts`, `transcript.ts`, `office_view.ts`, `sessions.js`, `app.js`), and CLI/launcher entrypoints (`cli.ts`, `cli.py`, `main.py`, `main.ts`, `run_*`, `*_launcher.*`, `*_opener.*`) from `T1_PENDING` 1:1 unit test obligations.
   - Updated `is_exempt_from_test_evidence` so slash-delimited directory patterns (`/ui/`, `/web/`, etc.) match only exact directory path segments without wildcarding inner substrings.
