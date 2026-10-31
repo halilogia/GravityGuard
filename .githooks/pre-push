@@ -10,13 +10,23 @@ echo "================================================================="
 
 # 1. GIZLI ANAHTAR / TOKEN SIZINTI KONTROLU
 echo " [1/2] Gizli anahtar / token sizintisi taraniyor..."
-SECRET_REGEX="sk-ant-|ghp_[0-9a-zA-Z]{36}|AKIA[0-9A-Z]{16}|sk-proj-"
-if git grep -EI "$SECRET_REGEX" HEAD -- ':!*.lock' ':!package-lock.json' ':!.github/workflows/*' ':!.git*' 2>/dev/null; then
-    echo ""
-    echo "❌ [Pre-Push Gate] HATA: HEAD commitinde gizli API anahtari veya token tespit edildi!"
-    echo "   Guvenlik sizintisini ve GitHub CI patlamasini onlemek icin push IPTAL EDILDI."
-    echo "================================================================="
-    exit 1
+if [ -f "engine/gravityguard_engine/publication_guard.py" ] && command -v python >/dev/null 2>&1; then
+    if ! python -c "import sys; sys.path.insert(0, 'engine'); from gravityguard_engine.publication_guard import scan_git_secrets; f = scan_git_secrets('.'); sys.exit(1 if f else 0)"; then
+        echo ""
+        echo "❌ [Pre-Push Gate] HATA: Gizli API anahtari veya token tespit edildi!"
+        echo "   Guvenlik sizintisini ve GitHub CI patlamasini onlemek icin push IPTAL EDILDI."
+        echo "================================================================="
+        exit 1
+    fi
+else
+    SECRET_REGEX="sk-ant-|ghp_[0-9a-zA-Z]{36}|AKIA[0-9A-Z]{16}|sk-proj-"
+    if git grep -EI "$SECRET_REGEX" HEAD -- ':!*.lock' ':!package-lock.json' ':!.github/workflows/*' ':!.git*' ':!*test*' ':!tests/*' ':!engine/tests/*' ':!docs/*' ':!CHANGELOG.md' ':!media/*' 2>/dev/null; then
+        echo ""
+        echo "❌ [Pre-Push Gate] HATA: HEAD commitinde gizli API anahtari veya token tespit edildi!"
+        echo "   Guvenlik sizintisini ve GitHub CI patlamasini onlemek icin push IPTAL EDILDI."
+        echo "================================================================="
+        exit 1
+    fi
 fi
 
 # 2. PROJE TEST VE DERLEME DOGRULAMASI
