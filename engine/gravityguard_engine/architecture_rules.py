@@ -43,38 +43,135 @@ def check_design_icon_rule(target_file: str, added_text: str) -> List[str]:
     return list(dict.fromkeys(icons))
 
 
-# --- G7: TYPESCRIPT FIRST ADVISORY (WARN ONLY) ---
-def check_g7_ts_first(target_file: str) -> Optional[str]:
+# --- G7: TYPESCRIPT FIRST ENFORCEMENT & MANDATORY JS DETECTOR (BLOCK + FEEDBACK) ---
+_MANDATORY_JS_DIRS: Set[str] = {
+    "dist", "build", "out", ".next", ".nuxt", ".svelte-kit", ".output",
+    "node_modules", "vendor", "coverage", "bundle", "bundles",
+    "doc", "docs", "documentation", "test", "tests", "__tests__",
+    "migrations", "seeders",
+}
+
+_MANDATORY_JS_SUFFIXES: Tuple[str, ...] = (
+    ".min.js", ".bundle.js", ".chunk.js", ".umd.js", ".esm.js", ".cjs.js",
+    ".config.js", ".config.cjs", ".config.mjs",
+    ".conf.js", ".conf.cjs", ".conf.mjs",
+    "rc.js", "rc.cjs", "rc.mjs",
+    ".test.js", ".test.cjs", ".test.mjs",
+    ".spec.js", ".spec.cjs", ".spec.mjs",
+    ".worker.js", ".sw.js",
+)
+
+_MANDATORY_JS_EXACT_NAMES: Set[str] = {
+    "gulpfile.js", "gulpfile.mjs", "gulpfile.cjs",
+    "gruntfile.js", "gruntfile.cjs",
+    "jakefile.js", "brocfile.js",
+    "sw.js", "service-worker.js", "firebase-messaging-sw.js",
+}
+
+_TS_MANDATORY_FEEDBACK_RE = re.compile(
+    r"(?://|/\*)\s*@(?:ts-mandatory|gravityguard-js-reason)\s*:\s*([^\n\r\*]+)",
+    re.IGNORECASE,
+)
+
+_TRIVIAL_FEEDBACK_REASONS: Set[str] = {
+    "test", "bypass", "none", "zorunlu", "gerekiyor", "js", "javascript", "ok", "allow",
+}
+
+
+def extract_js_mandatory_feedback(content: str) -> Optional[str]:
     """
-    Checks if a newly introduced or edited file is a raw JavaScript file (.js, .cjs, .mjs).
-    Upholds the G7 TypeScript-First standing invariant by issuing an Advisory Warning.
-    Never blocks; respects pragmatic exceptions:
-    - Distribution/build outputs: dist/, build/, out/, .next/
-    - Dependency directories: node_modules/
-    - Tool/bundler configuration files: *.config.js, *.config.cjs, *.config.mjs
-    - Direct client-side browser scripts: static/, public/, or *.min.js
+    Extracts a validated AI mandatory-JS justification from the first 10 lines of a file.
+    Syntax: // @ts-mandatory: <at least 15 chars of concrete technical reason>
+    """
+    if not content:
+        return None
+    head = "\n".join(content.splitlines()[:10])
+    m = _TS_MANDATORY_FEEDBACK_RE.search(head)
+    if not m:
+        return None
+    reason = m.group(1).strip()
+    if len(reason) < 15 or reason.lower() in _TRIVIAL_FEEDBACK_REASONS:
+        return None
+    return reason
+
+
+def record_js_mandatory_feedback(
+    target_file: str,
+    reason: str,
+    conversation_id: str = "default",
+) -> None:
+    """Persists AI feedback for mandatory JS exemptions so GravityGuard can audit and learn new patterns."""
+    from datetime import datetime, timezone
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "file": target_file.replace("\\", "/"),
+        "reason": reason,
+        "conversationId": conversation_id,
+    }
+    try:
+        log_dir = _resolve_log_dir()
+        os.makedirs(log_dir, exist_ok=True)
+        feedback_path = os.path.join(log_dir, "gravityguard_js_feedback.jsonl")
+        with open(feedback_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        sys.stderr.write(f"[GravityGuard JS Feedback Log Warning] {exc}\n")
+
+
+def evaluate_g7_ts_first(
+    target_file: str,
+    projected_content: str = "",
+) -> Tuple[bool, str, Optional[str]]:
+    """
+    Evaluates whether a JavaScript file (.js, .jsx, .cjs, .mjs) violates the G7 TypeScript-First standard.
+    Returns (is_blocked, deny_message, feedback_reason).
+    - Deterministic mandatory JS files (configs, dotfiles, build outputs, workers, test runners, migrations) -> allowed.
+    - Explicit technical justification via `// @ts-mandatory: <reason>` in first 10 lines -> allowed + feedback logged.
+    - All other raw JS application/module files -> BLOCKED (DENY).
     """
     norm = target_file.replace("\\", "/").lower()
-    parts = norm.split("/")
+    norm_rel = re.sub(r"^.*?/\.gemini/antigravity/scratch/[^/]+", "", norm)
+    parts = [p for p in norm_rel.split("/") if p]
+    if not parts:
+        return False, "", None
     name = parts[-1]
 
-    if not name.endswith((".js", ".cjs", ".mjs")):
-        return None
+    if not name.endswith((".js", ".jsx", ".cjs", ".mjs")):
+        return False, "", None
 
-    # Pragmatic exceptions
-    if any(part in {"dist", "build", "out", ".next", "node_modules", "vendor", "coverage", "static", "public"} for part in parts[:-1]):
-        return None
+    # 1. Deterministic directory exemptions (build output, vendor, docs, test runners, migrations)
+    if any(part in _MANDATORY_JS_DIRS for part in parts[:-1]):
+        return False, "", None
 
-    if name.endswith((".min.js", ".config.js", ".config.cjs", ".config.mjs")):
-        return None
+    # 2. Deterministic filename & suffix exemptions (configs, rc files, minified/bundled, workers, tests)
+    if name in _MANDATORY_JS_EXACT_NAMES or name.startswith("workbox-") or name.endswith(_MANDATORY_JS_SUFFIXES):
+        return False, "", None
 
-    if any(part in {"doc", "docs", "documentation"} for part in parts[:-1]):
-        return None
+    # 3. Check for AI Mandatory-JS Feedback Header in the first 10 lines
+    feedback = extract_js_mandatory_feedback(projected_content)
+    if feedback:
+        return False, "", feedback
 
+    ext = name.rsplit(".", 1)[-1]
+    stem = name.rsplit(".", 1)[0]
+    suggested_ext = ".tsx" if ext == "jsx" else ".ts"
     return (
-        f"G7 TypeScript-First Tavsiyesi: '{name}' dosyası saf JavaScript ({name.split('.')[-1]}) olarak yazılıyor. "
-        "Ekosistem standardı gereği kodların ve scriptlerin tip güvenli TypeScript (.ts) olarak yazılması tavsiye edilir."
+        True,
+        (
+            f"G7 TypeScript-First İhlali: '{name}' dosyası saf JavaScript (.{ext}) olarak yazılamaz! "
+            f"Ekosistem standardı gereği uygulama ve modül kodları tip güvenli TypeScript ('{stem}{suggested_ext}') olarak yazılmalıdır. "
+            f"EĞER bu dosyanın teknik bir zorunluluk nedeniyle kesinlikle .{ext} kalması gerekiyorsa, "
+            f"dosyanın ilk 5 satırı içine şu geri bildirim bildirimini ekleyerek GravityGuard'a bildirin: "
+            f"// @ts-mandatory: <en az 15 karakterlik somut teknik gerekçe>"
+        ),
+        None,
     )
+
+
+def check_g7_ts_first(target_file: str, projected_content: str = "") -> Optional[str]:
+    """Backwards-compatible wrapper around evaluate_g7_ts_first returning Optional[str]."""
+    is_blocked, msg, _ = evaluate_g7_ts_first(target_file, projected_content)
+    return msg if is_blocked else None
 
 
 # --- DESIGN_SCROLLBAR_RULE: DEFAULT WEBKIT / BROWSER SCROLLBAR BAN (WARN ONLY) ---

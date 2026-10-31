@@ -297,6 +297,23 @@ class TestEndToEnd(unittest.TestCase):
         self.assertNotIn("KNOWLEDGE.md", reason, "the project has no docs/KNOWLEDGE.md")
         self.assertIn("Kalan deneme: 4", reason)
 
+    def test_hook_json_records_knowledge_and_final_retry_injects_both_docs(self):
+        root = Path(self.proj)
+        (root / "CHANGELOG.md").write_text("## [Unreleased]\n", encoding="utf-8")
+        (root / "KNOWLEDGE.md").write_text("# Knowledge\n", encoding="utf-8")
+        target = root / "hooks.json"
+        out = self.hook("knowledge", "Write", {"file_path": str(target), "content": "{}\n"})
+        if out:
+            self.assertNotEqual(out.get("hookSpecificOutput", {}).get("permissionDecision"), "deny", out)
+        target.write_text("{}\n", encoding="utf-8")
+        for attempt in range(4):
+            out = self.hook("knowledge", stop=True, stop_hook_active=attempt > 0)
+            self.assertEqual(out["decision"], "block")
+            self.assertIn("KNOWLEDGE.md", out["reason"])
+        self.assertIsNone(self.hook("knowledge", stop=True, stop_hook_active=True))
+        self.assertIn("[auto-ADR]", (root / "KNOWLEDGE.md").read_text(encoding="utf-8"))
+        self.assertIn("[auto]", (root / "CHANGELOG.md").read_text(encoding="utf-8"))
+
     def test_non_string_content_is_denied_not_a_traceback(self):
         out = self.hook("A", "Write", {"file_path": os.path.join(self.proj, "n.py"), "content": 12345})
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")

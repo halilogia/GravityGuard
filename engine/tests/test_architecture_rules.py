@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Unit tests for GravityGuard Architecture Rules (G3, G4, OE Spike, Cumulative Growth, SRP).
+Unit tests for GravityGuard Architecture Rules (G3, G4, G7, OE Spike, Cumulative Growth, SRP, PMA).
 """
 import os
 import io
@@ -22,13 +22,17 @@ from gravityguard_engine.architecture_rules import (
     check_design_icon_rule,
     check_design_scrollbar_rule,
     check_g3_compiler_bypass,
+    check_g7_ts_first,
     check_oe_spike,
     check_pma_horizontal,
     check_pma_imports,
+    evaluate_g7_ts_first,
+    extract_js_mandatory_feedback,
     is_cohesive_module_by_filename,
     is_pma_exempt,
     is_py_cohesive_monolith,
     is_ts_cohesive_monolith,
+    record_js_mandatory_feedback,
 )
 
 
@@ -99,6 +103,71 @@ class TestDesignScrollbarRule(unittest.TestCase):
         self.assertEqual(len(violations), 0)
         violations2 = check_design_scrollbar_rule("tests/test_ui.css", "overflow: auto")
         self.assertEqual(len(violations2), 0)
+
+
+class TestG7TypeScriptFirst(unittest.TestCase):
+    def test_blocks_raw_js_application_files_including_antigravity_scratch(self):
+        for path in (
+            "src/app.js",
+            "js/formations.js",
+            "src/components/Button.jsx",
+            "src/utils/helper.mjs",
+            "C:/Users/Halil Emre/.gemini/antigravity/scratch/fm-tactic-viewer/js/app.js",
+        ):
+            blocked, msg, fb = evaluate_g7_ts_first(path, "const x = 1;\n")
+            self.assertTrue(blocked, path)
+            self.assertIn("G7 TypeScript-First İhlali", msg)
+            self.assertIsNone(fb)
+            self.assertIsNotNone(check_g7_ts_first(path, "const x = 1;\n"))
+
+    def test_allows_deterministic_mandatory_js_files(self):
+        for path in (
+            "vite.config.js",
+            "tailwind.config.cjs",
+            "astro.config.mjs",
+            ".eslintrc.js",
+            ".prettierrc.cjs",
+            "gulpfile.js",
+            "sw.js",
+            "service-worker.js",
+            "firebase-messaging-sw.js",
+            "public/pdf.worker.js",
+            "dist/app.js",
+            "build/bundle.js",
+            "node_modules/pkg/index.js",
+            "static/vendor.min.js",
+            "migrations/20261031_init.js",
+            "tests/unit.test.mjs",
+            "src/app.ts",
+            "src/Component.tsx",
+        ):
+            blocked, msg, fb = evaluate_g7_ts_first(path, "module.exports = {};\n")
+            self.assertFalse(blocked, path)
+            self.assertEqual(msg, "")
+            self.assertIsNone(fb)
+
+    def test_allows_and_logs_valid_ai_mandatory_js_feedback(self):
+        tag = "@" + "ts-mandatory"
+        code = f"// {tag}: Electron main process requires direct CommonJS entrypoint without compilation step\nconst {{ app }} = require('electron');\n"
+        self.assertIsNotNone(extract_js_mandatory_feedback(code))
+        blocked, msg, fb = evaluate_g7_ts_first("main.js", code)
+        self.assertFalse(blocked)
+        self.assertEqual(msg, "")
+        self.assertIn("Electron main process", fb)
+
+        # Trivial or short reasons must be rejected
+        bad_code = f"// {tag}: test\nconst x = 1;\n"
+        self.assertIsNone(extract_js_mandatory_feedback(bad_code))
+        self.assertTrue(evaluate_g7_ts_first("main.js", bad_code)[0])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("gravityguard_engine.architecture_rules._resolve_log_dir", return_value=tmpdir):
+                record_js_mandatory_feedback("main.js", fb, "conv-123")
+                ledger = Path(tmpdir) / "gravityguard_js_feedback.jsonl"
+                self.assertTrue(ledger.exists())
+                record = json.loads(ledger.read_text(encoding="utf-8").strip())
+                self.assertEqual(record["file"], "main.js")
+                self.assertIn("Electron main process", record["reason"])
 
 
 class TestArchitectureRulesDomain(unittest.TestCase):
@@ -254,10 +323,11 @@ class TestPmaBoundaryDetector(unittest.TestCase):
         self.assertTrue(is_pma_exempt(""))
 
     def test_dispatcher_wires_pma_guard(self):
-        src = open(os.path.join(_ENGINE_DIR, "gravityguard_engine", "dispatcher.py"), encoding="utf-8").read()
+        src = Path(_ENGINE_DIR, "gravityguard_engine", "dispatcher.py").read_text(encoding="utf-8")
         self.assertIn("check_pma_horizontal(target_file)", src)
         self.assertIn("check_pma_imports(target_file, added_text)", src)
         self.assertIn("ARCH_PMA_HORIZONTAL_DENY", src)
+        self.assertIn("evaluate_g7_ts_first(target_file, projected_content)", src)
 
 
 if __name__ == "__main__":

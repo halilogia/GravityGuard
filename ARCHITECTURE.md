@@ -2,6 +2,8 @@
 
 This document details the architectural topology, component boundaries, execution flows, and engineering decisions behind **GravityGuard**.
 
+Documentation automation lives in `engine/gravityguard_engine/doc_automation.py`. PreToolUse records CHANGELOG and, for rule/configuration changes, KNOWLEDGE obligations. Stop refreshes the architecture inventory and, on retry four, injects fallback entries before resolving completed obligations. Projects without a custom generator use a built-in source/LOC/test inventory in their existing architecture document; only the managed block is replaced (maximum 200 lines). Manual content and newline style are preserved by the generic updater.
+
 ---
 
 ## 1. System Topology Overview
@@ -394,4 +396,22 @@ flowchart TD
 3. **Misaligned Purpose**: SonarQube answers: *"Is this entire codebase maintainable, secure, and compliant with enterprise standards over time?"* GravityGuard answers: *"Is the AI agent about to commit an irreversible, sloppy, or hazardous act right this millisecond?"*
 4. **The Airbag Principle**: GravityGuard is an airbag, not a full annual vehicle inspection. An airbag must deploy in 5 milliseconds when a crash (secret leak, silent error, test destruction) occurs. It does not inspect whether the car's upholstery matches or if the engine oil has 10% wear.
 
+<!-- ARCH-AUTO:START (tools/generate_architecture.py --sync; elle düzenlemeyin) -->
+## Otomatik Metrikler (Stop hook ile güncellenir)
 
+> Üretim tarihi: 2026-10-31 — sürüm 1.4.18
+
+- Toplam dosya: **124**, dolu satır: **25190**
+- Test dosyası: **47**, test sayısı: **504**
+
+| Katman | Dosya | Dolu satır |
+|---|---:|---:|
+| Tier 1 Fast-Path Guardrail | 5 | 1250 |
+| Tier 4 Deep-Path Güvenlik Denetçisi | 1 | 417 |
+| Yönetişim & Yaşam Döngüsü | 4 | 1724 |
+| Extension UI & Client | 26 | 4125 |
+| `engine/` (alan) | 32 | 11604 |
+| `plugin/` (alan) | 10 | 651 |
+| `src/` (alan) | 34 | 5938 |
+| `tests/` (alan) | 48 | 6997 |
+<!-- ARCH-AUTO:END -->

@@ -76,6 +76,18 @@ class GenerateArchitectureTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("bulunamadı", msg)
 
+    def test_sync_check_is_read_only_and_detects_drift(self):
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(ga.main(["--sync", "--check"], root=self.root), 1)
+            self.assertFalse((self.root / "ARCHITECTURE.md").exists())
+            _write(self.root, "ARCHITECTURE.md", "# Manual\n")
+            ga.main(["--sync"], root=self.root)
+            self.assertEqual(ga.main(["--sync", "--check"], root=self.root), 0)
+            before = (self.root / "ARCHITECTURE.md").read_bytes()
+            _write(self.root, "src/new.ts", "const x = 1;\n")
+            self.assertEqual(ga.main(["--sync", "--check"], root=self.root), 1)
+            self.assertEqual((self.root / "ARCHITECTURE.md").read_bytes(), before)
+
     def test_main_generate_then_check_ok(self):
         with redirect_stdout(io.StringIO()):
             self.assertEqual(ga.main(["--output", "OUT.md"], root=self.root), 0)

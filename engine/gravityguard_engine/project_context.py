@@ -198,17 +198,20 @@ def resolve_complexity_thresholds(cfg: Optional[dict]) -> Dict[str, int]:
     return resolved
 
 
-def should_enforce_doc_obligations(target_file: str = "", cfg: Optional[dict] = None) -> bool:
+def should_enforce_doc_obligations(
+    target_file: str = "", cfg: Optional[dict] = None, project_root: Optional[Path] = None
+) -> bool:
     """
     Determines whether documentation obligations should be enforced for this target file.
-    Strictly opt-in: Requires explicit configuration in .gravityguard.json:
-        {"governance": {"enforceDocObligations": true}}
+    An explicit `.gravityguard.json` value always wins:
+        {"governance": {"enforceDocObligations": false}}
+    Without one, the obligation is on by default for any project that keeps a CHANGELOG.md in its root.
     """
     if cfg and isinstance(cfg.get("governance"), dict):
         explicit = cfg["governance"].get("enforceDocObligations")
         if explicit is not None:
             return bool(explicit)
-    return False
+    return project_root is not None and (Path(project_root) / "CHANGELOG.md").is_file()
 
 
 def is_doc_governed_target(target_file: str, cfg: Optional[dict] = None, project_root: Optional[Path] = None) -> bool:

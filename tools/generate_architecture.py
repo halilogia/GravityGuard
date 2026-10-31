@@ -215,6 +215,78 @@ def render_markdown(root, metrics=None, today=None):
     return "\n".join(out)
 
 
+ARCH_START = "<!-- ARCH-AUTO:START (tools/generate_architecture.py --sync; elle düzenlemeyin) -->"
+ARCH_END = "<!-- ARCH-AUTO:END -->"
+ARCH_MAX_LINES = 200  # anti-bloat: an auto-generated section never exceeds this many lines
+
+
+def render_compact_block(root, metrics=None, today=None):
+    """Compact auto-managed block (metrics + layer matrix) for embedding into a hand-written ARCHITECTURE.md."""
+    m = metrics or collect_metrics(root)
+    today = today or date.today().isoformat()
+    out = [
+        ARCH_START,
+        "## Otomatik Metrikler (Stop hook ile güncellenir)",
+        "",
+        f"{DATE_PREFIX} {today} — sürüm {read_version(root)}",
+        "",
+        f"- Toplam dosya: **{m['total_files']}**, dolu satır: **{m['total_loc']}**",
+        f"- Test dosyası: **{m['test_files']}**, test sayısı: **{m['test_count']}**",
+        "",
+        "| Katman | Dosya | Dolu satır |",
+        "|---|---:|---:|",
+    ]
+    for layer in m["layers"]:
+        out.append(f"| {layer['name']} | {layer['files']} | {layer['loc']} |")
+    for area in sorted(m["areas"]):
+        a = m["areas"][area]
+        out.append(f"| `{area}/` (alan) | {a['files']} | {a['loc']} |")
+    out.append(ARCH_END)
+    return "\n".join(out)
+
+
+def _cap_lines(text, limit=ARCH_MAX_LINES):
+    lines = text.splitlines()
+    if len(lines) <= limit:
+        return text
+    kept = lines[: limit - 3]
+    if sum(1 for l in kept if l.startswith("```")) % 2:
+        kept.append("```")
+    kept.append(f"> … {len(lines) - len(kept)} satır anti-bloat sınırı ({limit}) nedeniyle kırpıldı.")
+    return "\n".join(kept)
+
+
+def sync_architecture(root, target="ARCHITECTURE.md", today=None):
+    """Update the architecture doc in place and never overwrite hand-written content.
+
+    - missing file      -> create it from the full report, capped at ARCH_MAX_LINES lines
+    - markers present   -> replace only the text between the markers (skipped when only the date differs)
+    - no markers        -> append the compact marker block once; everything else stays untouched
+    Returns (status, path) where status is created | updated | appended | unchanged.
+    """
+    path = Path(target)
+    if not path.is_absolute():
+        path = Path(root) / path
+    if not path.is_file():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_cap_lines(render_markdown(root, today=today)) + "\n", encoding="utf-8", newline="\n")
+        return "created", path
+    current = path.read_text(encoding="utf-8")
+    block = render_compact_block(root, today=today)
+    start, end = current.find(ARCH_START), current.find(ARCH_END)
+    if start != -1 and end > start:
+        old = current[start:end + len(ARCH_END)]
+        if _strip_date(old) == _strip_date(block):
+            return "unchanged", path
+        new_text = current[:start] + block + current[end + len(ARCH_END):]
+        status = "updated"
+    else:
+        new_text = current.rstrip("\n") + "\n\n" + block + "\n"
+        status = "appended"
+    path.write_text(new_text, encoding="utf-8", newline="\n")
+    return status, path
+
+
 def _strip_date(text):
     return "\n".join(l for l in text.splitlines() if not l.startswith(DATE_PREFIX))
 
@@ -239,7 +311,21 @@ def main(argv=None, root=ROOT):
     ap = argparse.ArgumentParser(description="GravityGuard otomatik mimari raporlayıcı")
     ap.add_argument("--output", default=DEFAULT_OUTPUT)
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--sync", nargs="?", const="ARCHITECTURE.md", metavar="PATH",
+                    help="update the marker block of ARCHITECTURE.md (or PATH) in place")
     args = ap.parse_args(argv)
+    if args.sync and args.check:
+        path = Path(root) / args.sync
+        current = path.read_text(encoding="utf-8") if path.is_file() else ""
+        start, end = current.find(ARCH_START), current.find(ARCH_END)
+        fresh = render_compact_block(root)
+        valid = start >= 0 and end > start and _strip_date(current[start:end + len(ARCH_END)]) == _strip_date(fresh)
+        print(f"{'current' if valid else 'stale'}: {path}")
+        return 0 if valid else 1
+    if args.sync:
+        status, path = sync_architecture(root, args.sync)
+        print(f"{status}: {path}")
+        return 0
     if args.check:
         code, msg = check(root, args.output)
         print(msg, file=sys.stderr if code else sys.stdout)

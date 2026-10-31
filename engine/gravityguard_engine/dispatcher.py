@@ -23,10 +23,13 @@ from .architecture_rules import (
     check_pma_horizontal,
     check_pma_imports,
     check_oe_spike,
+    evaluate_g7_ts_first,
     is_ts_cohesive_monolith,
     record_and_check_cumulative_growth,
+    record_js_mandatory_feedback,
 )
 from .audit import log_event
+from .doc_automation import is_knowledge_governed_path, resolve_knowledge_doc
 from .state_lock import StateLockTimeout
 from .diagnostics import read_recent_diagnostics, trigger_background_validation
 from .diffing import get_diff_analysis, get_projected_and_old_content, ProjectionError
@@ -161,6 +164,57 @@ def _perform_task_archiving(project_root: Path, conversation_id: str) -> None:
         )
 
 
+def _perform_architecture_sync(project_root: Path, conversation_id: str) -> None:
+    """Refresh the managed architecture block when source files change. Never breaks the session."""
+    try:
+        from .doc_automation import sync_architecture
+        res = sync_architecture(project_root)
+        if res and res["status"] != "unchanged":
+            log_event(
+                "stop", "APPROVED", res["path"], f"ARCHITECTURE.md auto-sync ({res['status']})",
+                rule_id="ARCHITECTURE_SYNC_AUTO", conversation_id=conversation_id
+            )
+    except Exception as sync_err:
+        log_event(
+            "stop", "WARNING", "ARCHITECTURE.md", f"Non-fatal error during architecture sync: {sync_err}",
+            rule_id="ARCHITECTURE_SYNC_ERROR", conversation_id=conversation_id
+        )
+
+
+def _auto_resolve_changelog(project_root: Path, conversation_id: str, unresolved_docs: dict) -> list:
+    """Inject fallback CHANGELOG/KNOWLEDGE entries and close only completed obligations."""
+    try:
+        from .doc_automation import inject_changelog_entry, inject_knowledge_entry, summarize_changes
+        resolved = []
+        for doc in ("CHANGELOG.md", "KNOWLEDGE.md", "docs/KNOWLEDGE.md"):
+            mine = []
+            for p, info in unresolved_docs.items():
+                candidate = Path(p)
+                try:
+                    (candidate if candidate.is_absolute() else project_root / candidate).resolve().relative_to(project_root.resolve())
+                except ValueError:
+                    continue
+                if doc in info.get("required_docs", ["CHANGELOG.md"]):
+                    mine.append(p)
+            if not mine:
+                continue
+            path = project_root / doc
+            inject = inject_changelog_entry if doc == "CHANGELOG.md" else inject_knowledge_entry
+            if not inject(path, summarize_changes(project_root, sorted(mine))):
+                continue
+            resolved.extend(resolve_pending_doc_obligations(str(path), project_root, conversation_id))
+            log_event("stop", "APPROVED", str(path), f"Documentation entry auto-injected for {len(mine)} file(s)",
+                      rule_id="CHANGELOG_AUTO_INJECT" if doc == "CHANGELOG.md" else "KNOWLEDGE_AUTO_INJECT",
+                      conversation_id=conversation_id)
+        return list(dict.fromkeys(resolved))
+    except Exception as inj_err:
+        log_event(
+            "stop", "WARNING", "CHANGELOG.md", f"Non-fatal error during changelog auto-injection: {inj_err}",
+            rule_id="CHANGELOG_AUTO_INJECT_ERROR", conversation_id=conversation_id
+        )
+        return []
+
+
 def validate_gravityguard() -> None:
     harden_streams_to_utf8()
     start_time = time.perf_counter()
@@ -212,6 +266,9 @@ def validate_gravityguard() -> None:
                 log_event("stop", "BLOCKED", "workspace", reason, rule_id="FINAL_SECURITY_SCAN", conversation_id=conversation_id)
                 print(json.dumps({"decision": "continue", "reason": reason}))
                 sys.exit(0)
+
+            # Deterministic doc automation: refresh ARCHITECTURE.md when engine/ or src/ code changed.
+            _perform_architecture_sync(project_root, conversation_id)
 
             # Defect A fix: Circuit breaker strictly governed by session continuation retries
             session_retries = get_session_stop_retries(project_root, conversation_id)
@@ -275,11 +332,20 @@ def validate_gravityguard() -> None:
                 log_event("stop", "WARNING", "workspace", t0_msg, rule_id=t0_rule, conversation_id=conversation_id)
                 warn_reasons.append(t0_msg)
 
+            if unresolved_docs and session_retries >= 4:
+                for closed in _auto_resolve_changelog(project_root, conversation_id, unresolved_docs):
+                    unresolved_docs.pop(closed, None)
+
             if unresolved_docs:
                 changed = ", ".join(f"'{_project_relative(p, project_root)}'" for p in unresolved_docs)
                 needed = sorted({d for info in unresolved_docs.values() for d in info.get("required_docs", ["CHANGELOG.md"])})
                 if needed == ["CHANGELOG.md"]:
-                    todo = "CHANGELOG.md [Unreleased] bölümüne bu değişikliği anlatan bir girdi ekle."
+                    todo = (
+                        "CHANGELOG.md [Unreleased] bölümüne bu değişikliği anlatan bir girdi ekle. "
+                        "(`## [Unreleased]` başlığı birden fazla geçebilir: edit_file Target'ı olarak yalnız başlığı değil, "
+                        "ilk başlık satırını ve ardındaki benzersiz satırı birlikte ver; önce dosyanın ilk 15 satırını oku. "
+                        "Son denemede yapılmamışsa GravityGuard tek satırlık özeti otomatik ekler.)"
+                    )
                 else:
                     todo = f"Şu dokümanları güncelle: {', '.join(needed)}."
                 policy_ref = " (docs/KNOWLEDGE.md §6)" if (project_root / "docs" / "KNOWLEDGE.md").is_file() else ""
@@ -368,7 +434,8 @@ def validate_gravityguard() -> None:
         ".spec." in file_name_lower
     )
     is_test_file = is_in_test_dir or is_test_name
-    is_vendor_or_cache = any(m in file_lower for m in [
+    _vendor_check_path = re.sub(r"^.*?/\.gemini/antigravity/scratch/[^/]+", "", file_lower)
+    is_vendor_or_cache = any(m in _vendor_check_path for m in [
         "/node_modules/", "/venv/", "/.venv/", "/env/", "/.env/", "/dist/", "/build/",
         "/.git/", "/__pycache__/", "/runs/", "/scratch/", "/brain/", "/.gemini/"
     ])
@@ -499,12 +566,24 @@ def validate_gravityguard() -> None:
         print(json.dumps({"decision": "allow"}))
         sys.exit(0)
 
-    # Warn before the asset fast-pass so CSS additions are checked as well.
-    # G7: TypeScript First Advisory (WARN ONLY)
-    g7_warn = check_g7_ts_first(target_file)
-    if g7_warn:
-        _log('WARNING', target_file, g7_warn, rule_id='G7_TS_FIRST')
-        all_warnings.append(('G7_TS_FIRST', g7_warn))
+    # G7: TypeScript First Enforcement & Mandatory JS Feedback Channel (BLOCK + FEEDBACK)
+    if not is_vendor_or_cache and not is_test_file:
+        g7_blocked, g7_msg, g7_feedback = evaluate_g7_ts_first(target_file, projected_content)
+        if g7_feedback:
+            record_js_mandatory_feedback(target_file, g7_feedback, c_id)
+            fb_msg = f"Zorunlu JS Geri Bildirimi onaylandı ve kaydedildi: {g7_feedback}"
+            _log('WARNING', target_file, fb_msg, rule_id='G7_TS_MANDATORY_FEEDBACK')
+            all_warnings.append(('G7_TS_MANDATORY_FEEDBACK', fb_msg))
+        elif g7_blocked:
+            if is_rule_shadow("G7_TS_FIRST", cfg):
+                _log('SHADOW_TRIGGER', target_file, f"[SHADOW] {g7_msg}", rule_id='G7_TS_FIRST')
+            else:
+                _log('BLOCKED', target_file, g7_msg, rule_id='G7_TS_FIRST')
+                print(json.dumps({
+                    "decision": "deny",
+                    "reason": f"🛑 [G7_TS_FIRST]: '{target_file}' - {g7_msg}"
+                }))
+                sys.exit(0)
 
     design_icons = check_design_icon_rule(target_file, added_text)
     if design_icons:
@@ -519,7 +598,8 @@ def validate_gravityguard() -> None:
         all_warnings.append(('DESIGN_SCROLLBAR_RULE', warn_msg))
 
     # Fast-pass for vendor, cache, and non-code text assets (ONLY AFTER G0 IS CLEAN)
-    if is_vendor_or_cache or (is_data_or_doc and not file_lower.endswith((".py", ".ts", ".tsx", ".js", ".jsx"))):
+    knowledge_governed = is_knowledge_governed_path(target_file, p_root)
+    if is_vendor_or_cache or (is_data_or_doc and not knowledge_governed and not file_lower.endswith((".py", ".ts", ".tsx", ".js", ".jsx"))):
         if should_resolve_doc:
             try:
                 record_resolution_intent("doc", target_file, p_root, c_id)
@@ -777,7 +857,7 @@ def validate_gravityguard() -> None:
 
     # Stage doc obligation if production/engine code is changed and doc governance is enabled
     pending_doc_record = None
-    if should_enforce_doc_obligations(target_file, cfg=cfg) and is_doc_governed_target(target_file, cfg, p_root):
+    if should_enforce_doc_obligations(target_file, cfg=cfg, project_root=p_root) and (is_doc_governed_target(target_file, cfg, p_root) or knowledge_governed):
         pending_doc_record = target_file
 
     # ========================================================================
@@ -806,7 +886,12 @@ def validate_gravityguard() -> None:
             _log("APPROVED", tf, f"Pending test evidence recorded ({en})", rule_id="T1_PENDING")
 
         if pending_doc_record:
-            record_pending_doc_obligation(pending_doc_record, project_root=p_root, conversation_id=c_id)
+            required_docs = ["CHANGELOG.md"]
+            k_doc = resolve_knowledge_doc(p_root) if knowledge_governed else None
+            if k_doc:
+                required_docs.append(k_doc)
+            record_pending_doc_obligation(pending_doc_record, required_docs=required_docs, project_root=p_root, conversation_id=c_id)
+            _log("APPROVED", pending_doc_record, f"Pending doc obligation recorded ({', '.join(required_docs)})", rule_id="DOC_OBLIGATION_PENDING")
 
         # Review obligation removed (AI review disabled).
     except StateLockTimeout as lock_err:

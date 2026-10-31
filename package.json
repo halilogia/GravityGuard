@@ -44,8 +44,8 @@
     "package": "vsce package --no-git-tag-version",
     "verify:package": "python tools/verify_package.py",
     "update:ide": "python tools/auto_update_ide.py",
-    "docs:arch": "python tools/generate_architecture.py",
-    "docs:arch:check": "python tools/generate_architecture.py --check"
+    "docs:arch": "python tools/generate_architecture.py --sync",
+    "docs:arch:check": "python tools/generate_architecture.py --sync --check"
   },
   "contributes": {
     "viewsContainers": {

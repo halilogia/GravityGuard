@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Universal documentation automation**: Stop-time architecture sync now covers `engine`, `src`, `addons`, `app`, `lib`, `core`, `ui`, `scripts`, `tools`, and `web`. Projects without a generator receive a built-in source/LOC/test inventory in an existing `ARCHITECTURE.md`, with a 200-line managed-block limit and preserved manual content/newlines. Rule and hook/configuration changes require the available KNOWLEDGE document as well as CHANGELOG; the final retry writes idempotent ADR entries (`KNOWLEDGE_AUTO_INJECT`). Removed the redundant generated report; `docs:arch` and `docs:arch:check` now operate on the main architecture document.
+
+- **Doküman otomasyonu (Stop hook)**: `engine/gravityguard_engine/doc_automation.py` + `dispatcher.py`: `engine/`/`src/` değişince `tools/generate_architecture.py --sync` ile `ARCHITECTURE.md` içindeki `ARCH-AUTO` bloğu güncellenir (≤200 satır, elle yazılan içerik korunur, hata oturumu kırmaz); Stop doküman borcu mesajı çift başlık için cerrahi edit_file talimatı verir; son Stop denemesinde yalnız CHANGELOG borcu kalmışsa ilk `## [Unreleased]` altına git özetinden tek satırlık kayıt eklenir (`CHANGELOG_AUTO_INJECT`); `CHANGELOG.md` varsa doküman yükümlülüğü varsayılan açıktır (`project_context.should_enforce_doc_obligations`) ve `DOC_OBLIGATION_PENDING` audit kaydı yazılır.
+
 ### Added (Web SRP & HTML Separation of Concerns Budgets)
 - **`engine/gravityguard_engine/web_srp_analyzer.py`**: Web projelerinde monolitik HTML dosyalarının ve devasa gömülü JS/CSS bloklarının oluşmasını engelleyen deterministik bütçe denetleyici (Separation of Concerns).
   - `WEB_INLINE_JS_BUDGET`: Çalıştırılabilir gömülü JS > 30 LOC veya > 2048 bayt (2 KiB) -> **DENY** (> 10 LOC -> WARN). Harici betikler (`<script src="...">`) ve veri şablonları (`application/json`, `application/ld+json`, `importmap`, `speculationrules`) bütçeden muaftır.

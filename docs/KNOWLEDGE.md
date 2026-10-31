@@ -23,6 +23,11 @@ This document serves as the persistent engineering knowledge repository for **Gr
 
 ## 1. Architectural Invariants (Non-Negotiable)
 
+### Automatic documentation capture
+- Stop-time architecture synchronization prefers `tools/generate_architecture.py`; other projects use the built-in source inventory only when `ARCHITECTURE.md` already exists. The managed block is capped at 200 lines; handwritten sections are never truncated. Dependency/build directories and symlinks are excluded from the generic scan. An unchanged inventory does not rewrite the document.
+- Approved changes to `.gravityguard.json`, root/plugin `hooks.json`, files under `rules/`, `*_rules.py`, and `doc_policy.py` require CHANGELOG plus `docs/KNOWLEDGE.md` (preferred) or root `KNOWLEDGE.md` when present. Explicit `enforceDocObligations: false` still disables this tracking.
+- At Stop retry four, automatic CHANGELOG and `[auto-ADR]` entries can satisfy outstanding documentation obligations. Only successful insertions are resolved; missing documents and unrelated required documents remain pending. These factual file-change summaries do not replace human-authored architectural rationale.
+
 ### Audit maintenance invariant
 - A blocked security operation is observed enforcement, not proof of abandonment or a recovered code defect. Keep security counts separate from code correction rates.
 - Never truncate the audit journal manually. `tools/maintain_audit.py` takes the writer lock, verifies private backup hashes and replaces the active stream with a durable checkpoint preserving sequence, cumulative counters and unresolved violation causality.
