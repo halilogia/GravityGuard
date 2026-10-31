@@ -16,7 +16,7 @@ This document serves as the persistent engineering knowledge repository for **Gr
 >    - `G4_IMPORT_MATRIX`: Strict architectural layer boundaries (no reverse/cross-layer imports).
    - G7_TS_FIRST: Application code must be authored in TypeScript (.ts/.tsx); raw .js/.cjs/.mjs files are blocked unless deterministically recognized as mandatory JS (dist/, uild/, *.config.js, sw.js, *.worker.js) or justified via // @ts-mandatory: <reason> in the top 10 lines (logging feedback to gravityguard_js_feedback.jsonl). Workspace paths under ~/.gemini/antigravity/scratch/<project> strip their host prefix before is_vendor_or_cache evaluation.
 > 3. **Obligations Before Session Stop (L3 Lifecycle Gate)**:
->    - **Test Obligation (T1)**: Modifying production code requires matching test evidence before session stop.
+>    - **Test Obligation (T1)**: Modifying core production code requires matching test evidence before session stop. Translation dictionaries (`lang-*`, `i18n`), scratch files (`scratch*`), pure UI/DOM/TUI view files (`/ui/`, `/views/`, `/components/`, `/web/`, `tui.ts`, `tree.ts`), and CLI/launcher entrypoints (`cli.ts`, `main.py`, `*_launcher.*`) are exempt by default, and `T3_SYMBOL_TO_TEST_LINK` checks only exported/public API symbols rather than internal unexported helpers.
 >    - **Doc Obligation (§6 Same-Commit Rule)**: Modifying `engine/`, `src/`, `plugin/`, or `rules/` requires updating `CHANGELOG.md` (and `docs/KNOWLEDGE.md` if procedures change).
 > 4. **Git Pre-Commit Gate (L4)**: `tools/verify_doc_governance.py` rejects commits altering engine/rules without staged documentation.
 

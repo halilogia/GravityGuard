@@ -29,10 +29,19 @@ class TestTestEvidenceDomain(unittest.TestCase):
         self.assertTrue(is_exempt_from_test_evidence("src/types.ts"))
         self.assertTrue(is_exempt_from_test_evidence("src/constants.py"))
         self.assertTrue(is_exempt_from_test_evidence("src/models.d.ts"))
+        self.assertTrue(is_exempt_from_test_evidence("web/lang-en.js"))
+        self.assertTrue(is_exempt_from_test_evidence("web/lang-tr.js"))
+        self.assertTrue(is_exempt_from_test_evidence("web/app.js"))
+        self.assertTrue(is_exempt_from_test_evidence("src/ui/tree.ts"))
+        self.assertTrue(is_exempt_from_test_evidence("src/cli.ts"))
+        self.assertTrue(is_exempt_from_test_evidence("src/tui_launcher.ts"))
+        self.assertTrue(is_exempt_from_test_evidence("scratch_fix.py"))
+        self.assertFalse(is_exempt_from_test_evidence("src/core/sqlite_store.ts"))
         self.assertFalse(is_exempt_from_test_evidence("src/billing.py"))
 
     def test_resolve_candidate_test_file_normalizes_hyphen_and_underscore(self):
-        cand, expected = resolve_candidate_test_file("engine/gravity-validator.py")
+        target = (Path(_ENGINE_DIR) / "gravity-validator.py").as_posix()
+        cand, expected = resolve_candidate_test_file(target)
         self.assertTrue(cand is not None and cand.endswith("test_gravity_validator.py"))
 
 
@@ -131,6 +140,20 @@ class TestSubsystemMappingAndMtimeExemption(unittest.TestCase):
         )
         self.assertEqual(warnings, [])
         self.assertIsNone(actions["record_test"])
+
+    def test_t3_ignores_unexported_ts_internal_helpers(self):
+        test_path = self._write_test("plain.test.mjs", "import { publicApi } from './plain';\npublicApi();\n")
+        code = "function internalHelper() {\n  return 42;\n}\nexport function publicApi() {\n  return internalHelper();\n}\n"
+        warned, msg = check_t3_symbol_to_test_link(
+            target_file="src/other/plain.ts",
+            added_text="  return 42;",
+            candidate_test_path=test_path,
+            is_python=False,
+            is_ts=True,
+            projected_content=code,
+            added_line_numbers={2},
+        )
+        self.assertFalse(warned, msg)
 
 
 if __name__ == "__main__":

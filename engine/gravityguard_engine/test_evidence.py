@@ -18,7 +18,12 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 DEFAULT_EXEMPT_PATTERNS: List[str] = [
     "types", "constants", "index", ".d.ts", "config", "interfaces", "schemas",
-    "migration", "migrations", "fixtures", "mock", "mocks", "tools", "scripts"
+    "migration", "migrations", "fixtures", "mock", "mocks", "tools", "scripts",
+    "lang-", "i18n", "locale", "locales", "translations",
+    "scratch", "tmp_", "temp_",
+    "/ui/", "/views/", "/components/", "/web/",
+    "tui.ts", "tree.ts", "transcript.ts", "office_view.ts", "sessions.js", "app.js",
+    "cli.ts", "cli.py", "main.py", "main.ts", "run_", "_launcher.", "_opener."
 ]
 
 _TEST_FILE_PATTERNS = ("test_*.py", "*_test.py", "*.test.*", "*.spec.*", "conftest.py")
@@ -109,6 +114,11 @@ def is_exempt_from_test_evidence(target_file: str, cfg: Optional[dict] = None) -
             exempt_patterns = [p.lower() for p in te_cfg["exemptPatterns"]]
 
     for pat in exempt_patterns:
+        if pat.startswith("/") and pat.endswith("/"):
+            seg = pat.strip("/")
+            if f"/{seg}/" in normalized or normalized.startswith(f"{seg}/"):
+                return True
+            continue
         pat_clean = pat.lstrip("/").rstrip("/*")
         if (
             pat in basename or
@@ -473,29 +483,31 @@ def check_t3_symbol_to_test_link(
 
     elif is_ts:
         func_pattern = re.compile(
-            r"^(?:export\s+(?:default\s+)?)?(?:async\s+)?function\s+([a-zA-Z0-9_]+)",
+            r"^(export\s+)?(?:default\s+)?(?:async\s+)?function\s+([a-zA-Z0-9_]+)",
             re.MULTILINE
         )
         class_pattern = re.compile(
-            r"^(?:export\s+(?:default\s+)?)?class\s+([a-zA-Z0-9_]+)",
+            r"^(export\s+)?(?:default\s+)?class\s+([a-zA-Z0-9_]+)",
             re.MULTILINE
         )
         arrow_pattern = re.compile(
-            r"^(?:export\s+)?const\s+([a-zA-Z0-9_]+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[a-zA-Z0-9_]+)\s*=>",
+            r"^(export\s+)?const\s+([a-zA-Z0-9_]+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[a-zA-Z0-9_]+)\s*=>",
             re.MULTILINE
         )
         all_defs = []
         for pat in (func_pattern, class_pattern, arrow_pattern):
             for m in pat.finditer(projected_content):
-                name = m.group(1)
+                is_exp = bool(m.group(1)); name = m.group(2)
                 if not name.startswith("_"):
                     start_char = m.start()
                     start_line = projected_content[:start_char].count("\n") + 1
-                    all_defs.append((start_line, name))
+                    all_defs.append((start_line, name, is_exp))
 
         all_defs.sort(key=lambda x: x[0])
         lines = projected_content.splitlines()
-        for idx, (start_line, name) in enumerate(all_defs):
+        for idx, (start_line, name, is_exp) in enumerate(all_defs):
+            if not is_exp:
+                continue
             if idx + 1 < len(all_defs):
                 end_line = all_defs[idx + 1][0] - 1
             else:

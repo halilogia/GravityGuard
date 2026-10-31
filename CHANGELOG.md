@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Test Evidence Anti-Overengineering (`test_evidence.py`)**:
+  - Expanded `DEFAULT_EXEMPT_PATTERNS` to exempt i18n/translation dictionaries (`lang-*`, `i18n`, `locale`, `locales`, `translations`), scratch/temporary files (`scratch*`, `tmp_*`, `temp_*`), pure UI/DOM/TUI/View layers (`/ui/`, `/views/`, `/components/`, `/web/`, `tui.ts`, `tree.ts`, `transcript.ts`, `office_view.ts`, `sessions.js`, `app.js`), and CLI/launcher entrypoints (`cli.ts`, `cli.py`, `main.py`, `main.ts`, `run_*`, `*_launcher.*`, `*_opener.*`) from `T1_PENDING` 1:1 unit test obligations.
+  - Updated `is_exempt_from_test_evidence` so slash-delimited directory patterns (`/ui/`, `/web/`, etc.) match only exact directory path segments without wildcarding inner substrings.
+  - Restricted `check_t3_symbol_to_test_link` (`T3_SYMBOL_TO_TEST_LINK`) in TypeScript/JavaScript to only inspect exported public symbols (`export function`, `export class`, `export const ... = () =>`), ignoring unexported internal helpers that are tested indirectly through public entrypoints.
+
 - **G7 TypeScript-First Zorunluluğu (DENY), Otomatik Zorunlu JS Tespiti ve AI Feedback Kanalı**: engine/gravityguard_engine/architecture_rules.py ve dispatcher.py:
   - **Scratch Workspace Bypass Kapatıldı**: Antigravity varsayılan çalışma dizini (~/.gemini/antigravity/scratch/<proje>) içindeki projelerin /.gemini/ ve /scratch/ alt dizgeleri yüzünden is_vendor_or_cache tarafından muaf tutulması düzeltildi.
   - **G7_TS_FIRST Engelleyici (DENY) Oldu**: Uygulama mantığının .js/.cjs/.mjs olarak yazılması evaluate_g7_ts_first ile engellenir ve .ts/.tsx zorunlu tutulur.

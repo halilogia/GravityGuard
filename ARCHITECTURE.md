@@ -401,17 +401,17 @@ flowchart TD
 
 > Üretim tarihi: 2026-10-31 — sürüm 1.4.18
 
-- Toplam dosya: **124**, dolu satır: **25190**
-- Test dosyası: **47**, test sayısı: **504**
+- Toplam dosya: **124**, dolu satır: **25224**
+- Test dosyası: **47**, test sayısı: **505**
 
 | Katman | Dosya | Dolu satır |
 |---|---:|---:|
 | Tier 1 Fast-Path Guardrail | 5 | 1250 |
 | Tier 4 Deep-Path Güvenlik Denetçisi | 1 | 417 |
-| Yönetişim & Yaşam Döngüsü | 4 | 1724 |
+| Yönetişim & Yaşam Döngüsü | 4 | 1736 |
 | Extension UI & Client | 26 | 4125 |
-| `engine/` (alan) | 32 | 11604 |
+| `engine/` (alan) | 32 | 11616 |
 | `plugin/` (alan) | 10 | 651 |
 | `src/` (alan) | 34 | 5938 |
-| `tests/` (alan) | 48 | 6997 |
+| `tests/` (alan) | 48 | 7019 |
 <!-- ARCH-AUTO:END -->
