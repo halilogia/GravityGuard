@@ -81,7 +81,11 @@ def sync_architecture(project_root: Path, target: str = "ARCHITECTURE.md") -> Op
 def sync_generic_architecture(project_root: Path, target: str = "ARCHITECTURE.md") -> Optional[Dict[str, str]]:
     """Replace only the managed section; cap that section at 200 lines."""
     path = project_root / target
-    if not path.is_file():
+    if not path.is_file() or path.is_symlink():
+        return None
+    try:
+        path.resolve().relative_to(project_root.resolve())
+    except (ValueError, OSError):
         return None
     from .doc_policy import _is_test_file
     groups = {}

@@ -206,12 +206,22 @@ def should_enforce_doc_obligations(
     An explicit `.gravityguard.json` value always wins:
         {"governance": {"enforceDocObligations": false}}
     Without one, the obligation is on by default for any project that keeps a CHANGELOG.md in its root.
+    Files residing outside the project_root are never governed by that project's CHANGELOG.md.
     """
     if cfg and isinstance(cfg.get("governance"), dict):
         explicit = cfg["governance"].get("enforceDocObligations")
         if explicit is not None:
             return bool(explicit)
-    return project_root is not None and (Path(project_root) / "CHANGELOG.md").is_file()
+    if project_root is None or not (Path(project_root) / "CHANGELOG.md").is_file():
+        return False
+    if target_file and project_root is not None:
+        try:
+            target_p = Path(target_file)
+            if target_p.is_absolute():
+                target_p.resolve().relative_to(Path(project_root).resolve())
+        except (ValueError, OSError):
+            return False
+    return True
 
 
 def is_doc_governed_target(target_file: str, cfg: Optional[dict] = None, project_root: Optional[Path] = None) -> bool:

@@ -1117,24 +1117,33 @@ class TestGravityGuardPhase2(unittest.TestCase):
 
     def test_t1_warn_when_candidate_test_absent(self):
         """v1.2.7: When production code changes and no test exists on disk, T1 defers warning to Stop hook"""
-        payload = {
-            "toolCall": {
-                "name": "replace_file_content",
-                "args": {
-                    "TargetFile": "C:/fake_project/src/billing_service.py",
-                    "TargetContent": "def pay(): return True",
-                    "ReplacementContent": "def pay():\n    validate_card()\n    return True"
+        temp_dir = tempfile.mkdtemp()
+        try:
+            src_dir = os.path.join(temp_dir, "src")
+            tests_dir = os.path.join(temp_dir, "tests")
+            os.makedirs(src_dir, exist_ok=True)
+            os.makedirs(tests_dir, exist_ok=True)
+            prod_file = os.path.join(src_dir, "billing_service.py")
+            payload = {
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": prod_file,
+                        "TargetContent": "def pay(): return True",
+                        "ReplacementContent": "def pay():\n    validate_card()\n    return True"
+                    }
                 }
             }
-        }
-        res, _ = run_validator(payload)
-        self.assertEqual(res.get("decision"), "allow", "T1 must never block production changes")
-        rule_ids = _warnings_from(res)
-        self.assertNotIn("T1_MISSING_RELATED_TEST", rule_ids, "v1.2.7: No premature warning during PreToolUse")
+            res, _ = run_validator(payload)
+            self.assertEqual(res.get("decision"), "allow", "T1 must never block production changes")
+            rule_ids = _warnings_from(res)
+            self.assertNotIn("T1_MISSING_RELATED_TEST", rule_ids, "v1.2.7: No premature warning during PreToolUse")
 
-        # Final evaluation surfaces the single consolidated warning
-        stop_res, _ = run_validator({"terminationReason": "model_stop"})
-        self.assertIn("Test Kanıtı Uyarısı (T1)", _warnings_from(stop_res))
+            # Final evaluation surfaces the single consolidated warning
+            stop_res, _ = run_validator({"terminationReason": "model_stop"})
+            self.assertIn("Test Kanıtı Uyarısı (T1)", _warnings_from(stop_res))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_t1_allow_when_candidate_test_recently_touched(self):
         """When candidate test file exists and was touched in this session, T1 must NOT warn"""
@@ -1171,7 +1180,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_t1_warn_when_candidate_test_untouched_in_session(self):
-        """v1.2.7: When candidate test file exists but was not touched in session window, T1 defers warning to Stop hook"""
+        """v1.4.13: When candidate test file exists even if not touched in session window, T1 is satisfied and does NOT warn"""
         temp_dir = tempfile.mkdtemp()
         try:
             src_dir = os.path.join(temp_dir, "src")
@@ -1203,11 +1212,11 @@ class TestGravityGuardPhase2(unittest.TestCase):
             res, _ = run_validator(payload)
             self.assertEqual(res.get("decision"), "allow")
             rule_ids = _warnings_from(res)
-            self.assertNotIn("T1_MISSING_RELATED_TEST", rule_ids, "v1.2.7: Stale test is deferred to pending, no premature warning in PreToolUse")
+            self.assertNotIn("T1_MISSING_RELATED_TEST", rule_ids, "Existing test satisfies T1 in PreToolUse")
 
-            # Final evaluation surfaces the warning
+            # Final evaluation raises no warning for order.py either
             stop_res, _ = run_validator({"terminationReason": "model_stop"})
-            self.assertIn("Test Kanıtı Uyarısı (T1)", _warnings_from(stop_res))
+            self.assertNotIn("order.py", _warnings_from(stop_res))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 

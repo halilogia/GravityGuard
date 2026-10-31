@@ -60,12 +60,20 @@ def scan_git_secrets(root: Path, staged_only: bool = False, require_repo: bool =
                     continue
                 with file.open("rb") as fh:
                     head = fh.read(8192)
+                    # Even if a file has NUL bytes (e.g. attempted null-byte prefix bypass),
+                    # check if the leading chunk with NULs stripped contains a secret!
+                    head_clean = head.decode("utf-8", "replace").replace("\x00", "")
+                    blocked, reason, _ = check_g0_secret_leak(head_clean)
+                    if blocked:
+                        findings.append(f"[G0_SECRET_LEAK]: Untracked-file scan: {reason}")
+                        continue
                     if _is_binary_chunk(head):
                         continue
                     if file.stat().st_size > MAX_SCAN_BYTES:
                         return ["[SECURITY_SCAN_UNAVAILABLE]: Untracked file exceeds the scan limit"]
                     raw_bytes = head + fh.read()
-                blocked, reason, _ = check_g0_secret_leak(raw_bytes.decode("utf-8", "replace"))
+                text_content = raw_bytes.decode("utf-8", "replace").replace("\x00", "")
+                blocked, reason, _ = check_g0_secret_leak(text_content)
                 if blocked:
                     findings.append(f"[G0_SECRET_LEAK]: Untracked-file scan: {reason}")
         return findings

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Fix CI Test Failures, New-File Modular Growth Threshold & ChatGPT Red-Team Hardening (`architecture_rules.py`, `doc_policy.py`, `project_context.py`, `publication_guard.py`)**:
+  - `architecture_rules.py`: In `check_arch_file_growth`, restricted `single_write_loc` (default 200 LOC) strictly to existing file growth, ensuring new file creation is governed exclusively by the configured `monolith_loc` (fixing CI test failures for new modular file additions and configured complexity overrides). Replaced suffix wildcard `"rc.js"` with explicit config filenames (`.eslintrc.js`, `.prettierrc.js`, etc.) to prevent false G7 exemptions on source files.
+  - `project_context.py` & `doc_policy.py`: In `should_enforce_doc_obligations` and `is_doc_governed_path`, ensured that documentation obligations for a given `project_root` only apply to files physically residing inside that project root, preventing temporary/external test files outside the repository from inheriting the workspace root's `CHANGELOG.md` doc obligations.
+  - `publication_guard.py`: Closed ChatGPT Red-Team RG-001 finding by scanning the leading chunk with NUL bytes stripped before applying binary exemptions, ensuring attackers or accidental null-byte prefixes cannot bypass `G0_SECRET_LEAK` scanning in untracked files.
+  - `doc_automation.py`: Guarded `sync_generic_architecture` against symlinks and out-of-boundary path writes.
+
 - **Weekly Audit Maintenance & Publication Guard Hardening (`publication_guard.py`, `audit.py`)**:
   - `publication_guard.py`: Exempted genuine binary assets (files containing NUL bytes in their first 8 KB header, e.g. `.glb`, `.blend`, `.pck`, `.png`) from untracked content/size secret scanning while preserving `.env` / private key path checks and text-file scanning even under binary extensions; removed `--text` from `git diff` so binary diffs do not blow up diff output, and raised `MAX_SCAN_BYTES` from 4 MiB to 16 MiB.
   - `audit.py`: Prevented false `[GravityGuard Invariant Violation]` stderr noise on advisory/pending rules (`b == 0` with legacy recovery records).

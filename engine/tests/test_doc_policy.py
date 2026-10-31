@@ -95,6 +95,10 @@ class TestDocPolicy(unittest.TestCase):
         self.assertFalse(is_doc_governed_path(str(nested / "app" / "main.py"), None, nested))
         self.assertTrue(is_doc_governed_path(str(nested / "engine" / "main.py"), None, nested))
 
+    def test_external_files_outside_project_root_are_never_governed(self):
+        external_file = "/tmp/other_project/src/payment.ts"
+        self.assertFalse(is_doc_governed_path(external_file, None, self.root))
+
     def test_legacy_absolute_pattern_still_matches(self):
         cfg = {"governance": {"docObligationPatterns": ["*/core/*"]}}
         self.assertTrue(is_doc_governed_path(str(self.root / "core" / "a.py"), cfg, self.root))

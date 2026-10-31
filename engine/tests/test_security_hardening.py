@@ -4,9 +4,14 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+
+_ENGINE_DIR = Path(__file__).resolve().parent.parent
+if str(_ENGINE_DIR) not in sys.path:
+    sys.path.insert(0, str(_ENGINE_DIR))
 
 from gravityguard_engine.dispatcher import validate_gravityguard, is_rule_shadow
 from gravityguard_engine.diffing import get_projected_and_old_content, ProjectionError
@@ -82,3 +87,11 @@ class SecurityHardeningTests(unittest.TestCase):
         self.assertFalse(scan_git_secrets(self.root, staged_only=True))
         subprocess.run(["git", "add", "asset.png"], cwd=self.root, check=True, capture_output=True)
         self.assertTrue(scan_git_secrets(self.root, staged_only=True))
+
+    def test_git_gate_catches_null_prefixed_secret_bypass(self):
+        """ChatGPT Red-Team RG-001: NUL byte prefix must not bypass untracked secret scan."""
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True, capture_output=True)
+        file = self.root / "sneaky.dat"
+        file.write_bytes(b"\x00\x00ghp_" + b"A" * 36)
+        findings = scan_git_secrets(self.root)
+        self.assertTrue(any("G0_SECRET_LEAK" in f for f in findings))

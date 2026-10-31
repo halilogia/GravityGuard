@@ -94,7 +94,19 @@ def is_doc_governed_path(path_str: str, cfg: Optional[dict] = None, project_root
     With a project root the directory check looks only inside the project (a checkout that happens to live under
     `/home/me/src/` must not govern everything); without one it falls back to the path as given.
     """
-    rel = relative_posix(path_str, project_root)
+    if project_root is not None:
+        try:
+            target_p = Path(path_str)
+            if target_p.is_absolute():
+                rel_path = target_p.resolve().relative_to(Path(project_root).resolve())
+            else:
+                rel_path = (Path(project_root) / path_str).resolve().relative_to(Path(project_root).resolve())
+            rel = rel_path.as_posix().lower()
+        except (ValueError, OSError):
+            return False
+    else:
+        rel = relative_posix(path_str, None)
+
     path = Path(rel)
     if _is_test_file(path):
         return False
