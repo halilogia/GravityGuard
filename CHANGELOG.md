@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Frontmatter Injection & Fail-Closed Detection Rules (`security_rules.py`, `03-g-frontmatter-and-failclosed.md`)**:
+  - `security_rules.py`: Added `G_NO_RAW_FRONTMATTER_INTERPOLATION` pattern detecting raw f-string and newline concatenation into YAML frontmatter blocks, preventing privilege escalation and cross-session metadata tampering (Matt Abate disclosure).
+  - `security_rules.py`: Added `G_ENFORCE_FAIL_CLOSED` pattern detecting unsafe fail-open fallback defaults on security statuses, permissions, and roles (e.g. `get("status", "canonical")`).
+  - `docs/rules/03-g-frontmatter-and-failclosed.md`: Added formal threat model, violation patterns, and safe YAML serialization standards.
+  - `test_unsafe_code_patterns.py`: Added regression test coverage for frontmatter injection and fail-open detection.
+
 - **Fix CI Test Failures, New-File Modular Growth Threshold & ChatGPT Red-Team Hardening (`architecture_rules.py`, `doc_policy.py`, `project_context.py`, `publication_guard.py`)**:
   - `architecture_rules.py`: In `check_arch_file_growth`, restricted `single_write_loc` (default 200 LOC) strictly to existing file growth, ensuring new file creation is governed exclusively by the configured `monolith_loc` (fixing CI test failures for new modular file additions and configured complexity overrides). Replaced suffix wildcard `"rc.js"` with explicit config filenames (`.eslintrc.js`, `.prettierrc.js`, etc.) to prevent false G7 exemptions on source files.
   - `project_context.py` & `doc_policy.py`: In `should_enforce_doc_obligations` and `is_doc_governed_path`, ensured that documentation obligations for a given `project_root` only apply to files physically residing inside that project root, preventing temporary/external test files outside the repository from inheriting the workspace root's `CHANGELOG.md` doc obligations.

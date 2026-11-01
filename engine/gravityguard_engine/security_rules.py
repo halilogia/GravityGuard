@@ -264,6 +264,8 @@ _UNSAFE_PATTERNS = (
     (re.compile(r"Access-Control-Allow-Origin[\"']?\s*[:,=]\s*[\"']\*[\"']", re.IGNORECASE), "CORS joker (*) origin"),
     (re.compile(r"\bpickle\.loads?\s*\(|\byaml\.load\s*\((?![^)\n]*SafeLoader)"), "güvensiz deserialization (pickle / yaml.load)"),
     (re.compile(r"\bhashlib\.(?:md5|sha1)\s*\([^\n]*(?:password|passwd|pwd)", re.IGNORECASE), "parola için zayıf özet algoritması (MD5/SHA1)"),
+    (re.compile(r"f[\"'][^\"']*---\s*(?:\\n|[\r\n])"), "frontmatter enjeksiyonu riski (raw f-string yerine safe yaml dumper kullanın)"),
+    (re.compile(r"\.(?:get|getattr)\s*\(\s*[\"'](?:status|role|permission|is_admin|allow)[\"']\s*,\s*[\"'](?:canonical|admin|root|allowed)[\"']\s*\)", re.IGNORECASE), "fail-open varsayılan yetki/durum ataması (en kısıtlı varsayılan/fail-closed kullanın)"),
 )
 
 

@@ -28,6 +28,8 @@ class UnsafeCodePatterns(unittest.TestCase):
         ("obj = pickle.loads(data)", "deserialization"),
         ("cfg = yaml.load(stream)", "deserialization"),
         ("digest = hashlib.md5(password.encode())", "özet"),
+        ('f"---\\ntitle: {title}\\n---"', "frontmatter"),
+        ('status = payload.get("status", "canonical")', "fail-open"),
     )
     CLEAN = (
         "requests.get(url, verify=True, timeout=5)",
@@ -39,6 +41,8 @@ class UnsafeCodePatterns(unittest.TestCase):
         "cfg = yaml.load(stream, Loader=yaml.SafeLoader)",
         "digest = hashlib.sha256(payload).hexdigest()",
         "os.system('clear')",
+        'status = payload.get("status", "draft")',
+        'header = "---\\ntitle: safe\\n---"',
     )
 
     def test_flags_risky_constructs(self):
