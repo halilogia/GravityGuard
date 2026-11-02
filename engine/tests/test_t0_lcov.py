@@ -340,7 +340,7 @@ class TestT0StopHookIntegration(unittest.TestCase):
         res, err = self._stop({"dynamicExecution": True, "testCommand": _py_cmd("import sys; print('Ran 2 tests'); sys.exit(1)")})
         self.assertEqual(res.get("decision"), "continue", err)
         self.assertIn("T0_TEST_RUN_FAILED", res["reason"])
-        self.assertIn("[Test: ✗]", res["reason"])
+        self.assertIn(f"[Test: {chr(0x2717)}]", res["reason"])
 
     def test_stop_continues_when_no_tests_executed(self):
         res, err = self._stop({"dynamicExecution": True, "testCommand": _py_cmd("print('Ran 0 tests in 0.0s')")})

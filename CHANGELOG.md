@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Evidence-Based Delivery Gate (EBDG) Phase 0 (`delivery_gate.py`, `dispatcher.py`):**
+  - Added deterministic, zero-AI visual verification gate for UI modifications.
+  - When `.css`, `.html`, `.vue`, `.svelte`, `.tscn` or UI-scoped `.tsx`/`.jsx` files are modified, GravityGuard verifies that a recent, non-empty screenshot (`.png`, `.jpg`, `.webp`) exists in `.gravityguard/evidence/`, `artifacts/`, `screenshots/` or active session brain.
+  - Generates machine-readable receipt at `.gravityguard/runtime/delivery_receipt.json` (`VERIFIED`, `PENDING_EVIDENCE`, or `UNVERIFIED_CIRCUIT_BREAKER`).
+  - Strict circuit breaker prevents deadlock: gracefully degrades without locking after max retries (default: 2).
+  - Added unit test suite `test_delivery_gate.py` with 6 deterministic tests covering detection, evidence verification, and circuit breaker bypass.
+
 - **Design Icon Rule Hardening (`architecture_rules.py`, `dispatcher.py`)**:
   - `architecture_rules.py`: Added `find_design_icon_violations` returning exact line numbers, distinct icons, and line snippets from projected content.
   - `dispatcher.py`: Upgraded `DESIGN_ICON_RULE` from an advisory warning (`allow`) to a strict pre-tool hook rejection (`deny`). Reports the exact line number, icon, and snippet to mechanically block standard emoji injections and enforce the Zero-Bloat and Minimalist UI standard.

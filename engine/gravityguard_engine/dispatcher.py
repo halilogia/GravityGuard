@@ -76,6 +76,7 @@ from .test_evidence import (
     evaluate_test_evidence,
     resolve_candidate_test_file,
 )
+from .delivery_gate import evaluate_ebdg_ui_gate
 # Review governance removed
 
 def _project_relative(path: str, root: Path) -> str:
@@ -333,6 +334,17 @@ def validate_gravityguard() -> None:
                 log_event("stop", "WARNING", "workspace", t0_msg, rule_id=t0_rule, conversation_id=conversation_id)
                 warn_reasons.append(t0_msg)
 
+            # EBDG Phase 0: UI Visual Screenshot Evidence Gate
+            ui_allowed, ui_warn, _ = evaluate_ebdg_ui_gate(
+                project_root=project_root,
+                conversation_id=conversation_id,
+                session_retries=session_retries,
+                cfg=cfg
+            )
+            if not ui_allowed and ui_warn:
+                log_event("stop", "WARNING", "workspace", ui_warn, rule_id="EBDG_UI_SCREENSHOT_PENDING", conversation_id=conversation_id)
+                warn_reasons.append(ui_warn)
+
             if unresolved_docs and session_retries >= 4:
                 for closed in _auto_resolve_changelog(project_root, conversation_id, unresolved_docs):
                     unresolved_docs.pop(closed, None)
@@ -360,10 +372,12 @@ def validate_gravityguard() -> None:
 
             if warn_reasons:
                 increment_session_stop_retries(project_root, conversation_id)
+                _mark = lambda ok: chr(0x2713) if ok else chr(0x2717)
                 status_summary = (
-                    f"Aşama Durumu: [Kod: ✓] "
-                    f"[Test: {'✗' if unresolved_tests or t0_findings else '✓'}] "
-                    f"[Doküman: {'✗' if unresolved_docs else '✓'}]"
+                    f"Aşama Durumu: [Kod: {_mark(True)}] "
+                    f"[Test: {_mark(not (unresolved_tests or t0_findings))}] "
+                    f"[Görsel: {_mark(ui_allowed)}] "
+                    f"[Doküman: {_mark(not unresolved_docs)}]"
                 )
                 full_reason = f"{status_summary} | " + " | ".join(warn_reasons)
                 print(json.dumps({"decision": "continue", "reason": full_reason}))
