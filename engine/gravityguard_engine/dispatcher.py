@@ -24,6 +24,7 @@ from .architecture_rules import (
     check_pma_imports,
     check_oe_spike,
     evaluate_g7_ts_first,
+    find_design_icon_violations,
     is_ts_cohesive_monolith,
     record_and_check_cumulative_growth,
     record_js_mandatory_feedback,
@@ -585,11 +586,23 @@ def validate_gravityguard() -> None:
                 }))
                 sys.exit(0)
 
-    design_icons = check_design_icon_rule(target_file, added_text)
-    if design_icons:
-        warn_msg = f"Tasarım kuralına uymuyor hemen düzelt: kodda standart emoji/ikon kullanımı tespit edildi ({', '.join(design_icons[:5])})."
-        _log('WARNING', target_file, warn_msg, rule_id='DESIGN_ICON_RULE')
-        all_warnings.append(('DESIGN_ICON_RULE', warn_msg))
+    design_violations = find_design_icon_violations(target_file, projected_content, added_line_numbers)
+    if design_violations:
+        first = design_violations[0]
+        icons_str = ", ".join(first["icons"])
+        total_violations = len(design_violations)
+        extra_note = f" (+{total_violations - 1} diğer satır)" if total_violations > 1 else ""
+        deny_msg = (
+            f"Tasarım kuralı ihlali (Satır {first['line']}): Kodda standart emoji/ikon kullanımı tespit edildi ({icons_str}){extra_note}!\n"
+            f"Hatalı satır: '{first['snippet']}'\n"
+            f"Zero-Bloat ve Minimalist UI standardı gereği kaynak kodda emoji/ikon kullanılamaz; sadece temiz tipografi veya SVG kullanın."
+        )
+        _log('BLOCKED', target_file, deny_msg, rule_id='DESIGN_ICON_RULE')
+        print(json.dumps({
+            "decision": "deny",
+            "reason": f"🛑 [DESIGN_ICON_RULE]: '{target_file}:{first['line']}' - {deny_msg}"
+        }))
+        sys.exit(0)
 
     design_scrollbars = check_design_scrollbar_rule(target_file, added_text)
     if design_scrollbars:

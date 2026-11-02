@@ -27,6 +27,7 @@ from gravityguard_engine.architecture_rules import (
     check_pma_horizontal,
     check_pma_imports,
     evaluate_g7_ts_first,
+    find_design_icon_violations,
     extract_js_mandatory_feedback,
     is_cohesive_module_by_filename,
     is_pma_exempt,
@@ -55,7 +56,22 @@ class TestDesignIconRule(unittest.TestCase):
         self.assertEqual(check_design_icon_rule('src/button.ts', 'const label = "Kaydet";'), [])
         self.assertEqual(check_design_icon_rule('src/button.ts', '✅ ✅ 🗑️'), ['✅', '🗑️'])
 
-    def test_dispatcher_allows_write_and_emits_warning(self):
+    def test_find_design_icon_violations_returns_line_numbers_and_snippets(self):
+        content = "const a = 1;\nconst icon = '⚡';\nconst clean = 'ok';\nconst end = '🚀';"
+        violations = find_design_icon_violations('src/app.ts', content)
+        self.assertEqual(len(violations), 2)
+        self.assertEqual(violations[0]['line'], 2)
+        self.assertEqual(violations[0]['icons'], ['⚡'])
+        self.assertEqual(violations[0]['snippet'], "const icon = '⚡';")
+        self.assertEqual(violations[1]['line'], 4)
+        self.assertEqual(violations[1]['icons'], ['🚀'])
+
+        # With added_line_numbers filter
+        filtered = find_design_icon_violations('src/app.ts', content, added_line_numbers={2})
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]['line'], 2)
+
+    def test_dispatcher_denies_write_and_emits_line_level_deny(self):
         from gravityguard_engine import dispatcher
 
         with tempfile.TemporaryDirectory() as directory:
@@ -80,11 +96,10 @@ class TestDesignIconRule(unittest.TestCase):
                         dispatcher.validate_gravityguard()
                     self.assertEqual(result.exception.code, 0)
                     response = json.loads(output.getvalue())
-                    self.assertEqual(response['decision'], 'allow')
-                    message = 'Tasarım kuralına uymuyor hemen düzelt: kodda standart emoji/ikon kullanımı tespit edildi (✅).'
-                    self.assertIn('[DESIGN_ICON_RULE] ' + message, response['reason'])
-                    log.assert_any_call('write_to_file', 'WARNING', os.path.realpath(target), message,
-                                        rule_id='DESIGN_ICON_RULE', conversation_id='default')
+                    self.assertEqual(response['decision'], 'deny')
+                    self.assertIn('[DESIGN_ICON_RULE]', response['reason'])
+                    self.assertIn('Satır 1', response['reason'])
+                    self.assertIn('✅', response['reason'])
 
 
 class TestDesignScrollbarRule(unittest.TestCase):

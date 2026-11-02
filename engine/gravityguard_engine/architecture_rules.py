@@ -19,13 +19,54 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .audit import _resolve_log_dir
 from .project_context import DEFAULT_COMPLEXITY_THRESHOLDS, load_gravityguard_config
 
 
-# --- DESIGN_ICON_RULE: STANDARD EMOJI / ICON USAGE (WARN ONLY) ---
+# --- DESIGN_ICON_RULE: STANDARD EMOJI / ICON USAGE (STRICT DENY) ---
+def find_design_icon_violations(
+    target_file: str,
+    projected_content: str,
+    added_line_numbers: Optional[Set[int]] = None
+) -> List[Dict[str, Any]]:
+    """
+    Find emoji/icon violations in the target file.
+    If added_line_numbers is provided, only inspect newly added/modified lines in projected_content.
+    Otherwise, inspect all lines in projected_content.
+    Returns list of dicts: {'line': int, 'icons': List[str], 'snippet': str}
+    """
+    norm = target_file.replace("\\", "/").lower()
+    parts = norm.split("/")
+    name = parts[-1]
+    if not name.endswith((".ts", ".tsx", ".js", ".jsx", ".html", ".vue", ".svelte", ".css", ".py", ".gd", ".gdshader")):
+        return []
+    if any(part in {"doc", "docs", "documentation", "test", "tests", "__tests__"} for part in parts[:-1]):
+        return []
+    if any(marker in name for marker in ("test_", "_test.", ".test.", "spec.")):
+        return []
+
+    icon_regex = re.compile(r"[\U00010000-\U0010ffff\u2600-\u27bf\u231a\u231b\u23e9-\u23f3\u23f8-\u23fa][\ufe0e\ufe0f]?")
+    violations: List[Dict[str, Any]] = []
+    lines = projected_content.splitlines()
+    for idx, line in enumerate(lines, 1):
+        if added_line_numbers is not None and idx not in added_line_numbers:
+            continue
+        found = icon_regex.findall(line)
+        if found:
+            distinct_icons = list(dict.fromkeys(found))
+            snippet = line.strip()
+            if len(snippet) > 80:
+                snippet = snippet[:77] + "..."
+            violations.append({
+                "line": idx,
+                "icons": distinct_icons,
+                "snippet": snippet
+            })
+    return violations
+
+
 def check_design_icon_rule(target_file: str, added_text: str) -> List[str]:
     """Return distinct added icons in source files, preserving encounter order."""
     norm = target_file.replace("\\", "/").lower()

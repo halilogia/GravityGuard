@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Design Icon Rule Hardening (`architecture_rules.py`, `dispatcher.py`)**:
+  - `architecture_rules.py`: Added `find_design_icon_violations` returning exact line numbers, distinct icons, and line snippets from projected content.
+  - `dispatcher.py`: Upgraded `DESIGN_ICON_RULE` from an advisory warning (`allow`) to a strict pre-tool hook rejection (`deny`). Reports the exact line number, icon, and snippet to mechanically block standard emoji injections and enforce the Zero-Bloat and Minimalist UI standard.
+
 ## [1.5.0] - 2026-11-02
 
 - **Frontmatter Injection & Fail-Closed Detection Rules (`security_rules.py`, `03-g-frontmatter-and-failclosed.md`):**
