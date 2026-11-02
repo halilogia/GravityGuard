@@ -73,7 +73,7 @@ class TestTestEvidenceDomain(unittest.TestCase):
 
 class TestSubsystemMappingAndMtimeExemption(unittest.TestCase):
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
+        self._tmp = tempfile.TemporaryDirectory(prefix="proj_")
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
         (self.root / "src" / "webview").mkdir(parents=True)
