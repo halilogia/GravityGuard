@@ -33,6 +33,11 @@ media/*.png
 !media/icon.png
 !media/demo.png
 media/*.jpg
+KNOWLEDGE.md
+bin/
+.pytest_cache/
+**/.pytest_cache/**
+**/.gravityguard/**
 ARCHITECTURE.md
 CHANGELOG.md
 ROADMAP.md

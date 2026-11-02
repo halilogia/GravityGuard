@@ -20,7 +20,7 @@ Add the hook from [`plugin/claude-code/settings.example.json`](plugin/claude-cod
 **What it blocks:** leaked secrets (OpenAI, Anthropic, Gemini, Slack, GitHub, private keys) · silenced or deleted tests · silent `except: pass` · layer-boundary violations · god-files. Full list in the [rule matrix](#active-rule--evidence-matrix).
 
 [![Antigravity Compatible](https://img.shields.io/badge/Antigravity%20IDE-Compatible-blue.svg)](https://antigravity.google/)
-[![Tests](https://img.shields.io/badge/Engine%20265%20%2B%20TS%2037-Passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Engine%20528%20%2B%20TS%20132-Passing-brightgreen.svg)]()
 [![Core Evaluator](https://img.shields.io/badge/Core%20Benchmark-Avg%20~0.1ms%20%7C%20p95%20%3C0.5ms-blue.svg)]()
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9%20%7C%20ES2022-blue.svg)](https://www.typescriptlang.org/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B%20%7C%20Zero%20Dependencies-brightgreen.svg)](https://www.python.org/)
@@ -53,7 +53,7 @@ GravityGuard operates an ordered, zero-overhead pipeline before any file modific
 | **`T2`** | **Observable Assertion** | **WARN ONLY** | Verifies newly added test cases (`def test_...`, `it(...)`) contain observable assertions (`assert`, `self.assert*`, `pytest.raises`, `expect()`, `.toBe()`, `.toEqual()`). |
 | **`T3`** | **Symbol-to-Test Link** | **WARN ONLY** | Verifies that newly added top-level/exported functions or classes appear by name in the candidate test file. Never double-warns if test is absent. |
 | **`LINT`**| **Diagnostic Feedback** | **WARN ONLY** | Non-blocking Tier 2 background linters (Ruff, ESLint, Godot) write findings to `.gravityguard/runtime/diagnostics.json`, surfaced on subsequent pre-tool calls (<0.5ms). |
-| **`R1`** | **Self-Review** | **WARN (Stop gate)** | Opt-in. When a governed production file changes, the Stop hook asks the agent to read its own diff (logic bug, deleted test, doc to update, invented import/function) and write `.gravityguard/self-review/<id>.json`: a schema-valid record (`reviewId`, `sourceFingerprint`, `findings`, `notes` ≥ 20 chars) carrying the candidate fingerprint, on a non-stale candidate. A final diff guard also folds in governed code changed out-of-band (e.g. a shell write). It proves a review step ran against a specific candidate — not that the review was correct or complete. |
+| **`G7`** | **TypeScript-First Guard** | **BLOCK** | Enforces application logic in .ts/.tsx files, blocking loose .js creation. Automatic allowlist for config files, build outputs, worker scripts, and an opt-in `// @ts-mandatory:` feedback channel. |
 
 ## Key Features
 
@@ -160,7 +160,7 @@ GravityGuard, herhangi bir dosya değiştirme aracı çalıştırılmadan önce 
 | **`T2`** | **Gözlemlenebilir Assertion (Observable Assertion)**| **YALNIZCA UYAR** | Yeni eklenen test case'lerinin (`def test_...`, `it(...)`) en az bir assertion (`assert`, `self.assert*`, `expect()`, `.toBe()`, `pytest.raises`) içerdiğini doğrular. |
 | **`T3`** | **Sembol-Test İlişkisi (Symbol-to-Test Link)** | **YALNIZCA UYAR** | Eklenen/değişen fonksiyon veya sınıf isimlerinin ilgili test dosyasında adıyla geçip geçmediğini kontrol eder. Test yoksa T1 önceliklidir. |
 | **`LINT`**| **Statik Linter Bildirimi (Diagnostics)** | **YALNIZCA UYAR** | Arka planda çalışan linter'lar (Ruff, ESLint, Godot) bulgularını `.gravityguard/runtime/diagnostics.json` dosyasına yazar; bir sonraki hook çağrısında yapay zekaya bağlamsal uyarı verilir (<0.5ms). |
-| **`R1`** | **Öz-İnceleme (Self-Review)** | **UYAR (Stop kapısı)** | Opt-in. Yönetilen üretim kodu değiştiğinde Stop kapısı ajandan kendi diff'ini okumasını (mantık hatası, silinen test, güncellenecek doküman, uydurulmuş import/fonksiyon) ve `.gravityguard/self-review/<id>.json` dosyasına şema-geçerli bir kayıt (`reviewId`, `sourceFingerprint`, `findings`, en az 20 karakterlik `notes`) yazmasını ister; kayıt adayın parmak izini taşımalı ve aday bayatlamamış olmalıdır. Ayrıca bir final diff guard, kanca dışı (ör. kabuk yazımı) değişen yönetilen kodu da katar. İnceleme adımının belirli bir adaya karşı yapıldığını kanıtlar; incelemenin doğru ya da eksiksiz olduğunu kanıtlamaz. |
+| **`G7`** | **TypeScript-First Koruması** | **ENGELLE (BLOCK)** | Uygulama mantığının gevşek .js dosyaları olarak yazılmasını engeller, .ts/.tsx zorunlu tutar. Derleme/paket/ayar dosyaları için otomatik muafiyet ve `// @ts-mandatory:` geri bildirim kanalı içerir. |
 
 ## Temel Özellikler
 

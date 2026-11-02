@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- **Frontmatter Injection & Fail-Closed Detection Rules (`security_rules.py`, `03-g-frontmatter-and-failclosed.md`)**:
+## [1.5.0] - 2026-11-02
+
+- **Frontmatter Injection & Fail-Closed Detection Rules (`security_rules.py`, `03-g-frontmatter-and-failclosed.md`):**
   - `security_rules.py`: Added `G_NO_RAW_FRONTMATTER_INTERPOLATION` pattern detecting raw f-string and newline concatenation into YAML frontmatter blocks, preventing privilege escalation and cross-session metadata tampering (Matt Abate disclosure).
   - `security_rules.py`: Added `G_ENFORCE_FAIL_CLOSED` pattern detecting unsafe fail-open fallback defaults on security statuses, permissions, and roles (e.g. `get("status", "canonical")`).
   - `docs/rules/03-g-frontmatter-and-failclosed.md`: Added formal threat model, violation patterns, and safe YAML serialization standards.
