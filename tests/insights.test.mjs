@@ -113,7 +113,7 @@ test('agent table: first-try clean rate, dash for zero operations, sorted by iss
 test('low-data rules collapse into one closed group', () => {
   initI18n('tr');
   const html = renderInsightsTab(vmStats(stats()));
-  assert.ok(html.includes('1 kural, az veri'));
+  assert.ok(html.includes('1 kural az tetiklendi'));
   const item = id => html.indexOf(`<div class="rule-stat-item ins-rule" data-rk="${id}"`);
   assert.ok(item('G1_SILENT_EXCEPTION') < html.indexOf('<div class="ins-low-body">'));
   assert.ok(html.indexOf('<div class="ins-low-body">') < item('OE_SPIKE'));
@@ -128,7 +128,7 @@ test('drill-down shows events, escaped reason, false-alarm button and undo', () 
   assert.ok(html.includes('Geri al'));
   assert.ok(html.includes('#abcdef') && html.includes('title="claude:abcdef123456"'));
   assert.ok(html.includes('>app.py<') && html.includes('title="C:\\proj\\src\\app.py"'));
-  assert.ok(html.includes('atlatma şüphesi'));
+  assert.ok(html.includes('susturuldu, düzeltilmedi'));
   assert.ok(!html.includes('<b>x</b>') && html.includes('&lt;b&gt;x&lt;/b&gt;'));
   assert.ok(!html.includes('data-id="evt_rec"'), 'recovered events cannot be marked');
 });
@@ -136,17 +136,17 @@ test('drill-down shows events, escaped reason, false-alarm button and undo', () 
 test('evasion and false alarm figures appear per rule and in the summary', () => {
   initI18n('tr');
   const html = renderInsightsTab(vmStats(stats()));
-  assert.ok(html.includes('Atlatma 2 · düzeltmelerin %20'));
-  assert.ok(html.includes('Hatalı alarm 1 · olayların %8'), 'per rule: 1 of 12');
+  assert.ok(html.includes('2 düzeltme yalnız susturma, düzeltmelerin %20'));
+  assert.ok(html.includes('1 hatalı alarm, olayların %8'), 'per rule: 1 of 12');
   assert.ok(html.includes('<span class="text-muted"> · %6</span>'), 'summary: 1 of 17 blocked and warned');
   assert.ok(html.includes('<span class="text-muted"> · %20</span>'), 'summary evasion: 2 of 10 fixes');
-  assert.ok(html.includes('Atlatma şüphesi') && html.includes('Atlatma: düzeltme yalnızca'));
+  assert.ok(html.includes('Susturuldu, düzeltilmedi') && html.includes('uyarıyı kapatan bir yorum ekledi'));
 });
 
 test('trend svg has a max label; empty trend and unavailable stats fall back honestly', () => {
   initI18n('en');
   const html = renderInsightsTab(vmStats(stats()));
-  assert.ok(html.includes('<svg class="ins-trend"') && html.includes('peak 5'));
+  assert.ok(html.includes('<svg class="ins-trend"') && html.includes('highest 5'));
   const s = stats(); s.daily = s.daily.map(d => ({ ...d, blocked: 0, warned: 0 }));
   assert.ok(renderInsightsTab(vmStats(s)).includes('No events in the last 14 days'));
   const legacy = renderInsightsTab(vmStats({ available: false }));

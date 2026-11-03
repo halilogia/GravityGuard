@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Plain wording in the Insights and Live tabs (`src/i18n/index.ts`):** "Atlatma şüphesi" became "Susturuldu, düzeltilmedi" and the note under the summary now says what it means: the agent did not repair the problem, it added a comment that turns the warning off, such as `# noqa`. "Gölge/Gözlem" became "Yalnız kayıt". The low-data group, the trend peak, the repeat count and the fix rate are also written as full phrases.
 - **Each warning said once per conversation and file (`hook_output.py`):** a warning already shown for the same file, rule and message is not repeated; numbers in the message are ignored, so "1005 LOC" and "1012 LOC" count as the same warning. The audit log still records every occurrence. State: `warned_once.json` in the log folder.
 - **T3 waits for Stop (`test_evidence.py`):** a changed symbol missing from its test no longer warns on the write. It is recorded as pending, clears when the test file changes, and is reported at Stop under `T3_SYMBOL_TO_TEST_LINK` with its own message instead of "no test found". `testEvidence.deferredMode: false` keeps the immediate warning.
 - **Is the briefing helping? (`audit_stats.ts`, Insights tab):** a sent briefing is logged as `BRIEFING_SENT` by the Claude Code and Codex session hooks and by the first-call briefing. The agents card shows the first-try clean rate of briefed against unbriefed sessions, counting only agents the briefing reaches.
