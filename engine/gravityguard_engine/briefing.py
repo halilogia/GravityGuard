@@ -55,7 +55,8 @@ def build_briefing(agent: str, days: int = 7, top: int = 4, journal: str | None 
         if rec.get("agent") != agent:
             continue
         try:
-            ts = datetime.fromisoformat(str(rec.get("timestamp")))
+            # Python < 3.11 rejects a trailing "Z" (JS toISOString), so normalise it first.
+            ts = datetime.fromisoformat(str(rec.get("timestamp")).replace("Z", "+00:00"))
         except ValueError:
             continue
         if ts.tzinfo is None:

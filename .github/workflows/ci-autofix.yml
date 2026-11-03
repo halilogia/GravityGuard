@@ -1,0 +1,94 @@
+name: CI autofix
+
+# When CI fails on main, Claude reads the failed log, fixes the root cause on a
+# throwaway branch and opens a PR. It never pushes to main and never weakens a
+# test, scan or threshold. Needs one repo secret: CLAUDE_CODE_OAUTH_TOKEN
+# (`claude setup-token`, then `gh secret set CLAUDE_CODE_OAUTH_TOKEN`).
+# Without the secret the job skips instead of failing.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: ci-autofix-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  autofix:
+    # Only real failures of a push to main; never react to the bot's own work.
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event == 'push' &&
+      !startsWith(github.event.workflow_run.head_commit.message, 'fix(ci-autofix)')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: read
+      id-token: write
+    env:
+      HAS_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+    steps:
+      - name: Secret check
+        if: env.HAS_TOKEN != 'true'
+        run: echo "::notice::CLAUDE_CODE_OAUTH_TOKEN is not set; autofix skipped."
+
+      - uses: actions/checkout@v4
+        if: env.HAS_TOKEN == 'true'
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 2
+
+      # Same toolchain as CI, so Claude reproduces the failure before fixing it.
+      - uses: actions/setup-node@v4
+        if: env.HAS_TOKEN == 'true'
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        if: env.HAS_TOKEN == 'true'
+        with:
+          python-version: '3.10'
+
+      - name: Collect failed log
+        if: env.HAS_TOKEN == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run view ${{ github.event.workflow_run.id }} --log-failed > /tmp/ci-failed.log || true
+          grep -nE "not ok|FAIL|Error|error:|Traceback|AssertionError" /tmp/ci-failed.log | head -n 120 > /tmp/ci-summary.txt || true
+          npm ci --no-audit --no-fund
+
+      - uses: anthropics/claude-code-action@v1
+        if: env.HAS_TOKEN == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          claude_args: >-
+            --max-turns 60
+            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(npm:*),Bash(node:*),Bash(python:*),Bash(git:*),Bash(gh pr create:*),Bash(grep:*),Bash(cat:*),Bash(head:*),Bash(tail:*)"
+          prompt: |
+            CI failed on main at commit ${{ github.event.workflow_run.head_sha }}
+            (run ${{ github.event.workflow_run.html_url }}).
+            The failed log is /tmp/ci-failed.log, a short summary is /tmp/ci-summary.txt.
+
+            1. Find the root cause. Reproduce it locally first (npm run build, npm test,
+               npm run test:engine, python tools/verify_doc_governance.py --all,
+               python tools/check_secrets.py --base HEAD^). CI runs Python 3.10 on
+               ubuntu, windows and macos; think about version and OS differences.
+            2. Fix the cause in source. Forbidden: deleting or skipping tests, loosening
+               assertions, raising thresholds, narrowing the secret scan, suppression
+               comments, editing .github/workflows. If the failure is flaky or external
+               (network, runner outage), change nothing and stop.
+            3. Add or update a test that would have caught it. Follow AGENTS.md and the
+               Same-Commit doc rule (update CHANGELOG.md / docs that the governance check asks for).
+            4. Re-run every command from step 1; all must pass.
+            5. git switch -c ci-autofix/${{ github.event.workflow_run.head_sha }},
+               commit with message "fix(ci-autofix): <what was wrong>", push that branch,
+               then gh pr create --base main with the root cause, the fix and the test
+               results in the body. Never push to main.

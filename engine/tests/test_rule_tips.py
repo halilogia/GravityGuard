@@ -78,6 +78,13 @@ class BriefingTests(unittest.TestCase):
     def test_nothing_to_say(self):
         self.assertEqual(build_briefing("Codex", journal=self._journal([])), "")
 
+    def test_z_suffix_timestamps_count(self):
+        # JS toISOString writes "...Z"; Python 3.10 fromisoformat rejected it and the briefing went silent in CI.
+        now = datetime(2026, 11, 3, 12, tzinfo=timezone.utc)
+        ts = (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        path = self._journal([{"agent": "Codex", "status": "BLOCKED", "ruleId": "G1_SILENT_EXCEPTION", "timestamp": ts}])
+        self.assertIn("G1_SILENT_EXCEPTION, 1 kez", build_briefing("Codex", journal=path, now=now))
+
 
 class FirstCallBriefingTests(unittest.TestCase):
     def setUp(self):
