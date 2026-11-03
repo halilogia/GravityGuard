@@ -302,7 +302,18 @@ def read_bloat_deny(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }}
 
 
-def session_briefing(agent: str = "Claude Code") -> Optional[Dict[str, Any]]:
+def session_start_conversation() -> str:
+    """The SessionStart event's session id, or "" when stdin carries no event."""
+    try:
+        if sys.stdin is None or sys.stdin.isatty():
+            return ""
+        event = json.load(sys.stdin)
+    except (ValueError, OSError, RecursionError):
+        return ""
+    return conversation_id(event) if isinstance(event, dict) and event.get("session_id") else ""
+
+
+def session_briefing(agent: str = "Claude Code", conversation: str = "") -> Optional[Dict[str, Any]]:
     """SessionStart: the rules this agent tripped most lately, as additionalContext. Silent when there is nothing to say.
 
     Runs in-process from the engine package next to the configured engine; a failure only costs the briefing.
@@ -313,6 +324,9 @@ def session_briefing(agent: str = "Claude Code") -> Optional[Dict[str, Any]]:
             sys.path.insert(0, engine_dir)
         from gravityguard_engine.briefing import build_briefing
         text = build_briefing(agent)
+        if text and conversation:  # marks the session so Insights can compare briefed and unbriefed ones
+            from gravityguard_engine.briefing import record_briefing
+            record_briefing(conversation, text)
     except Exception as err:
         print(f"[GravityGuard Claude adapter] briefing unavailable: {err}", file=sys.stderr)
         return None
@@ -347,7 +361,7 @@ def main(argv: Sequence[str]) -> int:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
     if "--session-start" in argv:
-        result = session_briefing()
+        result = session_briefing(conversation=session_start_conversation())
         if result is not None:
             print(json.dumps(result, ensure_ascii=False))
         return 0

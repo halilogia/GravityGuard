@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from .rule_tips import TIPS
 
 # Bookkeeping and compliance records, not mistakes (mirrors src/audit_stats.ts NON_VIOLATION_RULES).
-_NOT_MISTAKES = {"PASS", "EXEMPT", "READ_ALLOW", "G7_TS_MANDATORY_FEEDBACK", "T1_PENDING", "DOC_OBLIGATION_PENDING"}
+_NOT_MISTAKES = {"PASS", "EXEMPT", "READ_ALLOW", "G7_TS_MANDATORY_FEEDBACK", "T1_PENDING", "DOC_OBLIGATION_PENDING", "BRIEFING_SENT"}
 _MAX_LINE_BYTES = 64 * 1024
 
 
@@ -110,6 +110,18 @@ def _attach(out: str, text: str) -> tuple[str, bool]:
     return out, False
 
 
+def record_briefing(conversation_id: str, text: str) -> None:
+    """Marks the conversation as briefed in the journal, so the Insights tab can compare briefed and unbriefed sessions."""
+    try:
+        from .audit import log_event
+
+        first_line = text.splitlines()[1] if len(text.splitlines()) > 1 else text
+        log_event("briefing", "APPROVED", "", f"Session briefing sent: {first_line[:160]}",
+                  rule_id="BRIEFING_SENT", conversation_id=conversation_id)
+    except Exception as err:  # the mark only feeds a statistic
+        sys.stderr.write(f"[GravityGuard] briefing not recorded: {err}\n")
+
+
 def brief_first_call(out: str, conversation_id: str, log_dir: str | None = None) -> str:
     """Adds the agent's briefing to the first non-rejected tool call of a conversation; later calls pass unchanged."""
     from .audit import _resolve_log_dir, detect_agent_name
@@ -133,6 +145,7 @@ def brief_first_call(out: str, conversation_id: str, log_dir: str | None = None)
         out, attached = _attach(out, text)
         if not attached:  # a rejection already teaches; try again on the next call
             return out
+        record_briefing(conversation_id, text)
     seen = (seen + [conversation_id])[-_MAX_BRIEFED:]
     try:
         os.makedirs(log_dir, exist_ok=True)

@@ -184,11 +184,25 @@ def handle(event: Dict[str, Any], stop: bool) -> Optional[Dict[str, Any]]:
     return from_engine_pretool(answer) if answer else failure_response()
 
 
-def session_briefing() -> Optional[Dict[str, Any]]:
+def session_start_conversation() -> str:
+    """The SessionStart event's session id, or "" when stdin carries no event."""
+    try:
+        if sys.stdin is None or sys.stdin.isatty():
+            return ""
+        event = json.load(sys.stdin)
+    except (ValueError, OSError, RecursionError):
+        return ""
+    ok = isinstance(event, dict) and (event.get("session_id") or event.get("sessionId"))
+    return conversation_id(event) if ok else ""
+
+
+def session_briefing(conversation: str = "") -> Optional[Dict[str, Any]]:
     """SessionStart: the rules Codex tripped most lately, as additionalContext. Silent when there is nothing to say."""
     try:
-        from gravityguard_engine.briefing import build_briefing
+        from gravityguard_engine.briefing import build_briefing, record_briefing
         text = build_briefing("Codex")
+        if text and conversation:  # marks the session so Insights can compare briefed and unbriefed ones
+            record_briefing(conversation, text)
     except Exception as err:  # a failure only costs the briefing
         print(f"[GravityGuard Codex adapter] briefing unavailable: {err}", file=sys.stderr)
         return None
@@ -202,7 +216,7 @@ def main(argv: Sequence[str]) -> int:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
     if "--session-start" in argv:
-        result = session_briefing()
+        result = session_briefing(session_start_conversation())
         if result is not None:
             print(json.dumps(result, ensure_ascii=False))
         return 0

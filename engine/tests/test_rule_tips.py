@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -85,12 +86,20 @@ class FirstCallBriefingTests(unittest.TestCase):
         with open(os.path.join(self.log_dir, "gravityguard_permanent_audit.jsonl"), "w", encoding="utf-8") as f:
             for agent in ("Antigravity IDE", "Claude Code"):
                 f.write(json.dumps({"agent": agent, "status": "BLOCKED", "ruleId": "G1_SILENT_EXCEPTION", "timestamp": ts}) + "\n")
+        env = mock.patch.dict(os.environ, {"GRAVITYGUARD_LOG_DIR": self.log_dir})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def _marks(self):
+        with open(os.path.join(self.log_dir, "gravityguard_permanent_audit.jsonl"), encoding="utf-8") as f:
+            return [r for r in map(json.loads, f) if r.get("ruleId") == "BRIEFING_SENT"]
 
     def test_first_allowed_call_carries_briefing_once(self):
         first = brief_first_call('{"decision": "allow", "reason": "token note"}\n', "conv-1", self.log_dir)
         reason = json.loads(first)["reason"]
         self.assertTrue(reason.startswith("GravityGuard: son 7"))
         self.assertTrue(reason.endswith("\n\ntoken note"))
+        self.assertEqual([m.get("conversationId") for m in self._marks()], ["conv-1"])
         again = '{"decision": "allow"}\n'
         self.assertEqual(brief_first_call(again, "conv-1", self.log_dir), again)
 

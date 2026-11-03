@@ -589,11 +589,10 @@ def evaluate_test_evidence(
             warnings.append(("T2_NO_OBSERVABLE_ASSERTION", t2_msg))
     else:
         t1_warn, t1_msg, candidate_path = check_t1_missing_test(target_file, added_text, cfg)
+        deferred = True
+        if cfg and isinstance(cfg, dict):
+            deferred = cfg.get("testEvidence", {}).get("deferredMode", True)
         if t1_warn:
-            deferred = True
-            if cfg and isinstance(cfg, dict):
-                deferred = cfg.get("testEvidence", {}).get("deferredMode", True)
-
             if deferred:
                 candidate_p, expected_n = resolve_candidate_test_file(target_file, cfg)
                 actions["record_test"] = (target_file, candidate_p, expected_n, t1_msg)
@@ -609,7 +608,11 @@ def evaluate_test_evidence(
                 added_line_numbers=added_line_numbers,
                 extra_test_paths=extra_paths
             )
-            if t3_warn:
+            if t3_warn and deferred:
+                # Same as T1: the agent gets the session to update the test; an unchanged test file is reported at Stop.
+                if actions["record_test"] is None:
+                    actions["record_test"] = (target_file, candidate_path, os.path.basename(candidate_path), t3_msg)
+            elif t3_warn:
                 warnings.append(("T3_SYMBOL_TO_TEST_LINK", t3_msg))
 
     return warnings, actions
@@ -957,3 +960,20 @@ def evaluate_t0_gate(
         return []
     violated, msg, _ = evaluate_lcov_coverage(lcov_path, targets, get_min_coverage_percent(cfg), repo_root)
     return [("T0_COVERAGE_BELOW_THRESHOLD", msg)] if violated else []
+
+
+def final_test_evidence_warnings(unresolved: dict) -> List[Tuple[str, str]]:
+    """Stop-time warnings for pending test obligations, as (rule_id, message).
+
+    A T3 entry has a test file that was not updated for the changed symbol, so it gets its own message instead of
+    "no test found".
+    """
+    out: List[Tuple[str, str]] = []
+    stale = {p: i for p, i in unresolved.items() if str(i.get("reason", "")).startswith("Sembol-Test")}
+    if stale:
+        out.append(("T3_SYMBOL_TO_TEST_LINK", " ".join(str(i["reason"]) for i in stale.values())))
+    missing = [f"'{p}' (beklenen test: {i.get('expected_name', 'test')})" for p, i in unresolved.items() if p not in stale]
+    if missing:
+        out.append(("T1_FINAL_UNRESOLVED", "Test Kanıtı Uyarısı: Oturum tamamlandı ancak şu üretim kodları için "
+                    f"test kanıtı bulunamadı: {', '.join(missing)}"))
+    return out

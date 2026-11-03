@@ -9,10 +9,10 @@ export const WINDOW_KEYS: WindowKey[] = ['24h', '7d', '30d', 'all'];
 const WINDOW_MS: Record<WindowKey, number> = { '24h': 864e5, '7d': 7 * 864e5, '30d': 30 * 864e5, all: Infinity };
 
 /** Approved records that are not the write itself; they never fix a violation (mirrors audit.NON_RECOVERING_RULES). */
-export const NON_RECOVERING_RULES = new Set(['READ_ALLOW', 'T1_PENDING', 'DOC_OBLIGATION_PENDING', 'G7_TS_MANDATORY_FEEDBACK']);
+export const NON_RECOVERING_RULES = new Set(['READ_ALLOW', 'T1_PENDING', 'DOC_OBLIGATION_PENDING', 'G7_TS_MANDATORY_FEEDBACK', 'BRIEFING_SENT']);
 
 /** Rule ids that record compliance or bookkeeping, not a violation. */
-export const NON_VIOLATION_RULES = new Set(['PASS', 'EXEMPT', 'READ_ALLOW', 'G7_TS_MANDATORY_FEEDBACK', 'T1_PENDING', 'DOC_OBLIGATION_PENDING']);
+export const NON_VIOLATION_RULES = new Set(['PASS', 'EXEMPT', 'READ_ALLOW', 'G7_TS_MANDATORY_FEEDBACK', 'T1_PENDING', 'DOC_OBLIGATION_PENDING', 'BRIEFING_SENT']);
 
 export interface AuditRecord {
   eventId?: string;
@@ -86,7 +86,14 @@ export interface WindowStats {
   falseAlarms: number;
   rules: Record<string, RuleStat>;
   agents: Record<string, AgentStat>;
+  briefing: BriefingStat;
 }
+
+export interface BriefingCohort { sessions: number; writes: number; clean: number; }
+
+/** First-try clean writes in sessions that got the session briefing versus those that did not.
+ *  Only agents with at least one briefed session count, so agents the briefing never reaches do not skew it. */
+export interface BriefingStat { briefed: BriefingCohort; unbriefed: BriefingCohort; }
 
 export interface AuditStats {
   available: boolean;
@@ -106,7 +113,10 @@ export function recordRule(r: AuditRecord): string {
 }
 
 function emptyWindow(): WindowStats {
-  return { operations: 0, blocked: 0, warned: 0, recovered: 0, evasion: 0, falseAlarms: 0, rules: {}, agents: {} };
+  return {
+    operations: 0, blocked: 0, warned: 0, recovered: 0, evasion: 0, falseAlarms: 0, rules: {}, agents: {},
+    briefing: { briefed: { sessions: 0, writes: 0, clean: 0 }, unbriefed: { sessions: 0, writes: 0, clean: 0 } }
+  };
 }
 
 function ruleOf(w: WindowStats, id: string): RuleStat {
@@ -125,6 +135,9 @@ export function computeAuditStats(records: AuditRecord[], falseAlarmIds: Set<str
   const days = opts.days ?? 14;
   const windows = Object.fromEntries(WINDOW_KEYS.map(k => [k, emptyWindow()])) as Record<WindowKey, WindowStats>;
   const convSets: Record<WindowKey, Record<string, Set<string>>> = { '24h': {}, '7d': {}, '30d': {}, all: {} };
+  const convWrites: Record<WindowKey, Map<string, { agent: string; writes: number; clean: number }>> =
+    { '24h': new Map(), '7d': new Map(), '30d': new Map(), all: new Map() };
+  const briefedConvs = new Set<string>();
 
   const dayKeys: string[] = [];
   for (let i = days - 1; i >= 0; i--) dayKeys.push(localDay(now - i * 864e5));
@@ -159,6 +172,7 @@ export function computeAuditStats(records: AuditRecord[], falseAlarmIds: Set<str
     // (the write still passes) and bookkeeping lines are not separate attempts.
     const isOperation = r.ruleId === 'PASS' || r.status === 'BLOCKED';
     const isFalseAlarm = !!r.eventId && falseAlarmIds.has(r.eventId);
+    if (r.ruleId === 'BRIEFING_SENT') briefedConvs.add(conv);
 
     for (const key of WINDOW_KEYS) {
       if (now - ms > WINDOW_MS[key]) continue;
@@ -166,7 +180,13 @@ export function computeAuditStats(records: AuditRecord[], falseAlarmIds: Set<str
       const a = w.agents[agent] || (w.agents[agent] = { agent, operations: 0, conversations: 0, blocked: 0, warned: 0, recovered: 0, cleanFirstTry: 0 });
       const cs = convSets[key][agent] || (convSets[key][agent] = new Set());
       cs.add(conv);
-      if (isOperation) { w.operations++; a.operations++; }
+      if (isOperation) {
+        w.operations++; a.operations++;
+        const cw = convWrites[key].get(conv) || { agent, writes: 0, clean: 0 };
+        cw.writes++;
+        if (r.outcome === 'CLEAN' && r.ruleId === 'PASS') cw.clean++;
+        convWrites[key].set(conv, cw);
+      }
       if (r.outcome === 'CLEAN' && r.ruleId === 'PASS') a.cleanFirstTry++;
       if (isBlocked || isRepeat || isWarn || isShadow || isRecovered) {
         const rs = ruleOf(w, rule);
@@ -216,6 +236,12 @@ export function computeAuditStats(records: AuditRecord[], falseAlarmIds: Set<str
 
   for (const key of WINDOW_KEYS) {
     for (const [agent, set] of Object.entries(convSets[key])) windows[key].agents[agent].conversations = set.size;
+    const reached = new Set([...convWrites[key]].filter(([c]) => briefedConvs.has(c)).map(([, v]) => v.agent));
+    for (const [c, v] of convWrites[key]) {
+      if (!reached.has(v.agent)) continue;
+      const cohort = briefedConvs.has(c) ? windows[key].briefing.briefed : windows[key].briefing.unbriefed;
+      cohort.sessions++; cohort.writes += v.writes; cohort.clean += v.clean;
+    }
   }
   const perRule = opts.recentPerRule ?? 10;
   for (const id of Object.keys(recentByRule)) {

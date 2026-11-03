@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -100,4 +102,17 @@ test('--session-start: briefing as SessionStart context, silent when the journal
   const empty = runHook({}, ['--session-start'], { GRAVITYGUARD_LOG_DIR: path.join(path.dirname(HOOK), '__no_such_log_dir__') });
   assert.equal(empty.status, 0);
   assert.equal(empty.stdout.trim(), '');
+});
+
+test('--session-start marks the briefed session in the journal', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gg-codex-brief-'));
+  const journal = path.join(dir, 'gravityguard_permanent_audit.jsonl');
+  const ts = new Date().toISOString();
+  fs.writeFileSync(journal, JSON.stringify({ agent: 'Codex', status: 'BLOCKED', ruleId: 'G1_SILENT_EXCEPTION', timestamp: ts }) + '\n');
+  const r = runHook({ session_id: 'abc', hook_event_name: 'SessionStart' }, ['--session-start'], { GRAVITYGUARD_LOG_DIR: dir });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /G1_SILENT_EXCEPTION/);
+  const marks = fs.readFileSync(journal, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((x) => x.ruleId === 'BRIEFING_SENT');
+  assert.deepEqual(marks.map((m) => m.conversationId), ['codex:abc']);
+  fs.rmSync(dir, { recursive: true, force: true });
 });

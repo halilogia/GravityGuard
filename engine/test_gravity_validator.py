@@ -45,6 +45,12 @@ def _warnings_from(res: dict) -> str:
     return res.get("reason", "") or ""
 
 
+def _immediate_test_evidence(project_dir: str) -> None:
+    """T3 waits for Stop by default; these checks look at the PreToolUse warning itself."""
+    with open(os.path.join(project_dir, ".gravityguard.json"), "w", encoding="utf-8") as f:
+        json.dump({"testEvidence": {"deferredMode": False}}, f)
+
+
 def run_validator(payload: dict) -> Tuple[dict, float]:
     start = time.perf_counter()
     proc = subprocess.Popen(
@@ -1160,7 +1166,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             with open(prod_file, "w", encoding="utf-8") as f:
                 f.write("def create_order():\n    return {'id': 1}\n")
             with open(test_file, "w", encoding="utf-8") as f:
-                f.write("def test_create_order():\n    assert True\n")
+                f.write("def test_create_order():\n    assert create_order()['id'] == 1\n")
 
             payload = {
                 "toolCall": {
@@ -1194,7 +1200,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             with open(prod_file, "w", encoding="utf-8") as f:
                 f.write("def create_order():\n    return {'id': 1}\n")
             with open(test_file, "w", encoding="utf-8") as f:
-                f.write("def test_create_order():\n    assert True\n")
+                f.write("def test_create_order():\n    assert create_order()['id'] == 1\n")
 
             past_time = time.time() - 1000
             os.utime(test_file, (past_time, past_time))
@@ -1368,6 +1374,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             tests_dir = os.path.join(temp_dir, "tests")
             os.makedirs(src_dir, exist_ok=True)
             os.makedirs(tests_dir, exist_ok=True)
+            _immediate_test_evidence(temp_dir)
 
             prod_file = os.path.join(src_dir, "calc.py")
             test_file = os.path.join(tests_dir, "test_calc.py")
@@ -1480,6 +1487,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             tests_dir = os.path.join(temp_dir, "tests")
             os.makedirs(src_dir, exist_ok=True)
             os.makedirs(tests_dir, exist_ok=True)
+            _immediate_test_evidence(temp_dir)
 
             prod_file = os.path.join(src_dir, "calc.py")
             test_file = os.path.join(tests_dir, "test_calc.py")
@@ -1514,6 +1522,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             tests_dir = os.path.join(temp_dir, "tests")
             os.makedirs(src_dir, exist_ok=True)
             os.makedirs(tests_dir, exist_ok=True)
+            _immediate_test_evidence(temp_dir)
 
             prod_file = os.path.join(src_dir, "service.py")
             test_file = os.path.join(tests_dir, "test_service.py")
@@ -1581,6 +1590,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             tests_dir = os.path.join(temp_dir, "tests")
             os.makedirs(src_dir, exist_ok=True)
             os.makedirs(tests_dir, exist_ok=True)
+            _immediate_test_evidence(temp_dir)
 
             prod_file = os.path.join(src_dir, "handler.ts")
             test_file = os.path.join(tests_dir, "handler.test.ts")
@@ -3017,6 +3027,33 @@ class TestV127G0ZeroBypassAndStatefulEvidence(unittest.TestCase):
         res, _ = run_validator(payload_json)
         self.assertEqual(res.get("decision"), "allow")
         self.assertEqual(_warnings_from(res), "")
+
+    def test_t3_waits_for_stop_and_clears_when_test_is_updated(self):
+        """Default mode: no T3 warning on the write; Stop reports the untouched test; updating it clears the warning"""
+        src_file = os.path.join(self.temp_dir, "src", "calc.py")
+        test_file = os.path.join(self.temp_dir, "tests", "test_calc.py")
+        os.makedirs(os.path.dirname(src_file), exist_ok=True)
+        os.makedirs(os.path.dirname(test_file), exist_ok=True)
+        with open(src_file, "w", encoding="utf-8") as f:
+            f.write("def old(): pass\n")
+        with open(test_file, "w", encoding="utf-8") as f:
+            f.write("def test_legacy():\n    assert old() is None\n")
+        res, _ = run_validator({"toolCall": {"name": "replace_file_content", "args": {
+            "TargetFile": src_file, "TargetContent": "def old(): pass",
+            "ReplacementContent": "def compute_untested_formula(x):\n    return x * 42\n"}}})
+        self.assertEqual(res.get("decision"), "allow")
+        self.assertNotIn("T3_SYMBOL_TO_TEST_LINK", _warnings_from(res))
+
+        stop_res, _ = run_validator({"terminationReason": "model_stop"})
+        self.assertIn("calc.py", _warnings_from(stop_res))
+
+        new_test = "def test_formula():\n    assert compute_untested_formula(1) == 42\n"
+        res2, _ = run_validator({"toolCall": {"name": "write_to_file", "args": {"TargetFile": test_file, "CodeContent": new_test}}})
+        self.assertEqual(res2.get("decision"), "allow")
+        with open(test_file, "w", encoding="utf-8") as f:
+            f.write(new_test)
+        stop_res2, _ = run_validator({"terminationReason": "model_stop"})
+        self.assertNotIn("calc.py", _warnings_from(stop_res2))
 
     def test_t1_stateful_lifecycle_resolve_flow(self):
         """Full lifecycle: Prod write (deferred) -> Stop hook warns -> Test write -> Stop hook clean"""

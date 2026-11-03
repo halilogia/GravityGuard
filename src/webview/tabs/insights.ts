@@ -296,7 +296,18 @@ function agentsCard(w: WindowStats): string {
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
+        ${briefingLine(w)}
       </div>`;
+}
+
+function briefingLine(w: WindowStats): string {
+  const b = w.briefing;
+  if (!b) return '';
+  const briefed = rate(b.briefed.clean, b.briefed.writes);
+  const unbriefed = rate(b.unbriefed.clean, b.unbriefed.writes);
+  if (briefed === null || unbriefed === null) return '';
+  const hint = t('insights.briefingCompareHint', { bs: b.briefed.sessions, us: b.unbriefed.sessions });
+  return `<div class="insight-sub" title="${escapeHtml(hint)}">${t('insights.briefingCompare', { briefed: pct(briefed), unbriefed: pct(unbriefed) })}</div>`;
 }
 
 function rulesCard(rows: RuleRow[]): string {

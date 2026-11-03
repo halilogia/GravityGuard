@@ -62,3 +62,19 @@ test('rule modes are written under "rules", mandatory rules cannot be shadowed',
   data = JSON.parse(fs.readFileSync(cfg, 'utf8'));
   assert.equal(configuredMode(data, 'G1_SILENT_EXCEPTION'), null);
 });
+
+test('briefing cohorts compare first-try clean writes, only for agents the briefing reaches', () => {
+  const ag = (h, status, outcome, ruleId, conv, agent = 'Antigravity IDE') => rec(h, status, outcome, ruleId, { agent, conversationId: conv });
+  const s = computeAuditStats([
+    ag(1, 'APPROVED', 'CLEAN', 'BRIEFING_SENT', 'b1'),
+    ag(1, 'APPROVED', 'CLEAN', 'PASS', 'b1'),
+    ag(1.1, 'APPROVED', 'CLEAN', 'PASS', 'b1'),
+    ag(2, 'BLOCKED', 'BLOCKED', 'G1_SILENT_EXCEPTION', 'u1'),
+    ag(2.1, 'APPROVED', 'RECOVERED', 'PASS', 'u1'),
+    ag(3, 'APPROVED', 'CLEAN', 'PASS', 'o1', 'OpenCode')
+  ], new Set(), { now: NOW });
+  const b = s.windows['24h'].briefing;
+  assert.deepEqual(b.briefed, { sessions: 1, writes: 2, clean: 2 });
+  assert.deepEqual(b.unbriefed, { sessions: 1, writes: 2, clean: 0 }, 'OpenCode is never briefed here, so it is left out');
+  assert.equal(s.windows['24h'].operations, 5, 'the briefing mark is not a write');
+});

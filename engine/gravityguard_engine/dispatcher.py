@@ -78,9 +78,11 @@ from .security_rules import (
 from .test_evidence import (
     evaluate_t0_gate,
     evaluate_test_evidence,
+    final_test_evidence_warnings,
     resolve_candidate_test_file,
 )
 from .delivery_gate import evaluate_ebdg_ui_gate
+from .hook_output import drop_repeated_warnings, finalize
 # Review governance removed
 
 def _project_relative(path: str, root: Path) -> str:
@@ -320,17 +322,9 @@ def validate_gravityguard() -> None:
                 )
                 log_event("stop", "WARNING", "workspace", removal_warn, rule_id="TEST_DELETED_SUBJECT_REMAINS", conversation_id=conversation_id)
                 warn_reasons.append(f"[TEST_DELETED_SUBJECT_REMAINS] {removal_warn}")
-            if unresolved_tests:
-                missing_items = [
-                    f"'{p}' (beklenen test: {info.get('expected_name', 'test')})"
-                    for p, info in unresolved_tests.items()
-                ]
-                t1_warn = (
-                    f"Test Kanıtı Uyarısı: Oturum tamamlandı ancak şu üretim kodları için "
-                    f"test kanıtı bulunamadı: {', '.join(missing_items)}"
-                )
-                log_event("stop", "WARNING", "workspace", t1_warn, rule_id="T1_FINAL_UNRESOLVED", conversation_id=conversation_id)
-                warn_reasons.append(f"[T1_FINAL_UNRESOLVED] {t1_warn}")
+            for t_rule, t_msg in final_test_evidence_warnings(unresolved_tests):
+                log_event("stop", "WARNING", "workspace", t_msg, rule_id=t_rule, conversation_id=conversation_id)
+                warn_reasons.append(f"[{t_rule}] {t_msg}")
 
             # T0: dynamic test run + LCOV gate (opt-in via testEvidence.dynamicExecution)
             t0_findings = evaluate_t0_gate(str(project_root), cfg)
@@ -980,6 +974,10 @@ def validate_gravityguard() -> None:
     _log("APPROVED", target_file, f"All Guards Passed ({elapsed_ms:.1f}ms)", rule_id="PASS",
          evasion_markers=find_evasion_markers(added_text))
     res_payload = {"decision": "allow"}
+    try:  # each warning is said once per conversation and file; the audit log above keeps every occurrence
+        all_warnings = drop_repeated_warnings(all_warnings, c_id, target_file)
+    except Exception as dedupe_err:
+        print(f"[GravityGuard] warning dedupe failed: {dedupe_err}", file=sys.stderr)
     if all_warnings:
         res_payload["reason"] = " ⚠ ".join(
             f"[{rule_id}] {msg}" for rule_id, msg in all_warnings
@@ -1087,18 +1085,7 @@ def run_cli() -> None:
         print(json.dumps({"decision": "continue" if "--stop" in sys.argv else "deny",
                           "reason": "[GUARD_UNAVAILABLE]: Validation could not complete"}))
         return
-    out = buf.getvalue()
-    try:
-        from .rule_tips import enrich_hook_output
-        out = enrich_hook_output(out)
-    except Exception as tip_err:  # a lesson must never cost the decision itself
-        print(f"[GravityGuard] rule tip failed: {tip_err}", file=sys.stderr)
-    if not _CRASH_CONTEXT.get("stop"):
-        try:
-            from .briefing import brief_first_call
-            out = brief_first_call(out, str(_CRASH_CONTEXT.get("conversation_id") or "default"))
-        except Exception as brief_err:  # the briefing must never cost the decision itself
-            print(f"[GravityGuard] briefing failed: {brief_err}", file=sys.stderr)
+    out = finalize(buf.getvalue(), bool(_CRASH_CONTEXT.get("stop")), str(_CRASH_CONTEXT.get("conversation_id") or ""))
     real_stdout.write(out)
     real_stdout.flush()
     if exit_code is not None:  # callers and tests rely on the engine's own sys.exit, code 0 included
