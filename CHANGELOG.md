@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **OpenCode Adapter & Agent Identity (`plugin/opencode/*`, `audit.py`, `src/tasks.ts`):**
+  - `plugin/opencode/gravityguard_opencode_hook.py`: translates OpenCode `write`/`edit`/`multiedit`/`read`/`bash`/`patch` payloads into the engine dialect, runs the unchanged engine, and answers `{"block": bool, "reason": str}`; fail-open on a missing engine.
+  - `plugin/opencode/gravityguard_opencode_plugin.ts`: OpenCode **v2** plugin (`export default { id: "gravityguard", setup }`, no npm import) — `ctx.tool.hook("execute.before")` blocks by throwing, `ctx.event.subscribe({ types: ["session.idle"] })` runs the Stop hook; only file/shell/read tools spawn the adapter.
+  - `plugin/opencode/install.py`: installs/updates the plugin into `~/.config/opencode/plugins/gravityguard.ts` with backup, hash verification and `--check` drift mode.
+  - `engine/gravityguard_engine/audit.py`: `detect_agent_name` maps the `opencode:` conversation prefix to `OpenCode`, so OpenCode sessions no longer fall back to the Antigravity IDE badge.
+  - `src/tasks.ts`: `stripConversationPrefix` also drops the `opencode:` prefix so task ids from OpenCode compare equal.
+  - Tests: `tests/opencode_adapter.test.mjs` (12 cases incl. silent-allow regression and fail-open) and an OpenCode row in `tests/agent_identity.test.mjs`.
+
 - **Token Output Guard (`token_guard.py`, `dispatcher.py`, `test_token_guard.py`):**
   - PreToolUse now rejects whole-file reads of large files (>150 KB) unless a bounded `StartLine`/`EndLine` window of at most 800 lines is requested.
   - Warns on unbounded recursive listings, `git log`/`git diff` without limits, and `cat`/`type`/`Get-Content` of large files; suggests `tsave run -- <command>`.

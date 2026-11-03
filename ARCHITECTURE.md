@@ -399,10 +399,10 @@ flowchart TD
 <!-- ARCH-AUTO:START (tools/generate_architecture.py --sync; elle düzenlemeyin) -->
 ## Otomatik Metrikler (Stop hook ile güncellenir)
 
-> Üretim tarihi: 2026-11-02 — sürüm 1.5.0
+> Üretim tarihi: 2026-11-03 — sürüm 1.5.0
 
-- Toplam dosya: **126**, dolu satır: **25692**
-- Test dosyası: **48**, test sayısı: **515**
+- Toplam dosya: **133**, dolu satır: **26558**
+- Test dosyası: **50**, test sayısı: **544**
 
 | Katman | Dosya | Dolu satır |
 |---|---:|---:|
@@ -410,8 +410,8 @@ flowchart TD
 | Tier 4 Deep-Path Güvenlik Denetçisi | 1 | 417 |
 | Yönetişim & Yaşam Döngüsü | 4 | 1747 |
 | Extension UI & Client | 26 | 4125 |
-| `engine/` (alan) | 33 | 11919 |
-| `plugin/` (alan) | 10 | 651 |
+| `engine/` (alan) | 34 | 12120 |
+| `plugin/` (alan) | 14 | 1108 |
 | `src/` (alan) | 34 | 5938 |
-| `tests/` (alan) | 49 | 7184 |
+| `tests/` (alan) | 51 | 7392 |
 <!-- ARCH-AUTO:END -->

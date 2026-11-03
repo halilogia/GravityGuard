@@ -643,6 +643,8 @@ def detect_agent_name(conv_id: Any = None) -> str:
         return "Claude Code"
     elif cid.startswith("codex:"):
         return "Codex"
+    elif cid.startswith("opencode:"):
+        return "OpenCode"
     elif cid.startswith("cli:") or cid.startswith("agy-cli:") or os.environ.get("AGY_CLI") or os.environ.get("ANTIGRAVITY_CLI"):
         return "Antigravity CLI"
     elif cid.startswith("sdk:") or cid.startswith("agy-sdk:") or os.environ.get("ANTIGRAVITY_SDK") or os.environ.get("AGY_SDK"):

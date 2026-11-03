@@ -16,6 +16,7 @@ from gravityguard_engine.audit import log_event
 test_cases = [
     ("claude:session_123", {}, "Claude Code"),
     ("codex:session_456", {}, "Codex"),
+    ("opencode:session_777", {}, "OpenCode"),
     ("cli:session_789", {}, "Antigravity CLI"),
     ("agy-cli:session_abc", {}, "Antigravity CLI"),
     ("default", {"AGY_CLI": "1"}, "Antigravity CLI"),
@@ -34,6 +35,8 @@ for conv_id, env_vars, expected_agent in test_cases:
         agent_name = "Claude Code"
     elif conv_id_str.startswith("codex:"):
         agent_name = "Codex"
+    elif conv_id_str.startswith("opencode:"):
+        agent_name = "OpenCode"
     elif conv_id_str.startswith("cli:") or conv_id_str.startswith("agy-cli:") or os.environ.get("AGY_CLI") or os.environ.get("ANTIGRAVITY_CLI"):
         agent_name = "Antigravity CLI"
     elif conv_id_str.startswith("sdk:") or conv_id_str.startswith("agy-sdk:") or os.environ.get("ANTIGRAVITY_SDK") or os.environ.get("AGY_SDK"):
@@ -100,5 +103,11 @@ test('renderAgentBadge renders correct emoji and badge class for all 5 agents', 
   assert.match(ideBadge, /agent-antigravity-ide/);
   assert.match(ideBadge, /🔵 Antigravity IDE/);
   assert.match(renderAgentBadge(undefined, true), /🔵 IDE/);
+
+  // OpenCode (black)
+  const openCodeBadge = renderAgentBadge('OpenCode', false);
+  assert.match(openCodeBadge, /agent-opencode/);
+  assert.match(openCodeBadge, /⚫ OpenCode CLI/);
+  assert.match(renderAgentBadge('OpenCode', true), /⚫ OpenCode/);
 });
 

@@ -199,9 +199,9 @@ export function pickActiveConversationId(
   return usable(sessionId);
 }
 
-/** Drops the `claude:` / `codex:` agent prefix so ids from different writers compare equal. */
+/** Drops the `claude:` / `codex:` / `opencode:` agent prefix so ids from different writers compare equal. */
 function stripConversationPrefix(id: string): string {
-  return id.trim().replace(/^(?:claude|codex):/i, '');
+  return id.trim().replace(/^(?:claude|codex|opencode):/i, '');
 }
 
 function normalizeTaskStatus(value: unknown): TaskStatus {
