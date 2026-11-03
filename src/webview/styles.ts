@@ -3,5 +3,6 @@
 import { BASE_STYLES } from './styles/base';
 import { STREAM_STYLES } from './styles/stream';
 import { INSIGHTS_STYLES } from './styles/insights';
+import { RULES_STYLES } from './styles/rules';
 
-export const WEBVIEW_STYLES: string = [BASE_STYLES, STREAM_STYLES, INSIGHTS_STYLES].join('\n');
+export const WEBVIEW_STYLES: string = [BASE_STYLES, STREAM_STYLES, INSIGHTS_STYLES, RULES_STYLES].join('\n');

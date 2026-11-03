@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Rules tab rebuilt on a rule catalog (`src/rule_catalog.ts`, `src/webview/tabs/rules.ts`):**
+  - 45 listed rules grouped by area, each with its effective mode (engine default overridden by `.gravityguard.json`), 7-day trigger count, last trigger and most frequent agent; mode buttons where the engine reads a mode; mandatory rules show a lock.
+  - `tests/rule_catalog.test.mjs` scans the engine for emitted rule ids and fails when one is missing from the catalog; ids seen in the journal but not catalogued are listed separately.
+  - Copy is single-language, no parenthetical translations. The default config written by the Settings button uses the `rules` key the engine reads instead of the unused `guards` block.
+
 - **Audit statistics layer and measurement fixes (`src/audit_stats.ts`, `src/rule_modes.ts`, `quality_signals.py`, `audit.py`):**
   - `audit_stats.ts` aggregates the permanent journal per time window (24h / 7d / 30d / all), rule, agent, session and day; cached by file size and mtime. Exposed to every tab as `vm.auditStats`.
   - A read no longer clears an open violation: `READ_ALLOW` approvals used to be counted as recoveries (38 of 84 recoveries in the maintainer journal). Replays ignore those old records too.
