@@ -32,7 +32,7 @@ test('extra rules get readable names, recovered-only keys are skipped, active ru
   assert.ok(html.includes('G4 Kör Üzerine Yazma'));
   assert.ok(!html.includes('G4_NO_BLIND_OVERWRITE'));
   assert.ok(!html.includes('T1_PENDING'));
-  assert.ok(html.indexOf('G4 Kör Üzerine Yazma') < html.indexOf('G1 Silent Error Swallowing'), 'higher volume first');
+  assert.ok(html.indexOf('G4 Kör Üzerine Yazma') < html.indexOf('Sessiz hata yutma'), 'higher volume first');
   assert.ok(html.includes('kuralda ihlal yok'), 'clean rules collapse into one line');
 });
 
