@@ -20,6 +20,14 @@ COMMAND_TOOLS = frozenset(("run_command", "bash", "execute_command", "shell", "c
 DEFAULT_MAX_FULL_READ_BYTES = 150_000
 DEFAULT_MAX_RANGE_LINES = 800
 
+# Source files above this size are mapped first (token-lens outline) instead of read whole.
+CODE_EXTS = frozenset((".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".gd", ".cs",
+                       ".go", ".rs", ".java", ".kt"))
+CODE_OUTLINE_LINES = 500
+# Read returns these as images/pages, not lines: the size rules do not apply.
+NON_TEXT_EXTS = frozenset((".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".ico",
+                           ".pdf", ".ipynb"))
+
 RULE_ID = "TOOL_OUTPUT_BLOAT"
 
 
@@ -66,6 +74,31 @@ def _int_arg(args: Dict[str, Any], *keys: str) -> Optional[int]:
     return None
 
 
+def _code_outline_hint(path: str, start: Optional[int], end: Optional[int]) -> Optional[TokenGuardResult]:
+    """Large source file read whole (or in a huge window): send the agent to token-lens first."""
+    if os.path.splitext(path)[1].lower() not in CODE_EXTS:
+        return None
+    if start is not None and end is not None and end - start + 1 <= CODE_OUTLINE_LINES:
+        return None
+    total = _count_lines(path)
+    if total <= CODE_OUTLINE_LINES:
+        return None
+    if start is not None and end is None and total - start + 1 <= CODE_OUTLINE_LINES:
+        return None
+    name = os.path.basename(path)
+    return TokenGuardResult(
+        "deny",
+        RULE_ID,
+        (
+            f"Baglam korumasi: '{name}' {total:,} satirlik kaynak dosya; tamami okunmaz. "
+            f"1) token-lens `read_outline` ile sembol haritasini al (Claude Code'da once ToolSearch "
+            f"'select:mcp__token-lens__read_outline,mcp__token-lens__read_symbol,mcp__token-lens__find_symbol'), "
+            f"2) gereken fonksiyonu `read_symbol` ile oku. Satir araligi biliniyorsa en fazla "
+            f"{CODE_OUTLINE_LINES} satirlik pencere oku (Read: offset+limit, Antigravity: StartLine/EndLine)."
+        ),
+    )
+
+
 def evaluate_read_guard(
     tool_name: str,
     args: Dict[str, Any],
@@ -80,17 +113,26 @@ def evaluate_read_guard(
     if not raw_path:
         return None
     path = _resolve(raw_path, cwd, project_root)
-    if not os.path.isfile(path):
+    if not os.path.isfile(path) or os.path.splitext(path)[1].lower() in NON_TEXT_EXTS:
         return None
     try:
         size = os.path.getsize(path)
     except OSError:
         return None
+
+    start = _int_arg(args, "StartLine", "start_line", "start", "offset")
+    end = _int_arg(args, "EndLine", "end_line", "end")
+    limit = _int_arg(args, "limit")
+    if limit is not None and limit > 0 and end is None:
+        # Claude Code / Codex Read: offset (1-based line) + limit.
+        end = (start or 1) + limit - 1
+        start = start or 1
+
+    code_hint = _code_outline_hint(path, start, end)
+    if code_hint:
+        return code_hint
     if size <= max_bytes:
         return None
-
-    start = _int_arg(args, "StartLine", "start_line", "start")
-    end = _int_arg(args, "EndLine", "end_line", "end")
     total_lines = _count_lines(path)
     name = os.path.basename(path)
     kb = size // 1024

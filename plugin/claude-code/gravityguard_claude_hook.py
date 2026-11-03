@@ -43,6 +43,11 @@ try:
 except (ImportError, SyntaxError):
     def provider_tool_call(name, args, cwd):
         return {"name": name, "args": args}
+try:
+    from gravityguard_engine.token_guard import evaluate_read_guard
+except (ImportError, SyntaxError):
+    def evaluate_read_guard(*_args, **_kwargs):
+        return None
 
 # Claude Code tool name -> the engine's (Antigravity) tool name.
 TOOL_MAP = {
@@ -283,6 +288,20 @@ def shell_deny(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }}
 
 
+def read_bloat_deny(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Plain reads never reach the engine (no file is changed), so the token guard runs here, in-process."""
+    if (event.get("tool_name") or "") != "Read":
+        return None
+    finding = evaluate_read_guard("read", event.get("tool_input") or {}, cwd=str(event.get("cwd") or ""))
+    if not finding or finding.level != "deny":
+        return None
+    return {"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": f"[{finding.rule_id}]: {finding.reason}",
+    }}
+
+
 def handle(event: Dict[str, Any], stop: bool) -> Optional[Dict[str, Any]]:
     """Claude Code event in, Claude Code answer out (None = say nothing, let it proceed)."""
     if stop:
@@ -292,6 +311,9 @@ def handle(event: Dict[str, Any], stop: bool) -> Optional[Dict[str, Any]]:
         # blocked retries (per session), and Claude Code overrides a Stop hook that blocked 8 times in a row.
         answer = run_engine(to_engine_stop(event), ["--stop"])
         return from_engine_stop(answer) if answer else failure_response(stop=True)
+    bloat = read_bloat_deny(event)
+    if bloat:
+        return bloat
     payload = to_engine_pretool(event)
     if payload is None:
         return None

@@ -36,6 +36,26 @@ try:
 except (ImportError, SyntaxError):
     def provider_tool_call(name, args, cwd):
         return {"name": name, "args": args}
+try:
+    from gravityguard_engine.token_guard import evaluate_read_guard
+except (ImportError, SyntaxError):
+    def evaluate_read_guard(*_args, **_kwargs):
+        return None
+
+
+def read_bloat_deny(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Plain reads never reach the engine, so the token guard runs here, in-process."""
+    if (event.get("tool_name") or event.get("toolName") or "") not in _READ_TOOLS:
+        return None
+    tool_input = event.get("tool_input", event.get("toolInput")) or {}
+    finding = evaluate_read_guard("read", tool_input, cwd=str(event.get("cwd") or ""))
+    if not finding or finding.level != "deny":
+        return None
+    return {"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": f"[{finding.rule_id}]: {finding.reason}",
+    }}
 
 # Codex tool name -> the engine's (Antigravity) tool name.
 TOOL_MAP = {
@@ -154,6 +174,9 @@ def handle(event: Dict[str, Any], stop: bool) -> Optional[Dict[str, Any]]:
     if stop:
         answer = run_engine(to_engine_stop(event), ["--stop"])
         return from_engine_stop(answer) if answer else failure_response(stop=True)
+    bloat = read_bloat_deny(event)
+    if bloat:
+        return bloat
     payload = to_engine_pretool(event)
     if payload is None:
         return None

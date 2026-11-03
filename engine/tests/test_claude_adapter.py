@@ -358,6 +358,17 @@ class TestAdapterRobustness(unittest.TestCase):
         example = {"session_id": "r", "cwd": self.proj, "tool_name": "Read", "tool_input": {"file_path": str(Path(self.proj) / ".env.example")}}
         self.assertIsNone(self.run_hook(example)[0])
 
+    def test_whole_read_of_long_source_is_sent_to_token_lens(self):
+        src = Path(self.proj) / "big_module.py"
+        src.write_text("".join(f"def f{i}():\n    return {i}\n" for i in range(400)), encoding="utf-8")
+        out, _ = self.run_hook({"session_id": "r", "cwd": self.proj, "tool_name": "Read",
+                                "tool_input": {"file_path": str(src)}})
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("read_outline", out["hookSpecificOutput"]["permissionDecisionReason"])
+        window, _ = self.run_hook({"session_id": "r", "cwd": self.proj, "tool_name": "Read",
+                                   "tool_input": {"file_path": str(src), "offset": 100, "limit": 200}})
+        self.assertIsNone(window)
+
     def test_settings_example_matcher_includes_read(self):
         settings = json.loads((_ADAPTER.parent / "settings.example.json").read_text(encoding="utf-8"))
         self.assertEqual("*", settings["hooks"]["PreToolUse"][0]["matcher"])

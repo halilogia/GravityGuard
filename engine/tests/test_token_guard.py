@@ -31,6 +31,43 @@ class TokenGuardTests(unittest.TestCase):
         import shutil
         shutil.rmtree(self.dir, ignore_errors=True)
 
+    # ------------------------------------------------------------------ code outline rule
+    def _code_file(self, name, lines):
+        path = os.path.join(self.dir, name)
+        with open(path, "w", encoding="utf-8") as handle:
+            for i in range(lines):
+                handle.write(f"def f{i}(): return {i}\n")
+        return path
+
+    def test_unbounded_read_of_long_source_points_to_token_lens(self):
+        path = self._code_file("mid.ts", 900)  # far below 150 KB, still a whole-file read
+        result = evaluate_read_guard("read", {"file_path": path}, cwd=self.dir)
+        self.assertEqual(result.level, "deny")
+        self.assertIn("read_outline", result.reason)
+
+    def test_claude_offset_limit_window_is_allowed(self):
+        path = self._code_file("mid.py", 900)
+        self.assertIsNone(evaluate_read_guard("read", {"file_path": path, "offset": 200, "limit": 300}, cwd=self.dir))
+        self.assertIsNotNone(evaluate_read_guard("read", {"file_path": path, "limit": 800}, cwd=self.dir))
+
+    def test_short_source_and_long_non_code_files_are_allowed(self):
+        self.assertIsNone(evaluate_read_guard("read", {"file_path": self._code_file("ok.py", 500)}, cwd=self.dir))
+        notes = os.path.join(self.dir, "notes.md")
+        with open(notes, "w", encoding="utf-8") as handle:
+            handle.write("line\n" * 3000)
+        self.assertIsNone(evaluate_read_guard("read", {"file_path": notes}, cwd=self.dir))
+
+    def test_images_and_pdfs_are_not_line_checked(self):
+        for name in ("shot.png", "doc.pdf"):
+            path = os.path.join(self.dir, name)
+            with open(path, "wb") as handle:
+                handle.write(b"\x89PNG\r\n" + b"\n" * 300_000)
+            self.assertIsNone(evaluate_read_guard("read", {"file_path": path}, cwd=self.dir))
+
+    def test_tail_of_long_source_is_allowed(self):
+        path = self._code_file("tail.gd", 900)
+        self.assertIsNone(evaluate_read_guard("read", {"file_path": path, "offset": 500}, cwd=self.dir))
+
     # ------------------------------------------------------------------ reads
     def test_full_read_of_big_file_is_denied(self):
         result = evaluate_read_guard("read_file", {"Path": self.big}, cwd=self.dir)

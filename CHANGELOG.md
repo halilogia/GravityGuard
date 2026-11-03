@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Token guard reaches Claude Code and Codex reads; long sources go through token-lens (`token_guard.py`, Claude/Codex hooks):**
+  - Plain `Read` calls never reached the engine (the adapters drop reads that change nothing), so the read guard was dead in Claude Code and Codex. Both hooks now run `evaluate_read_guard` in-process before the engine, with no extra engine spawn.
+  - New rule: a source file (`.py .ts .js .gd .cs .go .rs .java .kt …`) longer than 500 lines cannot be read whole; the deny names token-lens `read_outline` / `read_symbol` / `find_symbol` and the bounded-window alternative. Claude's `offset`/`limit` are understood.
+  - Images, PDFs and notebooks are exempt (Read returns them as images/pages, not lines).
+  - Tests: 6 new `test_token_guard` cases, 1 subprocess test in `test_claude_adapter`.
+
 - **Insights tab shows only measured data (`src/webview/tabs/insights.ts`, `audit.py`):**
   - Empty history no longer draws a full green bar; a rule with no violations no longer counts as a 100 % fix rate.
   - `medianAttempts` is `null` when no attempts were recorded (the engine used to default it to 1); the UI hides the median then.
