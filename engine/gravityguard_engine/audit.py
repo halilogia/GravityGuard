@@ -478,7 +478,8 @@ def _recompute_effectiveness_rates(state: Dict[str, Any]) -> None:
             tot_code_r += min(r, b)
 
         atts = rst.get("attempts", [])
-        rst["medianAttempts"] = sorted(atts)[len(atts) // 2] if atts else 1.0
+        # No recorded attempts means no median; a default of 1 looked like real data.
+        rst["medianAttempts"] = sorted(atts)[len(atts) // 2] if atts else None
 
     # A rejected operation is observable; abandonment or deterrence is not.
     eff.pop("deterrenceRate", None)

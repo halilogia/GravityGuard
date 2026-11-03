@@ -50,10 +50,6 @@ export const resources = {
         fixedNext: 'sonraki denemede düzeltildi',
         latencyFast: 'Hızlı yol mantığı',
         latencySpawn: 'Alt süreç (Subprocess)',
-        lockStatus: 'Durum Kilidi (StateLock)',
-        lockHealthy: 'Çekirdek düzeyi kilit etkin',
-        twoPhase: 'İki Fazlı Taahhüt (2PC)',
-        twoPhaseActive: 'Fiziksel Disk Doğrulama Aktif',
         highValueTitle: 'Yüksek Değerli Muhafızlar (Kanıtlanmış Sinyal)',
         highValueDesc: 'G0 (Sızıntı), G1 (Sessiz Hata), G2 (Test Bütünlüğü)',
         tuningTitle: 'Tavsiye & Ayar Değerlendirmesi',
@@ -73,7 +69,19 @@ export const resources = {
         badgeHighValue: 'Yüksek Değer (n={{n}})',
         badgeFriction: 'Sürtünme (n={{n}})',
         badgeBalanced: 'Dengeli (n={{n}})',
-        badgeDeterrence: 'Güvenlik engeli',
+        badgeDeterrence: 'Güvenlik engeli (n={{n}})',
+        scopeNote: 'Kapsam: tüm denetim geçmişi. Üstteki sayaçlar yalnızca son olayları sayar.',
+        ruleOpen: '{{count}} hâlâ açık',
+        openViolations: '{{count}} engellenen işlem hâlâ düzeltilmedi',
+        cleanRules: '{{count}} kuralda ihlal yok: {{names}}',
+        latencyUnknown: 'Ölçüm yok',
+        ruleNames: {
+          G0_ENV_PROTECTION: 'G0 Ortam Dosyası Koruması',
+          G4_NO_BLIND_OVERWRITE: 'G4 Kör Üzerine Yazma',
+          POLICY_INTEGRITY: 'Politika Bütünlüğü',
+          SHELL_SECURITY: 'Kabuk Komutu Güvenliği',
+          G2_SECURITY_TAMPERING: 'G2 Güvenlik Kurcalama'
+        },
         lifecycleTitle: 'Yaşam Döngüsü ve Tavsiye Kuralları',
         t1Label: 'T1 Test Kanıtı:',
         t1Pending: '{{count}} Bekleyen Test Kanıtı',
@@ -102,7 +110,7 @@ export const resources = {
         circuitLabel: 'Devre Kesici Sayacı:',
         circuitValue: '{{retries}} / 5 deneme',
         diagnosticsTitle: 'Sistem Bilgisi & Tanılama',
-        diagnosticsBadge: 'WAL & Kilit Aktif'
+        diagnosticsBadge: 'Seq #{{seq}}'
       },
       stats: {
         blocked: 'Engellendi',
@@ -351,10 +359,6 @@ export const resources = {
         fixedNext: 'fixed on next attempt',
         latencyFast: 'In-memory fast path',
         latencySpawn: 'Subprocess spawn',
-        lockStatus: 'State Lock',
-        lockHealthy: 'Kernel-level lock enabled',
-        twoPhase: 'Two-Phase Commit (2PC)',
-        twoPhaseActive: 'Physical Disk Verification Active',
         highValueTitle: 'High-Value Guardrails (Proven Signal)',
         highValueDesc: 'G0 (Secret Leak), G1 (Silent Error), G2 (Test Integrity)',
         tuningTitle: 'Advisory & Tuning Evaluation',
@@ -374,7 +378,19 @@ export const resources = {
         badgeHighValue: 'High Value (n={{n}})',
         badgeFriction: 'Friction (n={{n}})',
         badgeBalanced: 'Balanced (n={{n}})',
-        badgeDeterrence: 'Security barrier',
+        badgeDeterrence: 'Security barrier (n={{n}})',
+        scopeNote: 'Scope: full audit history. The counters above only count recent events.',
+        ruleOpen: '{{count}} still open',
+        openViolations: '{{count}} blocked operations still not fixed',
+        cleanRules: 'No violations in {{count}} rules: {{names}}',
+        latencyUnknown: 'Not measured',
+        ruleNames: {
+          G0_ENV_PROTECTION: 'G0 Env File Protection',
+          G4_NO_BLIND_OVERWRITE: 'G4 No Blind Overwrite',
+          POLICY_INTEGRITY: 'Policy Integrity',
+          SHELL_SECURITY: 'Shell Command Security',
+          G2_SECURITY_TAMPERING: 'G2 Security Tampering'
+        },
         lifecycleTitle: 'Lifecycle & Advisory Guardrails',
         t1Label: 'T1 Test Evidence:',
         t1Pending: '{{count}} Pending Test Evidence',
@@ -403,7 +419,7 @@ export const resources = {
         circuitLabel: 'Circuit Breaker Counter:',
         circuitValue: '{{retries}} / 5 attempts',
         diagnosticsTitle: 'System Info & Diagnostics',
-        diagnosticsBadge: 'WAL & Lock Active'
+        diagnosticsBadge: 'Seq #{{seq}}'
       },
       stats: {
         blocked: 'Blocked',

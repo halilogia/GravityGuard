@@ -20,8 +20,9 @@ export function renderInsightsTab(vm: GuardianViewModel): string {
   const codeStats = Object.entries(eff.ruleStats || {}).filter(([rule]) => !isSecurityRule(rule)).map(([, stat]) => stat as any);
   const totalBlockedCount = typeof eff.totalCodeBlocked === 'number' ? eff.totalCodeBlocked : (codeStats.length ? codeStats.reduce((sum, s) => sum + (s.blocked || 0), 0) : totalBlockedAnalyzed);
   const totalRecoveredCount = typeof eff.totalCodeRecovered === 'number' ? eff.totalCodeRecovered : (codeStats.length ? codeStats.reduce((sum, s) => sum + Math.min(s.recovered || 0, s.blocked || 0), 0) : recoveredCount);
-  const finalRecRate = typeof eff.codeFixRate === 'number' ? eff.codeFixRate
-    : (totalBlockedCount > 0 ? Math.min(100, Math.round(totalRecoveredCount / totalBlockedCount * 100)) : 100);
+  // No blocked operations means no rate, not a perfect one.
+  const finalRecRate: number | null = totalBlockedCount === 0 ? null
+    : (typeof eff.codeFixRate === 'number' ? eff.codeFixRate : Math.min(100, Math.round(totalRecoveredCount / totalBlockedCount * 100)));
 
   let recoverySubtext = '';
   if (totalBlockedCount === 0) {
@@ -34,13 +35,30 @@ export function renderInsightsTab(vm: GuardianViewModel): string {
 
   const ruleStats: Record<string, any> = eff.ruleStats || {};
 
+  // Blocked operations the agent has not fixed yet, per rule.
+  const openByRule: Record<string, number> = {};
+  const activeViolations = (data as any)?.activeViolations;
+  if (activeViolations && typeof activeViolations === 'object') {
+    for (const v of Object.values(activeViolations) as any[]) {
+      if (v?.ruleId) openByRule[v.ruleId] = (openByRule[v.ruleId] || 0) + 1;
+    }
+  }
+  const totalOpen = Object.entries(openByRule).filter(([rule]) => !isSecurityRule(rule)).reduce((sum, [, n]) => sum + n, 0);
+
+  const ruleLabel = (ruleKey: string) => {
+    const key = `insights.ruleNames.${ruleKey}`;
+    const name = t(key);
+    return name === key ? ruleKey : name;
+  };
+
   function formatRuleStat(ruleKey: string, defaultName: string, isWarning?: boolean) {
     const stat = ruleStats[ruleKey];
     const b = stat?.blocked || 0;
     const r = stat?.recovered || 0;
     const isSecurityBarrier = isSecurityRule(ruleKey);
-    const rate = typeof stat?.recoveryRate === 'number' ? stat.recoveryRate : (b > 0 ? Math.round((r / b) * 100) : 100);
-    const med = stat?.medianAttempts || 1;
+    const rate: number | null = b === 0 ? null : (typeof stat?.recoveryRate === 'number' ? stat.recoveryRate : Math.round((r / b) * 100));
+    // A median needs recorded attempts; the engine used to default it to 1.
+    const med: number | null = Array.isArray(stat?.attempts) && stat.attempts.length > 0 && typeof stat?.medianAttempts === 'number' ? stat.medianAttempts : null;
     let badgeText = t('insights.badgeInsufficient', { n: b });
     let badgeClass = 'badge-neutral';
     let badgeIcon = lucide('circleDot', { size: 9 });
@@ -61,11 +79,11 @@ export function renderInsightsTab(vm: GuardianViewModel): string {
       badgeText = t('insights.badgeEarlySignal', { n: b });
       badgeClass = 'badge-warning';
       badgeIcon = lucide('alertTriangle', { size: 9 });
-    } else if (rate >= 80) {
+    } else if ((rate ?? 0) >= 80) {
       badgeText = t('insights.badgeHighValue', { n: b });
       badgeClass = 'badge-allowed';
       badgeIcon = lucide('trophy', { size: 9 });
-    } else if (rate < 50) {
+    } else if ((rate ?? 0) < 50) {
       badgeText = t('insights.badgeFriction', { n: b });
       badgeClass = 'badge-blocked';
       badgeIcon = lucide('zap', { size: 9 });
@@ -76,9 +94,11 @@ export function renderInsightsTab(vm: GuardianViewModel): string {
     }
 
     return {
+      key: ruleKey,
       label: defaultName,
       b,
       r,
+      open: openByRule[ruleKey] || 0,
       rate,
       med,
       isWarning: !!isWarning,
@@ -101,14 +121,18 @@ export function renderInsightsTab(vm: GuardianViewModel): string {
 
   const knownKeys = new Set(['G0_SECRET_LEAK', 'G1_SILENT_EXCEPTION', 'G2_TEST_INTEGRITY', 'G4_IMPORT_MATRIX', 'SRP_BOUNDARY', 'ARCH_FILE_GROWTH', 'G3_COMPILER_BYPASS']);
   for (const k of Object.keys(ruleStats)) {
-    if (!knownKeys.has(k) && (ruleStats[k]?.blocked > 0 || ruleStats[k]?.recovered > 0)) {
-      rulesToDisplay.push(formatRuleStat(k, k));
+    // Recovered-only keys (e.g. T1_PENDING) have no blocked operation to score.
+    if (!knownKeys.has(k) && ruleStats[k]?.blocked > 0) {
+      rulesToDisplay.push(formatRuleStat(k, ruleLabel(k)));
     }
   }
+  // Most active rules first; rules without violations collapse into one line.
+  const activeRules = rulesToDisplay.filter(st => st.b > 0).sort((a, b) => b.b - a.b);
+  const cleanRules = rulesToDisplay.filter(st => st.b === 0);
 
   const lastEvent = (data.events && data.events.length > 0) ? data.events[0] : null;
   const latencyMatch = lastEvent?.reason?.match(/\((\d+(\.\d+)?ms)\)/);
-  const measuredLatency = latencyMatch ? latencyMatch[1] : '< 1 ms';
+  const measuredLatency = latencyMatch ? latencyMatch[1] : null;
 
   const lastSeq = (data as any)?.lastAuditSeq || 0;
 
@@ -123,16 +147,18 @@ export function renderInsightsTab(vm: GuardianViewModel): string {
         <div class="insight-title"><span class="icon-inline">${lucide('target', { size: 12 })}</span> ${t('insights.recoveryTitle')}</div>
         <div class="recovery-meter">
           <div class="recovery-bar-wrap">
-            <div class="recovery-bar" style="width: ${finalRecRate}%;"></div>
+            <div class="recovery-bar" style="width: ${finalRecRate ?? 0}%;"></div>
           </div>
-          <div class="recovery-score">${totalBlockedCount === 0 ? '—' : `${finalRecRate}%`}</div>
+          <div class="recovery-score">${finalRecRate === null ? '—' : `${finalRecRate}%`}</div>
         </div>
         <div class="insight-sub">${recoverySubtext}</div>
+        ${totalOpen > 0 ? `<div class="insight-sub text-amber">${t('insights.openViolations', { count: totalOpen })}</div>` : ''}
+        <div class="insight-sub text-muted">${t('insights.scopeNote')}</div>
       </div>
 
       <div class="insight-card">
         <div class="insight-title"><span class="icon-inline">${lucide('shieldCheck', { size: 12 })}</span> ${t('insights.reportCardTitle')}</div>
-        ${rulesToDisplay.map(st => `
+        ${activeRules.map(st => `
           <div class="rule-stat-item">
             <div class="rule-stat-header">
               <span class="rule-stat-name">${escapeHtml(st.label)}</span>
@@ -141,11 +167,13 @@ export function renderInsightsTab(vm: GuardianViewModel): string {
             ${st.b > 0 ? `
               <div class="rule-stat-sub">
                 <span>${st.isWarning ? t('insights.ruleWarnings', { count: st.b, rate: st.rate }) : (st.isSecurityBarrier ? t('insights.ruleDeterrence', { blocked: st.b, rate: st.rate }) : t('insights.ruleInterventions', { blocked: st.b, recovered: st.r, rate: st.rate }))}</span>
-                ${!st.isWarning && !st.isSecurityBarrier ? `<span>${t('insights.medianAttempts', { attempts: st.med })}</span>` : ''}
+                ${!st.isWarning && !st.isSecurityBarrier && st.med !== null ? `<span>${t('insights.medianAttempts', { attempts: st.med })}</span>` : ''}
               </div>
-            ` : `<div class="rule-stat-sub text-muted">${t('insights.ruleClean')}</div>`}
+              ${st.open > 0 && !st.isSecurityBarrier ? `<div class="rule-stat-sub text-amber">${t('insights.ruleOpen', { count: st.open })}</div>` : ''}
+            ` : ''}
           </div>
         `).join('')}
+        ${cleanRules.length > 0 ? `<div class="rule-stat-sub text-muted rule-clean-summary">${t('insights.cleanRules', { count: cleanRules.length, names: cleanRules.map(st => escapeHtml(st.label)).join(', ') })}</div>` : ''}
       </div>
 
       <div class="insight-card">
@@ -175,7 +203,7 @@ export function renderInsightsTab(vm: GuardianViewModel): string {
             <span class="diagnostics-title">${t('insights.diagnosticsTitle')}</span>
           </span>
           <span class="status-badge badge-neutral" style="font-size: 8px; padding: 1px 5px;">
-            ${lucide('database', { size: 8 })} ${t('insights.diagnosticsBadge')}
+            ${lucide('database', { size: 8 })} ${t('insights.diagnosticsBadge', { seq: lastSeq })}
           </span>
         </summary>
         <div class="diagnostics-body">
@@ -195,7 +223,7 @@ export function renderInsightsTab(vm: GuardianViewModel): string {
             <div class="insight-title"><span class="icon-inline">${lucide('cpu', { size: 12 })}</span> ${t('insights.perfTitle')}</div>
             <div class="metric-row">
               <span class="metric-lbl">${t('insights.latencyFast')}:</span>
-              <span class="metric-val text-green">${measuredLatency}</span>
+              <span class="metric-val ${measuredLatency ? 'text-green' : 'text-muted'}">${measuredLatency ?? t('insights.latencyUnknown')}</span>
             </div>
             <div class="metric-row">
               <span class="metric-lbl">${t('insights.latencySpawn')}:</span>
@@ -205,14 +233,6 @@ export function renderInsightsTab(vm: GuardianViewModel): string {
 
           <div class="insight-card">
             <div class="insight-title"><span class="icon-inline">${lucide('lock', { size: 12 })}</span> ${t('insights.integrityTitle')}</div>
-            <div class="metric-row">
-              <span class="metric-lbl">${t('insights.lockStatus')}:</span>
-              <span class="metric-val text-green"><span class="icon-inline">${lucide('checkCircle', { size: 10, color: 'var(--color-green)' })}</span> ${t('insights.lockHealthy')}</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-lbl">${t('insights.twoPhase')}:</span>
-              <span class="metric-val text-green"><span class="icon-inline">${lucide('checkCircle', { size: 10, color: 'var(--color-green)' })}</span> ${t('insights.twoPhaseActive')}</span>
-            </div>
             <div class="metric-row">
               <span class="metric-lbl">${t('insights.sessionLabel')}</span>
               <span class="metric-val text-cyan">${shortSess}</span>

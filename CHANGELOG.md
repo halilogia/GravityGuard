@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Insights tab shows only measured data (`src/webview/tabs/insights.ts`, `audit.py`):**
+  - Empty history no longer draws a full green bar; a rule with no violations no longer counts as a 100 % fix rate.
+  - `medianAttempts` is `null` when no attempts were recorded (the engine used to default it to 1); the UI hides the median then.
+  - Removed hardcoded green "StateLock healthy" / "2PC active" rows and the fake `< 1 ms` latency fallback; the diagnostics badge shows the real audit seq.
+  - New: blocked operations still not fixed (`activeViolations`) per rule and in total; scope note (full audit history vs. recent counters).
+  - Rules sorted by volume; rules without violations collapse into one line; known extra rules get readable names; recovered-only keys (e.g. `T1_PENDING`) are no longer listed; the security badge shows its count.
+  - Tests: `tests/insights.test.mjs` (5 cases), `test_median_attempts_is_none_without_recorded_attempts`.
+
 - **Skill catalog honors disabled Antigravity plugins (`src/skills.ts`):**
   - Plugins marked `"enabled": false` in `~/.gemini/config/config.json` are no longer listed; Antigravity does not load them either. A missing or malformed config still lists every plugin.
   - Real catalog on the maintainer machine: 404 → 227 entries (177 skills came from disabled plugins such as `science`, `data-agent-kit-plugin`, `flutter`).

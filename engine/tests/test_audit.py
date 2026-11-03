@@ -124,6 +124,13 @@ class TestAuditSubsystem(unittest.TestCase):
         self.assertEqual(eff["ruleStats"]["G0_ENV_PROTECTION"]["recoveryRate"], 0.0)
         self.assertEqual(eff["ruleStats"]["G1_SILENT_EXCEPTION"]["recoveryRate"], 100.0)
 
+    def test_median_attempts_is_none_without_recorded_attempts(self):
+        log_event("write", "BLOCKED", ".env", "env write", rule_id="G0_ENV_PROTECTION", conversation_id="conv-median")
+        live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
+        with open(live_path, "r", encoding="utf-8") as f:
+            live = json.load(f)
+        self.assertIsNone(live["effectiveness"]["ruleStats"]["G0_ENV_PROTECTION"]["medianAttempts"])
+
     def test_rule_specific_causal_isolation(self):
         target = "src/app.py"
         # 1. First block is G1
