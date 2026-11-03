@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Pre-push secret scan no longer crashes on untracked files (`publication_guard.py`):** the hook passes `'.'` as a string; joining an untracked file name onto it raised `TypeError`, which the gate reported as a leaked secret and refused the push. `scan_git_secrets` now coerces the root to `Path`. Test: `test_git_gate_accepts_string_root_with_untracked_files`.
+
 - **Rules tab rebuilt on a rule catalog (`src/rule_catalog.ts`, `src/webview/tabs/rules.ts`):**
   - 45 listed rules grouped by area, each with its effective mode (engine default overridden by `.gravityguard.json`), 7-day trigger count, last trigger and most frequent agent; mode buttons where the engine reads a mode; mandatory rules show a lock.
   - `tests/rule_catalog.test.mjs` scans the engine for emitted rule ids and fails when one is missing from the catalog; ids seen in the journal but not catalogued are listed separately.

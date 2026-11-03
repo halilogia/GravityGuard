@@ -95,3 +95,9 @@ class SecurityHardeningTests(unittest.TestCase):
         file.write_bytes(b"\x00\x00ghp_" + b"A" * 36)
         findings = scan_git_secrets(self.root)
         self.assertTrue(any("G0_SECRET_LEAK" in f for f in findings))
+
+    def test_git_gate_accepts_string_root_with_untracked_files(self):
+        """The pre-push hook passes '.'; an untracked file used to crash the scan into a false leak."""
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True, capture_output=True)
+        (self.root / "notes.txt").write_text("plain text", encoding="utf-8")
+        self.assertEqual(scan_git_secrets(str(self.root)), [])

@@ -20,6 +20,8 @@ def _is_protected_path(path: str) -> bool:
 
 def scan_git_secrets(root: Path, staged_only: bool = False, require_repo: bool = False, base: str = "") -> list:
     """Return redacted findings; never place diff/file contents in diagnostics."""
+    # Hooks pass a plain string ('.'); joining untracked names onto it crashed and read as a leak.
+    root = Path(root)
     def git(*args):
         return subprocess.run(["git", *args], cwd=str(root), capture_output=True, timeout=10)
 
