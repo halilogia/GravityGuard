@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `tests/rule_catalog.test.mjs` scans the engine for emitted rule ids and fails when one is missing from the catalog; ids seen in the journal but not catalogued are listed separately.
   - Copy is single-language, no parenthetical translations. The default config written by the Settings button uses the `rules` key the engine reads instead of the unused `guards` block.
 
+- **Insights tab: time windows, trend, agent breakdown, drill-down (`src/webview/tabs/insights.ts`):**
+  - 24h / 7d / 30d / all selector; every figure follows the selected window. 14-day blocked/warned trend as inline SVG.
+  - Agent table: operations, first-try clean rate, blocked, warned, issues per session.
+  - Evasion suspects and user-marked false alarms per rule and in total; rules with fewer than 10 events collapse into one group.
+  - Clicking a rule shows its latest events with agent, session tag, file and a false-alarm / undo button.
+  - Rule names come only from the rule catalog, so both tabs show the same name. Drill-down events are rendered once per rule as a `<template>` and copied into the open row; the tab markup went from ~466 KB to ~261 KB on the maintainer journal.
+  - Pending-evidence and doc-obligation notes (`T1_PENDING`, `DOC_OBLIGATION_PENDING`) no longer clear open violations, in the engine and in the statistics; the 7-day fix rate on the maintainer journal drops from 41 % to 31 %.
+
 - **Audit statistics layer and measurement fixes (`src/audit_stats.ts`, `src/rule_modes.ts`, `quality_signals.py`, `audit.py`):**
   - `audit_stats.ts` aggregates the permanent journal per time window (24h / 7d / 30d / all), rule, agent, session and day; cached by file size and mtime. Exposed to every tab as `vm.auditStats`.
   - A read no longer clears an open violation: `READ_ALLOW` approvals used to be counted as recoveries (38 of 84 recoveries in the maintainer journal). Replays ignore those old records too.

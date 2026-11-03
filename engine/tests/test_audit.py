@@ -154,10 +154,11 @@ class TestAuditSubsystem(unittest.TestCase):
         conv = "conv-read"
         log_event("write", "BLOCKED", "src/z.ts", "silent catch", rule_id="G1_SILENT_EXCEPTION", conversation_id=conv)
         log_event("read_file", "APPROVED", "src/z.ts", "read", rule_id="READ_ALLOW", conversation_id=conv)
+        log_event("write", "APPROVED", "src/z.ts", "Pending test evidence recorded", rule_id="T1_PENDING", conversation_id=conv)
         live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
         with open(live_path, "r", encoding="utf-8") as f:
             live = json.load(f)
-        self.assertEqual(live["events"][0]["outcome"], "CLEAN")
+        self.assertTrue(all(e["outcome"] == "CLEAN" for e in live["events"][:2]))
         self.assertEqual(live["effectiveness"]["ruleStats"]["G1_SILENT_EXCEPTION"]["recovered"], 0)
         self.assertTrue(any(v.get("ruleId") == "G1_SILENT_EXCEPTION" for v in live["activeViolations"].values()))
 

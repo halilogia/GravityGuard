@@ -8,6 +8,9 @@ export type WindowKey = '24h' | '7d' | '30d' | 'all';
 export const WINDOW_KEYS: WindowKey[] = ['24h', '7d', '30d', 'all'];
 const WINDOW_MS: Record<WindowKey, number> = { '24h': 864e5, '7d': 7 * 864e5, '30d': 30 * 864e5, all: Infinity };
 
+/** Approved records that are not the write itself; they never fix a violation (mirrors audit.NON_RECOVERING_RULES). */
+export const NON_RECOVERING_RULES = new Set(['READ_ALLOW', 'T1_PENDING', 'DOC_OBLIGATION_PENDING']);
+
 /** Rule ids that record compliance or bookkeeping, not a violation. */
 export const NON_VIOLATION_RULES = new Set(['PASS', 'EXEMPT', 'READ_ALLOW', 'G7_TS_MANDATORY_FEEDBACK', 'T1_PENDING', 'DOC_OBLIGATION_PENDING']);
 
@@ -150,8 +153,8 @@ export function computeAuditStats(records: AuditRecord[], falseAlarmIds: Set<str
     const isRepeat = r.outcome === 'REPEATED_VIOLATION';
     const isWarn = r.status === 'WARNING' && !nonViolation;
     const isShadow = r.status === 'SHADOW_TRIGGER';
-    // Older journals let a read clear a violation; that was never a fix.
-    const isRecovered = r.outcome === 'RECOVERED' && r.ruleId !== 'READ_ALLOW';
+    // Older journals let a read or a bookkeeping note clear a violation; that was never a fix.
+    const isRecovered = r.outcome === 'RECOVERED' && !NON_RECOVERING_RULES.has(r.ruleId || '');
     // An operation is one write or command attempt: an approved write or a rejection. Reads, warnings
     // (the write still passes) and bookkeeping lines are not separate attempts.
     const isOperation = r.ruleId === 'PASS' || r.status === 'BLOCKED';

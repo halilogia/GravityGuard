@@ -21,6 +21,7 @@ export function buildClientScript(nonce: string, activeTab: string): string {
               const root = document.getElementById('guardian-app-root');
               if (root) {
                 root.innerHTML = msg.bodyHtml;
+                fillDrill();
                 const state = vscode.getState() || {};
                 const active = state.currentTab || currentTab;
                 if (active) {
@@ -48,12 +49,25 @@ export function buildClientScript(nonce: string, activeTab: string): string {
           }
 
           // Segmented views (time window, agent filter...) live on <body> so in-place updates keep them.
+          // Insights drill-down: copy the rule's event <template> into its open slots.
+          function fillDrill() {
+            const rk = document.body.getAttribute('data-sel-rule');
+            if (!rk) return;
+            const src = document.querySelector('template[data-drill-src="' + CSS.escape(rk) + '"]');
+            if (!src) return;
+            document.querySelectorAll('[data-drill-slot="' + CSS.escape(rk) + '"]').forEach(slot => {
+              if (!slot.hasChildNodes()) slot.appendChild(src.content.cloneNode(true));
+            });
+          }
+
           function selectSegment(group, value) {
             document.body.setAttribute('data-sel-' + group, value);
+            if (group === 'rule') fillDrill();
             const st = vscode.getState() || {};
             vscode.setState({ ...st, segments: { ...(st.segments || {}), [group]: value } });
           }
           Object.entries(savedState.segments || {}).forEach(([g, v]) => document.body.setAttribute('data-sel-' + g, String(v)));
+          fillDrill();
 
           if (savedState.currentTab && savedState.currentTab !== '${escapeJs(activeTab)}') {
             setTab(savedState.currentTab);

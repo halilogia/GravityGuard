@@ -421,7 +421,7 @@ def _apply_event_to_live_state(state: Dict[str, Any], ev: Dict[str, Any]) -> Non
         if t_key and t_key in active_violations:
             active_violations[t_key]["attempts"] = ev.get("recoveryAttempts", active_violations[t_key].get("attempts", 1) + 1)
             active_violations[t_key]["lastTimestamp"] = ev.get("timestamp")
-    elif out == "RECOVERED" and ev.get("ruleId") != "READ_ALLOW":
+    elif out == "RECOVERED" and ev.get("ruleId") not in NON_RECOVERING_RULES:
         eff["totalRecovered"] = eff.get("totalRecovered", 0) + 1
         rst = rule_stats.setdefault(res_id, {"blocked": 0, "recovered": 0, "recoveryRate": 0.0, "attempts": []})
         rst["recovered"] = rst.get("recovered", 0) + 1
@@ -440,6 +440,10 @@ def _apply_event_to_live_state(state: Dict[str, Any], ev: Dict[str, Any]) -> Non
     seq = ev.get("auditSeq")
     if isinstance(seq, int) and seq > state.get("lastAuditSeq", 0):
         state["lastAuditSeq"] = seq
+
+
+# Approved records that are not the write itself (a read, a pending-evidence or doc note).
+NON_RECOVERING_RULES = frozenset({"READ_ALLOW", "T1_PENDING", "DOC_OBLIGATION_PENDING"})
 
 
 DETERRENCE_RULES = {
@@ -854,8 +858,8 @@ def log_event(
                                 "status": "BLOCKED"
                             }
                 elif status == "APPROVED":
-                    # Reading a file fixes nothing; only an approved write may clear an open violation.
-                    can_recover = bool(norm_target) and rule_id != "READ_ALLOW"
+                    # Reads and bookkeeping notes fix nothing; only an approved write may clear an open violation.
+                    can_recover = bool(norm_target) and rule_id not in NON_RECOVERING_RULES
                     matching_keys = [k for k in list(active_violations.keys()) if k.startswith(target_prefix)] if can_recover else []
                     if matching_keys:
                         resolved_items = []
