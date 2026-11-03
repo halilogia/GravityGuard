@@ -187,6 +187,25 @@ function scanRuleFilesInDir(dirPath: string, scope: SkillScope, agentType: Agent
   return items;
 }
 
+/** Plugin names with `"enabled": false` in Antigravity's config.json; unreadable config means none disabled. */
+function readDisabledPlugins(configPath: string): Set<string> {
+  const disabled = new Set<string>();
+  try {
+    const raw = fs.readFileSync(configPath, 'utf8').replace(/^﻿/, '');
+    const plugins = JSON.parse(raw)?.plugins;
+    if (plugins && typeof plugins === 'object') {
+      for (const [name, entry] of Object.entries(plugins)) {
+        if (entry && typeof entry === 'object' && (entry as { enabled?: unknown }).enabled === false) {
+          disabled.add(name);
+        }
+      }
+    }
+  } catch {
+    // missing or malformed config: list every plugin
+  }
+  return disabled;
+}
+
 export function scanAllSkills(workspaceRoot?: string): SkillItem[] {
   const all: SkillItem[] = [];
   const seenPaths = new Set<string>();
@@ -248,13 +267,14 @@ export function scanAllSkills(workspaceRoot?: string): SkillItem[] {
   addItems(scanDirectoryForSkills(path.join(home, '.claude', 'skills'), 'global', 'claude'));
   addItems(scanRuleFilesInDir(path.join(home, '.gemini', 'config', 'rules'), 'global', 'gemini'));
 
-  // 3. Plugin Skills (~/.gemini/config/plugins/*/skills)
+  // 3. Plugin Skills (~/.gemini/config/plugins/*/skills); plugins disabled in Antigravity are not loaded, so skip them
   const pluginsDir = path.join(home, '.gemini', 'config', 'plugins');
   if (fs.existsSync(pluginsDir)) {
+    const disabled = readDisabledPlugins(path.join(home, '.gemini', 'config', 'config.json'));
     try {
       const pluginEntries = fs.readdirSync(pluginsDir, { withFileTypes: true });
       for (const pe of pluginEntries) {
-        if (pe.isDirectory()) {
+        if (pe.isDirectory() && !disabled.has(pe.name)) {
           const pSkillDir = path.join(pluginsDir, pe.name, 'skills');
           addItems(scanDirectoryForSkills(pSkillDir, 'plugin', 'gemini'));
         }

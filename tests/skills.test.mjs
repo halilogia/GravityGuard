@@ -329,6 +329,29 @@ test('scanAllSkills de-duplicates a rule file reachable through two linked rule 
   });
 });
 
+test('scanAllSkills skips plugins disabled in ~/.gemini/config/config.json', () => {
+  withSandbox((root, home) => {
+    write(home, '.gemini/config/plugins/science/skills/pubmed/SKILL.md', '---\nname: pubmed\ndescription: Off.\n---\n');
+    write(home, '.gemini/config/plugins/gemini-api/skills/gemini-api-dev/SKILL.md', '---\nname: gemini-api-dev\ndescription: On.\n---\n');
+    write(home, '.gemini/config/plugins/local-only/skills/mine/SKILL.md', '---\nname: mine\ndescription: No entry.\n---\n');
+    write(home, '.gemini/config/config.json', '﻿' + JSON.stringify({ plugins: {
+      science: { enabled: false }, 'gemini-api': { enabled: true },
+    } }));
+
+    const names = scanAllSkills(root).filter(i => i.scope === 'plugin').map(i => i.name).sort();
+    assert.deepEqual(names, ['gemini-api-dev', 'mine']);
+  });
+});
+
+test('scanAllSkills lists every plugin when config.json is missing or malformed', () => {
+  withSandbox((root, home) => {
+    write(home, '.gemini/config/plugins/science/skills/pubmed/SKILL.md', '---\nname: pubmed\ndescription: x\n---\n');
+    assert.equal(scanAllSkills(root).filter(i => i.scope === 'plugin').length, 1);
+    write(home, '.gemini/config/config.json', '{ not json');
+    assert.equal(scanAllSkills(root).filter(i => i.scope === 'plugin').length, 1);
+  });
+});
+
 test('scanAllSkills reads rule files that start with a UTF-8 BOM', () => {
   withSandbox((root, home) => {
     write(root, 'rules.md', '﻿---\nname: Bom Rules\ndescription: Saved by Notepad.\n---\nBody\n');

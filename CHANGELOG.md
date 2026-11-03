@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Skill catalog honors disabled Antigravity plugins (`src/skills.ts`):**
+  - Plugins marked `"enabled": false` in `~/.gemini/config/config.json` are no longer listed; Antigravity does not load them either. A missing or malformed config still lists every plugin.
+  - Real catalog on the maintainer machine: 404 → 227 entries (177 skills came from disabled plugins such as `science`, `data-agent-kit-plugin`, `flutter`).
+  - 2 new tests in `tests/skills.test.mjs`.
+
 - **OpenCode Adapter & Agent Identity (`plugin/opencode/*`, `audit.py`, `src/tasks.ts`):**
   - `plugin/opencode/gravityguard_opencode_hook.py`: translates OpenCode `write`/`edit`/`multiedit`/`read`/`bash`/`patch` payloads into the engine dialect, runs the unchanged engine, and answers `{"block": bool, "reason": str}`; fail-open on a missing engine.
   - `plugin/opencode/gravityguard_opencode_plugin.ts`: OpenCode **v2** plugin (`export default { id: "gravityguard", setup }`, no npm import) — `ctx.tool.hook("execute.before")` blocks by throwing, `ctx.event.subscribe({ types: ["session.idle"] })` runs the Stop hook; only file/shell/read tools spawn the adapter.
