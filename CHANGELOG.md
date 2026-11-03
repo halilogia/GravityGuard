@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Briefing for every agent, not only Claude Code (`briefing.py`, Codex and OpenCode adapters):**
+  - Codex: `--session-start` in the Codex adapter returns the briefing as `SessionStart` context.
+  - OpenCode: its hook warnings only reach the server log, so the plugin writes the briefing to `~/.gemini/logs/gravityguard_briefing_opencode.md` at startup and on every idle session; the file is listed under `instructions` in `opencode.jsonc`.
+  - Antigravity and other hosts without a session hook: the first allowed tool call of each conversation carries the briefing in its reason (`brief_first_call`, `briefed_sessions.json`). A rejection does not use it up.
+  - The journal path follows `GRAVITYGUARD_LOG_DIR` like the rest of the engine.
+- **Engine messages without parenthetical rule ids:** "Modülerlik Uyarısı (ARCH_FILE_GROWTH):" and similar became "Modülerlik Uyarısı:" since the `[RULE_ID]` tag already precedes them; stop-hook warnings, which had no tag, now get one. "(T1)" also dropped from the Live tab title.
+
 - **Fewer repeat mistakes: session briefing and lessons in rejections (`briefing.py`, `rule_tips.py`, `dispatcher.py`, Claude Code adapter):**
   - `SessionStart` hook: the Claude Code adapter (`--session-start`) injects the agent's most frequent rules of the last 7 days with a one-line tip each, plus its first-try clean rate. `settings.example.json` lists the hook.
   - Every deny decision gets a "Doğru yol" line and, where useful, a short correct example for its rule; the leading stop-sign symbol is dropped. Done once in `run_cli` on the buffered engine output, so all rules share it.

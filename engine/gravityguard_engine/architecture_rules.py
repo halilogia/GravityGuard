@@ -341,7 +341,7 @@ def check_g4_import_matrix(target_file: str, added_text: str) -> Tuple[bool, str
 
                     if matched:
                         return True, (
-                            f"Katman Mimari İhlali (ARCH01_LAYER_VIOLATION): '{layer_name}' katmanındaki "
+                            f"Katman Mimari İhlali: '{layer_name}' katmanındaki "
                             f"bir dosya doğrudan '{forbidden}' katmanını import edemez! "
                             f"(Tespit edilen import: '{imported}'). Araya bir controller/servis katmanı koyun."
                         )
@@ -478,7 +478,7 @@ def check_pma_imports(target_file: str, added_text: str) -> Tuple[bool, str, str
         if layer == "features":
             if dest_layer == "features" and dest_feature and dest_feature != feature and not _is_public_api(rest):
                 return True, "ARCH_PMA_DEEP_IMPORT", (
-                    f"PMA Derin Import İhlali (ARCH_PMA_DEEP_IMPORT): 'features/{feature}' dilimi, "
+                    f"PMA Derin Import İhlali: 'features/{feature}' dilimi, "
                     f"'features/{dest_feature}' diliminin iç dosyasını import ediyor ('{spec}'). "
                     f"Diğer dilimlere yalnızca public API (features/{dest_feature} veya features/{dest_feature}/index) üzerinden erişilir."
                 )
@@ -486,12 +486,12 @@ def check_pma_imports(target_file: str, added_text: str) -> Tuple[bool, str, str
             if dest_layer in ("features", "pipelines") or (dest_layer == "shared" and re.match(r"ui(?:/|$)", rest)):
                 target_name = "shared/ui" if dest_layer == "shared" else dest_layer
                 return True, "ARCH_PMA_CORE_PURITY", (
-                    f"PMA Core Saflık İhlali (ARCH_PMA_CORE_PURITY): src/core/ altındaki dosya '{target_name}' "
+                    f"PMA Core Saflık İhlali: src/core/ altındaki dosya '{target_name}' "
                     f"import edemez ('{spec}'). Core 0 dış bağımlılıkla saf kalmalıdır."
                 )
         elif dest_layer == "features":
             return True, "ARCH_PMA_SHARED_PURITY", (
-                f"PMA Shared Saflık İhlali (ARCH_PMA_SHARED_PURITY): src/shared/ altındaki dosya "
+                f"PMA Shared Saflık İhlali: src/shared/ altındaki dosya "
                 f"'features/' import edemez ('{spec}'). Shared bileşenler özelliklerden bağımsız (agnostic) olmalıdır."
             )
     return False, "", ""
@@ -515,7 +515,7 @@ def check_oe_spike(added_text: str, thresholds: Optional[Dict[str, int]] = None)
         abstractions = re.findall(r"\b(?:class|interface|abstract\s+class)\s+([A-Za-z0-9_]+)", added_text)
         if len(abstractions) >= min_abstractions:
             return True, (
-                f"Aşırı Soyutlama Uyarısı (OE_SPIKE): Küçük bir kod değişikliğinde ({loc_count} LOC) "
+                f"Aşırı Soyutlama Uyarısı: Küçük bir kod değişikliğinde ({loc_count} LOC) "
                 f"{len(abstractions)} yeni soyutlama ({', '.join(abstractions)}) eklendi. "
                 f"YAGNI kuralını gözetin; tekil kullanım için erken soyutlamadan kaçının."
             )
@@ -654,7 +654,7 @@ def check_arch_file_growth(
         reason_str = "; ".join(reasons)
         basename = os.path.basename(target_file) if target_file else "dosya"
         return True, (
-            f"Modülerlik Uyarısı (ARCH_FILE_GROWTH): '{basename}' için {reason_str}. "
+            f"Modülerlik Uyarısı: '{basename}' için {reason_str}. "
             f"Yeni sorumlulukları aynı büyük dosyada biriktirmek yerine ilgili sorumlulukları "
             f"bağımsız ve cohesive modüllere ayırmayı değerlendirin."
         )

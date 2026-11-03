@@ -1141,7 +1141,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
 
             # Final evaluation surfaces the single consolidated warning
             stop_res, _ = run_validator({"terminationReason": "model_stop"})
-            self.assertIn("Test Kanıtı Uyarısı (T1)", _warnings_from(stop_res))
+            self.assertIn("Test Kanıtı Uyarısı", _warnings_from(stop_res))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -1780,7 +1780,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             "src/legacy_service.py", old, big_addition, added_lines, False
         )
         self.assertTrue(triggered, "material growth on a monolithic file must still warn")
-        self.assertIn("ARCH_FILE_GROWTH", reason)
+        self.assertIn("Modülerlik Uyarısı:", reason)
 
     def test_arch_file_growth_respects_declared_cohesion_marker(self):
         """`srp: allow-monolith` in the content silences the growth rules.
@@ -3041,7 +3041,7 @@ class TestV127G0ZeroBypassAndStatefulEvidence(unittest.TestCase):
 
         # 2. Stop hook at this moment: should report missing test for payment.ts
         stop_res1, _ = run_validator({"terminationReason": "model_stop"})
-        self.assertIn("Test Kanıtı Uyarısı (T1)", _warnings_from(stop_res1))
+        self.assertIn("Test Kanıtı Uyarısı", _warnings_from(stop_res1))
         self.assertIn("payment.ts", _warnings_from(stop_res1))
 
         # 3. Agent writes the test file in subsequent tool call
@@ -3186,7 +3186,7 @@ class TestV127G0ZeroBypassAndStatefulEvidence(unittest.TestCase):
 
         stop_res, _ = run_validator({"terminationReason": "model_stop"})
         self.assertNotIn(
-            "Test Kanıtı Uyarısı (T1)", _warnings_from(stop_res),
+            "Test Kanıtı Uyarısı", _warnings_from(stop_res),
             "a project with no test suite must not be nagged at Stop either",
         )
 
@@ -3214,7 +3214,7 @@ class TestV127G0ZeroBypassAndStatefulEvidence(unittest.TestCase):
         }
         run_validator(payload)
         stop_res, _ = run_validator({"terminationReason": "model_stop"})
-        self.assertIn("Test Kanıtı Uyarısı (T1)", _warnings_from(stop_res))
+        self.assertIn("Test Kanıtı Uyarısı", _warnings_from(stop_res))
 
     def test_t1_corrupted_state_file_fail_safe(self):
         state_path = os.path.join(self.temp_dir, "test_evidence_state.json")
@@ -3535,7 +3535,7 @@ class TestObligationGovernance(unittest.TestCase):
         # 2. Stop hook should return continue and point to billing.ts
         stop_res, _ = run_validator({"terminationReason": "model_stop"})
         self.assertEqual(stop_res.get("decision"), "continue")
-        self.assertIn("Test Kanıtı Uyarısı (T1)", stop_res.get("reason", ""))
+        self.assertIn("Test Kanıtı Uyarısı", stop_res.get("reason", ""))
         self.assertIn("billing.ts", stop_res.get("reason", ""))
 
     def test_stop_hook_returns_continue_when_unresolved_doc_obligations_exist(self):

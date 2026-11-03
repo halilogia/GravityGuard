@@ -311,7 +311,7 @@ def check_t1_missing_test(
         if not project_has_test_infrastructure(target_file, cfg):
             return False, "", None
         return True, (
-            f"Test Kanıtı Uyarısı (T1_MISSING_RELATED_TEST): Üretim kodunda değişiklik yapıldı "
+            f"Test Kanıtı Uyarısı: Üretim kodunda değişiklik yapıldı "
             f"ancak ilişkili test dosyası ('{expected_name}') diskte bulunamadı. "
             f"Davranış değişikliği için ilgili test dosyasını oluşturmayı veya güncellemeyi değerlendirin."
         ), None
@@ -427,7 +427,7 @@ def check_t2_observable_assertion(
     if unasserted_tests:
         sample_tests = ", ".join(f"'{n}'" for n in unasserted_tests[:2])
         return True, (
-            f"Test Gözlem Uyarısı (T2_NO_OBSERVABLE_ASSERTION): Eklenen/değiştirilen test case "
+            f"Test Gözlem Uyarısı: Eklenen/değiştirilen test case "
             f"({sample_tests}) içinde gözlemlenebilir bir assertion (assert, expect, self.assert*, pytest.raises) "
             f"tespit edilemedi. İçi boş veya assertionsız test yazılmasından kaçının."
         )
@@ -542,7 +542,7 @@ def check_t3_symbol_to_test_link(
     if missing_symbols:
         sample = ", ".join(f"'{s}'" for s in missing_symbols[:3])
         return True, (
-            f"Sembol-Test İlişki Uyarısı (T3_SYMBOL_TO_TEST_LINK): Değiştirilen üretim sembolü "
+            f"Sembol-Test İlişki Uyarısı: Değiştirilen üretim sembolü "
             f"({sample}) ilgili test dosyasında ('{Path(candidate_test_path).name}') doğrudan referans edilmemiş. "
             f"Test dosyasının bu davranışı doğrudan veya dolaylı test ettiğinden emin olun."
         )
@@ -757,7 +757,7 @@ def evaluate_lcov_coverage(
         branch = f", dal %{e['branch_pct']:.1f}" if e["branch_pct"] is not None else ""
         parts.append(f"'{os.path.basename(target)}' satır %{e['line_pct']:.1f} ({e['lh']}/{e['lf']}{branch})")
     return True, (
-        f"Kapsam Uyarısı (T0_COVERAGE_BELOW_THRESHOLD): Değişen dosyaların satır kapsamı %{min_coverage:g} "
+        f"Kapsam Uyarısı: Değişen dosyaların satır kapsamı %{min_coverage:g} "
         f"eşiğinin altında: {', '.join(parts)}. Eksik satırlar için test ekleyin."
     ), details
 
@@ -932,16 +932,16 @@ def evaluate_t0_gate(
     status = run["status"]
     if status == "failed":
         return [("T0_TEST_RUN_FAILED", (
-            f"Dinamik Test Uyarısı (T0_TEST_RUN_FAILED): '{cmd_text}' çıkış kodu {run['exit_code']} ile bitti "
+            f"Dinamik Test Uyarısı: '{cmd_text}' çıkış kodu {run['exit_code']} ile bitti "
             f"({run['tests_executed'] if run['tests_executed'] is not None else '?'} test). Son çıktı: {tail}"))]
     if status == "timeout":
         return [("T0_TEST_RUN_FAILED", (
-            f"Dinamik Test Uyarısı (T0_TEST_RUN_FAILED): '{cmd_text}' {timeout} sn zaman aşımına uğradı ve sonlandırıldı."))]
+            f"Dinamik Test Uyarısı: '{cmd_text}' {timeout} sn zaman aşımına uğradı ve sonlandırıldı."))]
     if status == "error":
-        return [("T0_TEST_RUN_FAILED", f"Dinamik Test Uyarısı (T0_TEST_RUN_FAILED): test başlatılamadı: {tail}")]
+        return [("T0_TEST_RUN_FAILED", f"Dinamik Test Uyarısı: test başlatılamadı: {tail}")]
     if status == "no_tests":
         return [("T0_NO_TESTS_EXECUTED", (
-            f"Dinamik Test Uyarısı (T0_NO_TESTS_EXECUTED): '{cmd_text}' çalıştı ama hiç test koşulmadı (0 test). "
+            f"Dinamik Test Uyarısı: '{cmd_text}' çalıştı ama hiç test koşulmadı (0 test). "
             f"Test kanıtı olarak sayılmaz."))]
     if status == "no_runner":
         return []

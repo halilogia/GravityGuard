@@ -315,28 +315,28 @@ def validate_gravityguard() -> None:
                 tests = removals["suspicious_tests"]
                 shown = ", ".join(tests[:5]) + (f" (+{len(tests) - 5} more)" if len(tests) > 5 else "")
                 removal_warn = (
-                    f"Test Silme Uyarısı (TEST_DELETED_SUBJECT_REMAINS): Test dosyası silindi ama test ettiği kod hâlâ duruyor: {shown}. "
+                    f"Test Silme Uyarısı: Test dosyası silindi ama test ettiği kod hâlâ duruyor: {shown}. "
                     "Özellik gerçekten kaldırılıyorsa kodunu da sil; değilse testi geri getir. Emin değilsen kullanıcıya sor."
                 )
                 log_event("stop", "WARNING", "workspace", removal_warn, rule_id="TEST_DELETED_SUBJECT_REMAINS", conversation_id=conversation_id)
-                warn_reasons.append(removal_warn)
+                warn_reasons.append(f"[TEST_DELETED_SUBJECT_REMAINS] {removal_warn}")
             if unresolved_tests:
                 missing_items = [
                     f"'{p}' (beklenen test: {info.get('expected_name', 'test')})"
                     for p, info in unresolved_tests.items()
                 ]
                 t1_warn = (
-                    f"Test Kanıtı Uyarısı (T1): Oturum tamamlandı ancak şu üretim kodları için "
+                    f"Test Kanıtı Uyarısı: Oturum tamamlandı ancak şu üretim kodları için "
                     f"test kanıtı bulunamadı: {', '.join(missing_items)}"
                 )
                 log_event("stop", "WARNING", "workspace", t1_warn, rule_id="T1_FINAL_UNRESOLVED", conversation_id=conversation_id)
-                warn_reasons.append(t1_warn)
+                warn_reasons.append(f"[T1_FINAL_UNRESOLVED] {t1_warn}")
 
             # T0: dynamic test run + LCOV gate (opt-in via testEvidence.dynamicExecution)
             t0_findings = evaluate_t0_gate(str(project_root), cfg)
             for t0_rule, t0_msg in t0_findings:
                 log_event("stop", "WARNING", "workspace", t0_msg, rule_id=t0_rule, conversation_id=conversation_id)
-                warn_reasons.append(t0_msg)
+                warn_reasons.append(f"[{t0_rule}] {t0_msg}")
 
             # EBDG Phase 0: UI Visual Screenshot Evidence Gate
             ui_allowed, ui_warn, _ = evaluate_ebdg_ui_gate(
@@ -347,7 +347,7 @@ def validate_gravityguard() -> None:
             )
             if not ui_allowed and ui_warn:
                 log_event("stop", "WARNING", "workspace", ui_warn, rule_id="EBDG_UI_SCREENSHOT_PENDING", conversation_id=conversation_id)
-                warn_reasons.append(ui_warn)
+                warn_reasons.append(f"[EBDG_UI_SCREENSHOT_PENDING] {ui_warn}")
 
             if unresolved_docs and session_retries >= 4:
                 for closed in _auto_resolve_changelog(project_root, conversation_id, unresolved_docs):
@@ -372,7 +372,7 @@ def validate_gravityguard() -> None:
                     f"(Kalan deneme: {retries_left}; sonra devre kesici durdurmaya izin verir.)"
                 )
                 log_event("stop", "WARNING", "workspace", doc_warn, rule_id="DOC_OBLIGATION_UNRESOLVED", conversation_id=conversation_id)
-                warn_reasons.append(doc_warn)
+                warn_reasons.append(f"[DOC_OBLIGATION_UNRESOLVED] {doc_warn}")
 
             if warn_reasons:
                 increment_session_stop_retries(project_root, conversation_id)
@@ -1093,6 +1093,12 @@ def run_cli() -> None:
         out = enrich_hook_output(out)
     except Exception as tip_err:  # a lesson must never cost the decision itself
         print(f"[GravityGuard] rule tip failed: {tip_err}", file=sys.stderr)
+    if not _CRASH_CONTEXT.get("stop"):
+        try:
+            from .briefing import brief_first_call
+            out = brief_first_call(out, str(_CRASH_CONTEXT.get("conversation_id") or "default"))
+        except Exception as brief_err:  # the briefing must never cost the decision itself
+            print(f"[GravityGuard] briefing failed: {brief_err}", file=sys.stderr)
     real_stdout.write(out)
     real_stdout.flush()
     if exit_code is not None:  # callers and tests rely on the engine's own sys.exit, code 0 included

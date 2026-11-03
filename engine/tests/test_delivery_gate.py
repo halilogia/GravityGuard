@@ -69,7 +69,7 @@ class TestDeliveryGate(unittest.TestCase):
         )
         self.assertFalse(allowed)
         self.assertIsNotNone(warn)
-        self.assertIn("EBDG_UI_SCREENSHOT_PENDING", warn)
+        self.assertIn("Görsel Doğrulama Uyarısı:", warn)
         self.assertIsNone(path)
 
         # Verify receipt was written with PENDING_EVIDENCE

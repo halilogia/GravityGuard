@@ -56,7 +56,7 @@ class TestTestEvidenceDomain(unittest.TestCase):
             added_line_numbers={1, 2, 3},
         )
         self.assertTrue(warned)
-        self.assertIn("T2_NO_OBSERVABLE_ASSERTION", msg)
+        self.assertIn("Test Gözlem Uyarısı:", msg)
 
     def test_t2_allows_assert(self):
         code = "def test_something():\n    assert 1 == 1\n"
@@ -102,7 +102,7 @@ class TestSubsystemMappingAndMtimeExemption(unittest.TestCase):
         self.assertEqual(resolve_subsystem_test_files(plain), [])
         warned, msg, cand = check_t1_missing_test(plain, "export function plain() {}")
         self.assertTrue(warned)
-        self.assertIn("T1_MISSING_RELATED_TEST", msg)
+        self.assertIn("Test Kanıtı Uyarısı:", msg)
         self.assertIsNone(cand)
 
     def test_config_subsystem_mappings_extend_defaults(self):

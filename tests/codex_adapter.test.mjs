@@ -95,3 +95,9 @@ test('fail-open: missing engine yields no output, exit 0 and a stderr note', () 
   assert.equal(stop.status, 0);
   assert.equal(JSON.parse(stop.stdout).decision, 'block');
 });
+
+test('--session-start: briefing as SessionStart context, silent when the journal is empty', () => {
+  const empty = runHook({}, ['--session-start'], { GRAVITYGUARD_LOG_DIR: path.join(path.dirname(HOOK), '__no_such_log_dir__') });
+  assert.equal(empty.status, 0);
+  assert.equal(empty.stdout.trim(), '');
+});

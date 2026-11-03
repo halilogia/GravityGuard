@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from gravityguard_engine.briefing import build_briefing
+from gravityguard_engine.briefing import brief_first_call, build_briefing
 from gravityguard_engine.rule_tips import TIPS, enrich_hook_output, lesson_text
 
 
@@ -76,6 +76,33 @@ class BriefingTests(unittest.TestCase):
 
     def test_nothing_to_say(self):
         self.assertEqual(build_briefing("Codex", journal=self._journal([])), "")
+
+
+class FirstCallBriefingTests(unittest.TestCase):
+    def setUp(self):
+        self.log_dir = tempfile.mkdtemp()
+        ts = datetime.now(timezone.utc).isoformat()
+        with open(os.path.join(self.log_dir, "gravityguard_permanent_audit.jsonl"), "w", encoding="utf-8") as f:
+            for agent in ("Antigravity IDE", "Claude Code"):
+                f.write(json.dumps({"agent": agent, "status": "BLOCKED", "ruleId": "G1_SILENT_EXCEPTION", "timestamp": ts}) + "\n")
+
+    def test_first_allowed_call_carries_briefing_once(self):
+        first = brief_first_call('{"decision": "allow", "reason": "token note"}\n', "conv-1", self.log_dir)
+        reason = json.loads(first)["reason"]
+        self.assertTrue(reason.startswith("GravityGuard: son 7"))
+        self.assertTrue(reason.endswith("\n\ntoken note"))
+        again = '{"decision": "allow"}\n'
+        self.assertEqual(brief_first_call(again, "conv-1", self.log_dir), again)
+
+    def test_rejection_does_not_use_up_the_briefing(self):
+        deny = '{"decision": "deny", "reason": "x"}\n'
+        self.assertEqual(brief_first_call(deny, "conv-2", self.log_dir), deny)
+        self.assertIn("G1_SILENT_EXCEPTION", brief_first_call('{"decision": "allow"}', "conv-2", self.log_dir))
+
+    def test_agents_with_session_hook_are_skipped(self):
+        out = '{"decision": "allow"}'
+        self.assertEqual(brief_first_call(out, "claude:abc", self.log_dir), out)
+        self.assertEqual(brief_first_call(out, "codex:abc", self.log_dir), out)
 
 
 if __name__ == "__main__":

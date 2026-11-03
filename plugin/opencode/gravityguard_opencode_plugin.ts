@@ -77,6 +77,22 @@ function warn(message: string): void {
   console.warn(`[GravityGuard] ${message}`)
 }
 
+/** Briefing file listed under `instructions` in opencode.jsonc; refreshed at startup and whenever a session goes idle. */
+const BRIEFING =
+  process.env.GRAVITYGUARD_OPENCODE_BRIEFING ??
+  path.join(homedir(), ".gemini", "logs", "gravityguard_briefing_opencode.md")
+
+function refreshBriefing(): void {
+  if (!existsSync(HOOK)) return
+  const result = spawnSync(PYTHON, ["-X", "utf8", HOOK, "--briefing-file", BRIEFING], {
+    encoding: "utf8",
+    timeout: TIMEOUT_MS,
+    windowsHide: true,
+    env: process.env,
+  })
+  if (result.error) warn(`briefing did not run: ${result.error.message}`)
+}
+
 /** Runs the adapter; null means "no verdict" (fail-open). */
 function askEngine(payload: Record<string, unknown>, stop: boolean): Verdict | null {
   if (!existsSync(HOOK)) {
@@ -115,6 +131,7 @@ function askEngine(payload: Record<string, unknown>, stop: boolean): Verdict | n
 export default {
   id: "gravityguard",
   async setup(ctx: PluginContext) {
+    refreshBriefing()
     await ctx.tool.hook("execute.before", (event) => {
       if (!GUARDED_TOOLS.has(event.tool.toLowerCase())) return
       const verdict = askEngine(
@@ -134,6 +151,7 @@ export default {
         const sessionID = event.properties?.sessionID
         const verdict = askEngine({ session_id: sessionID, cwd: ctx.location.directory }, true)
         if (verdict?.block && verdict.reason) warn(verdict.reason)
+        refreshBriefing()
       }
     })().catch((error: unknown) => warn(`idle listener stopped: ${(error as Error).message}`))
 

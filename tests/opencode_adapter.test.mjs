@@ -128,3 +128,12 @@ test('fail-open: missing engine yields a GUARD_UNAVAILABLE block, exit 0 and a s
   assert.equal(stop.status, 0);
   assert.equal(JSON.parse(stop.stdout).block, true);
 });
+
+test('--briefing-file writes the OpenCode briefing, an empty file when the journal is empty', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gg-oc-brief-'));
+  const out = path.join(dir, 'briefing.md');
+  const r = runHook({}, ['--briefing-file', out], { GRAVITYGUARD_LOG_DIR: dir });
+  assert.equal(r.status, 0);
+  assert.equal(fs.readFileSync(out, 'utf8'), '');
+  fs.rmSync(dir, { recursive: true, force: true });
+});

@@ -11,8 +11,8 @@ import json
 import os
 import sys
 from collections import Counter
+from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
-from typing import Iterable, Optional
 
 from .rule_tips import TIPS
 
@@ -22,7 +22,11 @@ _MAX_LINE_BYTES = 64 * 1024
 
 
 def _journal_path() -> str:
-    return os.path.join(os.path.expanduser("~"), ".gemini", "logs", "gravityguard_permanent_audit.jsonl")
+    from .audit import (
+        _resolve_log_dir,  # same journal the engine writes, test/CI redirection included
+    )
+
+    return os.path.join(_resolve_log_dir(), "gravityguard_permanent_audit.jsonl")
 
 
 def _records(path: str) -> Iterable[dict]:
@@ -41,8 +45,8 @@ def _records(path: str) -> Iterable[dict]:
         return
 
 
-def build_briefing(agent: str, days: int = 7, top: int = 4, journal: Optional[str] = None,
-                   now: Optional[datetime] = None) -> str:
+def build_briefing(agent: str, days: int = 7, top: int = 4, journal: str | None = None,
+                   now: datetime | None = None) -> str:
     now = now or datetime.now(timezone.utc)
     since = now - timedelta(days=days)
     mistakes: Counter = Counter()
@@ -80,15 +84,79 @@ def build_briefing(agent: str, days: int = 7, top: int = 4, journal: Optional[st
     return "\n".join(lines)
 
 
+# Agents briefed through their own channel: a SessionStart hook (Claude Code, Codex) or an instructions file
+# (OpenCode, whose hook warnings only reach the server log). The rest get it on their first allowed tool call.
+_SESSION_HOOK_AGENTS = {"Claude Code", "Codex", "OpenCode"}
+_MAX_BRIEFED = 300
+
+
+def _attach(out: str, text: str) -> tuple[str, bool]:
+    """Puts the briefing in front of the reason of the last allow/continue decision line. False when there is none."""
+    lines = out.splitlines(keepends=True)
+    for i in range(len(lines) - 1, -1, -1):
+        stripped = lines[i].strip()
+        if not stripped.startswith("{"):
+            continue
+        try:
+            payload = json.loads(stripped)
+        except ValueError:
+            continue
+        if not isinstance(payload, dict) or payload.get("decision") not in ("allow", "continue"):
+            return out, False
+        reason = payload.get("reason")
+        payload["reason"] = text + ("\n\n" + reason if isinstance(reason, str) and reason else "")
+        lines[i] = json.dumps(payload) + ("\n" if lines[i].endswith("\n") else "")
+        return "".join(lines), True
+    return out, False
+
+
+def brief_first_call(out: str, conversation_id: str, log_dir: str | None = None) -> str:
+    """Adds the agent's briefing to the first non-rejected tool call of a conversation; later calls pass unchanged."""
+    from .audit import _resolve_log_dir, detect_agent_name
+
+    agent = detect_agent_name(conversation_id)
+    if agent in _SESSION_HOOK_AGENTS or not out:
+        return out
+    log_dir = log_dir or _resolve_log_dir()
+    state_path = os.path.join(log_dir, "briefed_sessions.json")
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            seen = json.load(f)
+        if not isinstance(seen, list):
+            seen = []
+    except (OSError, ValueError):
+        seen = []
+    if conversation_id in seen:
+        return out
+    text = build_briefing(agent, journal=os.path.join(log_dir, "gravityguard_permanent_audit.jsonl"))
+    if text:
+        out, attached = _attach(out, text)
+        if not attached:  # a rejection already teaches; try again on the next call
+            return out
+    seen = (seen + [conversation_id])[-_MAX_BRIEFED:]
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(seen, f)
+    except OSError as err:
+        sys.stderr.write(f"[GravityGuard] could not record briefed session: {err}\n")
+    return out
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--agent", required=True)
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--top", type=int, default=4)
+    ap.add_argument("--out", help="write the briefing to this file instead of stdout (empty file when nothing to say)")
     args = ap.parse_args(argv)
+    text = build_briefing(args.agent, days=args.days, top=args.top)
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as f:
+            f.write(text + "\n" if text else "")
+        return 0
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    text = build_briefing(args.agent, days=args.days, top=args.top)
     if text:
         print(text)
     return 0

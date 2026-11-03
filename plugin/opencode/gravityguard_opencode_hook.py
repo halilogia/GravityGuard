@@ -228,10 +228,33 @@ def handle(event: Dict[str, Any], stop: bool) -> Optional[Dict[str, Any]]:
     return from_engine_pretool(answer) if answer else failure_answer()
 
 
+def write_briefing(path: str) -> None:
+    """Writes the OpenCode briefing to `path`, read by OpenCode as an `instructions` file. Empty file = nothing to say.
+
+    OpenCode warnings only reach the server log, so a file in `instructions` is the one channel the model reads.
+    """
+    try:
+        from gravityguard_engine.briefing import build_briefing
+        text = build_briefing("OpenCode")
+    except Exception as err:  # a failure only costs the briefing
+        print(f"[GravityGuard OpenCode adapter] briefing unavailable: {err}", file=sys.stderr)
+        return
+    try:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text(text + "\n" if text else "", encoding="utf-8")
+    except OSError as err:
+        print(f"[GravityGuard OpenCode adapter] briefing not written: {err}", file=sys.stderr)
+
+
 def main(argv: Sequence[str]) -> int:
     for stream in (sys.stdin, sys.stdout):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
+    if "--briefing-file" in argv:
+        idx = list(argv).index("--briefing-file")
+        if idx + 1 < len(argv):
+            write_briefing(argv[idx + 1])
+        return 0
     try:
         event = json.load(sys.stdin)
     except ValueError:

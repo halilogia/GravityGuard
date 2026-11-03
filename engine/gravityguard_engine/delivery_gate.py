@@ -200,7 +200,7 @@ def evaluate_ebdg_ui_gate(
     # Warning triggered before completion
     short_file_list = ", ".join(ui_files[:4]) + (f" (+{len(ui_files) - 4} dosya)" if len(ui_files) > 4 else "")
     warning_msg = (
-        f"Görsel Doğrulama Uyarısı (EBDG_UI_SCREENSHOT_PENDING): Arayüz dosyaları ({short_file_list}) güncellendi "
+        f"Görsel Doğrulama Uyarısı: Arayüz dosyaları ({short_file_list}) güncellendi "
         f"ancak son 10 dakikaya ait bir ekran görüntüsü kanıtı (.png) bulunamadı. "
         f"Lütfen Playwright veya tarayıcı ekran yakalama aracıyla ekran görüntüsü alıp arayüzün doğruluğunu kontrol edin. "
         f"(Kalan deneme: {max(0, max_retries - session_retries)})"

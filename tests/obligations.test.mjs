@@ -30,7 +30,7 @@ test('renderObligationsTab renders stop guard and pending test obligations', () 
     pendingTests: {
       'src/engine.ts': {
         expected_name: 'engine.test.ts',
-        reason: 'Test Kanıtı Uyarısı (T1): Test dosyası eksik.'
+        reason: 'Test Kanıtı Uyarısı: Test dosyası eksik.'
       }
     }
   });

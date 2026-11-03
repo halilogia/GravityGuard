@@ -83,7 +83,7 @@ class TestEvaluateLcovCoverage(unittest.TestCase):
     def test_below_threshold_is_flagged_with_line_and_branch_numbers(self):
         violated, msg, details = evaluate_lcov_coverage(self.lcov, ["src/billing.ts"], 80.0)
         self.assertTrue(violated)
-        self.assertIn("T0_COVERAGE_BELOW_THRESHOLD", msg)
+        self.assertIn("Kapsam Uyarısı:", msg)
         self.assertEqual(details["files"]["src/billing.ts"]["line_pct"], 50.0)
         self.assertEqual(details["files"]["src/billing.ts"]["branch_pct"], 25.0)
         self.assertEqual(details["below"], ["src/billing.ts"])

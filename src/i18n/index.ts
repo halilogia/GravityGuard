@@ -237,7 +237,7 @@ export const resources = {
       },
       obligations: {
         title: 'Aktif Yönetişim & Yükümlülük Durumu',
-        testTitle: 'Bekleyen Test Kanıtları (T1)',
+        testTitle: 'Bekleyen Test Kanıtları',
         docTitle: 'Bekleyen Dokümantasyon Yükümlülükleri (§6)',
         circuitBreaker: 'Devre Kesici Sayacı',
         cleanState: 'Bekleyen hiçbir yükümlülük yok. Tüm test ve doküman kontrolleri temiz.',
@@ -655,7 +655,7 @@ export const resources = {
       },
       obligations: {
         title: 'Active Governance & Obligations State',
-        testTitle: 'Pending Test Evidence (T1)',
+        testTitle: 'Pending Test Evidence',
         docTitle: 'Pending Documentation Obligations (§6)',
         circuitBreaker: 'Circuit Breaker Counter',
         cleanState: 'No pending obligations. All test and documentation gates are clean.',

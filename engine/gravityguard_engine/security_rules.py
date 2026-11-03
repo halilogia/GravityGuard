@@ -209,7 +209,7 @@ def check_g0_secret_leak(added_text: str) -> Tuple[bool, str, Optional[str]]:
     if aws_match:
         raw_token = aws_match.group(0)
         if not is_placeholder(raw_token):
-            return True, f"AWS Access Key ID tespit edildi: {redact_token(raw_token)}. Ortam değişkeni (AWS_ACCESS_KEY_ID) veya IAM role kullanın.", None
+            return True, f"AWS Access Key ID tespit edildi: {redact_token(raw_token)}. Ortam değişkeni AWS_ACCESS_KEY_ID ya da IAM role kullanın.", None
 
     # H) Other vendor tokens with a fixed, distinctive prefix/shape
     for vendor_re, vendor_name in _VENDOR_TOKEN_PATTERNS:
