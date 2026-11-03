@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Token Output Guard (`token_guard.py`, `dispatcher.py`, `test_token_guard.py`):**
+  - PreToolUse now rejects whole-file reads of large files (>150 KB) unless a bounded `StartLine`/`EndLine` window of at most 800 lines is requested.
+  - Warns on unbounded recursive listings, `git log`/`git diff` without limits, and `cat`/`type`/`Get-Content` of large files; suggests `tsave run -- <command>`.
+  - Short count form (`git log -5`, `git log -20 --stat`) is recognized as bounded, so it no longer raises a false warning.
+  - Codex: `plugin/codex/gravityguard_codex_hook.py` documents the separate `"matcher": "Bash"` hooks.json entry that routes shell commands through shell rules and the token guard.
+  - 17 deterministic unit tests cover deny/warn boundaries and allow cases.
+
 - **Evidence-Based Delivery Gate (EBDG) Phase 0 (`delivery_gate.py`, `dispatcher.py`):**
   - Added deterministic, zero-AI visual verification gate for UI modifications.
   - When `.css`, `.html`, `.vue`, `.svelte`, `.tscn` or UI-scoped `.tsx`/`.jsx` files are modified, GravityGuard verifies that a recent, non-empty screenshot (`.png`, `.jpg`, `.webp`) exists in `.gravityguard/evidence/`, `artifacts/`, `screenshots/` or active session brain.

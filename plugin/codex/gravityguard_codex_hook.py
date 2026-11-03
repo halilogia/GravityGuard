@@ -7,10 +7,12 @@ Translates Codex hook events into the engine's (Antigravity) dialect and runs th
 (`engine/gravity-validator.py`) as a subprocess, so rules, state files and the audit log behave as under Antigravity.
 
     PreToolUse (write_file | apply_diff | edit_file | read_file) -> engine PreToolUse payload -> deny / context / allow
+    PreToolUse (Bash, separate `"matcher": "Bash"` entry)        -> shell rules + token guard -> deny / context / allow
     Stop (`--stop`)                                              -> engine `--stop` payload  -> block or allow
 
 Fail-open by design: when the engine cannot be started or gives no answer, the tool call proceeds and the reason goes
-to stderr. Bash is not covered; the Stop hook is the only backstop for files written through a shell.
+to stderr. Bash commands get shell rules and token-guard warnings, but files written through a shell are only
+backstopped by the Stop hook.
 """
 from __future__ import annotations
 

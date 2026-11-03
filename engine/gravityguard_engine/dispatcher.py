@@ -37,6 +37,7 @@ from .diffing import get_diff_analysis, get_projected_and_old_content, Projectio
 from .engine_integrity import engine_source_defect, repair_reason, run_lkg
 from .policy_integrity import MANDATORY_RULES, check_policy_change, is_runtime_control_file
 from .shell_rules import check_shell_command
+from .token_guard import evaluate_token_guard
 from .publication_guard import scan_git_secrets
 from .removal_observer import observe_removals
 from .operations import normalize_operation, UnsupportedOperation
@@ -402,6 +403,7 @@ def validate_gravityguard() -> None:
         print(json.dumps({"decision": "deny", "reason": "[TOOL_SCHEMA_UNSUPPORTED]: Invalid toolCall"}))
         sys.exit(0)
     args = tool_call.get("args", {})
+    raw_args = dict(args) if isinstance(args, dict) else {}
     tool_name = tool_call.get("name", "")
     c_id = payload.get("conversationId", "default")
 
@@ -414,6 +416,32 @@ def validate_gravityguard() -> None:
         print(json.dumps({"decision": "deny", "reason": shell_reason}))
         sys.exit(0)
 
+    # 1.5 TOKEN OUTPUT GUARD: stop context-bloating reads and unbounded commands
+    token_warning = ""
+    _guard_cwd = payload.get("cwd")
+    token_finding = evaluate_token_guard(
+        tool_name,
+        raw_args,
+        cwd=_guard_cwd if isinstance(_guard_cwd, str) else os.getcwd(),
+    )
+    if token_finding:
+        _guard_target = str(
+            raw_args.get("Path")
+            or raw_args.get("file_path")
+            or raw_args.get("CommandLine")
+            or raw_args.get("command")
+            or ""
+        )
+        if token_finding.level == "deny":
+            _log("BLOCKED", _guard_target, token_finding.reason, rule_id=token_finding.rule_id)
+            print(json.dumps({
+                "decision": "deny",
+                "reason": f"[{token_finding.rule_id}]: {token_finding.reason}",
+            }))
+            sys.exit(0)
+        _log("WARNING", _guard_target, token_finding.reason, rule_id=token_finding.rule_id)
+        token_warning = token_finding.reason
+
 
     try:
         operation = normalize_operation(tool_name, args)
@@ -423,7 +451,10 @@ def validate_gravityguard() -> None:
         print(json.dumps({"decision": "deny", "reason": reason}))
         sys.exit(0)
     if operation is None:
-        print(json.dumps({"decision": "allow"}))
+        if token_warning:
+            print(json.dumps({"decision": "allow", "reason": token_warning}))
+        else:
+            print(json.dumps({"decision": "allow"}))
         sys.exit(0)
     target_file = operation.path
     if not os.path.isabs(target_file):
