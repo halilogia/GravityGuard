@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Insights tab: time windows, trend, agent breakdown, drill-down (`src/webview/tabs/insights.ts`):**
+  - 24h / 7d / 30d / all selector; every figure follows the selected window. 14-day blocked/warned trend as inline SVG.
+  - Agent table: operations, first-try clean rate, blocked, warned, issues per session.
+  - Evasion suspects and user-marked false alarms per rule and in total; rules with fewer than 10 events collapse into one group.
+  - Clicking a rule shows its latest events with agent, session tag, file and a false-alarm / undo button.
+
 - **Audit statistics layer and measurement fixes (`src/audit_stats.ts`, `src/rule_modes.ts`, `quality_signals.py`, `audit.py`):**
   - `audit_stats.ts` aggregates the permanent journal per time window (24h / 7d / 30d / all), rule, agent, session and day; cached by file size and mtime. Exposed to every tab as `vm.auditStats`.
   - A read no longer clears an open violation: `READ_ALLOW` approvals used to be counted as recoveries (38 of 84 recoveries in the maintainer journal). Replays ignore those old records too.
