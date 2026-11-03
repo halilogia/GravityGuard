@@ -47,6 +47,14 @@ export function buildClientScript(nonce: string, activeTab: string): string {
             if (pane) pane.classList.add('active');
           }
 
+          // Segmented views (time window, agent filter...) live on <body> so in-place updates keep them.
+          function selectSegment(group, value) {
+            document.body.setAttribute('data-sel-' + group, value);
+            const st = vscode.getState() || {};
+            vscode.setState({ ...st, segments: { ...(st.segments || {}), [group]: value } });
+          }
+          Object.entries(savedState.segments || {}).forEach(([g, v]) => document.body.setAttribute('data-sel-' + g, String(v)));
+
           if (savedState.currentTab && savedState.currentTab !== '${escapeJs(activeTab)}') {
             setTab(savedState.currentTab);
           }
@@ -75,6 +83,18 @@ export function buildClientScript(nonce: string, activeTab: string): string {
             if (action === 'setTab') {
               const tab = target.getAttribute('data-tab');
               if (tab) setTab(tab);
+            } else if (action === 'selectSegment') {
+              const group = target.getAttribute('data-group');
+              const value = target.getAttribute('data-value');
+              if (group && value) selectSegment(group, value);
+            } else if (action === 'markFalseAlarm') {
+              const eventId = target.getAttribute('data-id');
+              const ruleId = target.getAttribute('data-rule');
+              if (eventId && ruleId) vscode.postMessage({ command: 'markFalseAlarm', text: eventId, title: ruleId, decision: target.getAttribute('data-undo') === '1' ? 'undo' : 'mark' });
+            } else if (action === 'setRuleMode') {
+              const ruleId = target.getAttribute('data-rule');
+              const mode = target.getAttribute('data-mode');
+              if (ruleId && mode) vscode.postMessage({ command: 'setRuleMode', title: ruleId, decision: mode });
             } else if (action === 'openConfig') {
               vscode.postMessage({ command: 'openConfig' });
             } else if (action === 'toggleLanguage') {

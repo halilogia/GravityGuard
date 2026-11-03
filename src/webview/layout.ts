@@ -1,3 +1,4 @@
+import { NON_VIOLATION_RULES } from '../audit_stats';
 import { t, getCurrentLanguage } from '../i18n';
 import { lucide } from '../icons';
 import { SkillItem } from '../skills';
@@ -35,7 +36,8 @@ export function buildHtmlDocument(p: LayoutParams): string {
   const { eventsList, projectName, totalObligations } = vm;
 
   const blockedCount = eventsList.filter(e => e.status === 'BLOCKED').length;
-  const warningCount = eventsList.filter(e => e.status === 'WARNING').length;
+  // Mandatory JS feedback and pending-evidence notes are compliance records, not warnings.
+  const warningCount = eventsList.filter(e => e.status === 'WARNING' && !NON_VIOLATION_RULES.has(e.ruleId || '')).length;
   const approvedCount = eventsList.filter(e => e.status === 'APPROVED').length;
   const shadowCount = eventsList.filter(e => e.status === 'SHADOW_TRIGGER').length;
 

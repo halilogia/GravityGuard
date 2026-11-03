@@ -421,13 +421,15 @@ def _apply_event_to_live_state(state: Dict[str, Any], ev: Dict[str, Any]) -> Non
         if t_key and t_key in active_violations:
             active_violations[t_key]["attempts"] = ev.get("recoveryAttempts", active_violations[t_key].get("attempts", 1) + 1)
             active_violations[t_key]["lastTimestamp"] = ev.get("timestamp")
-    elif out == "RECOVERED":
+    elif out == "RECOVERED" and ev.get("ruleId") != "READ_ALLOW":
         eff["totalRecovered"] = eff.get("totalRecovered", 0) + 1
         rst = rule_stats.setdefault(res_id, {"blocked": 0, "recovered": 0, "recoveryRate": 0.0, "attempts": []})
         rst["recovered"] = rst.get("recovered", 0) + 1
         att = ev.get("recoveryAttempts")
         if isinstance(att, (int, float)):
             rst.setdefault("attempts", []).append(att)
+        if ev.get("evasionSuspect"):
+            rst["evasionSuspect"] = rst.get("evasionSuspect", 0) + 1
         # Clear matching active violation
         matching = [k for k in list(active_violations.keys()) if k.startswith(f"{c_id}::{target}::")]
         for mk in matching:
@@ -660,7 +662,8 @@ def log_event(
     reason: str,
     rule_id: str = "SRP",
     outcome_override: Optional[str] = None,
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = None,
+    evasion_markers: Optional[List[str]] = None
 ) -> str:
     """
     Logs an event to the live monitor stream (last 50 events)
@@ -851,7 +854,9 @@ def log_event(
                                 "status": "BLOCKED"
                             }
                 elif status == "APPROVED":
-                    matching_keys = [k for k in list(active_violations.keys()) if k.startswith(target_prefix)] if norm_target else []
+                    # Reading a file fixes nothing; only an approved write may clear an open violation.
+                    can_recover = bool(norm_target) and rule_id != "READ_ALLOW"
+                    matching_keys = [k for k in list(active_violations.keys()) if k.startswith(target_prefix)] if can_recover else []
                     if matching_keys:
                         resolved_items = []
                         for m_key in matching_keys:
@@ -877,6 +882,9 @@ def log_event(
                             p_st["recovered"] = p_st.get("recovered", 0) + 1
                             if recovery_attempts is not None:
                                 p_st.setdefault("attempts", []).append(recovery_attempts)
+                            # A "fix" that only adds suppression markers is counted, not trusted.
+                            if evasion_markers:
+                                p_st["evasionSuspect"] = p_st.get("evasionSuspect", 0) + 1
 
                             # Create linked recovery events and update ruleStats for each additional resolved rule
                             for additional in resolved_items[1:]:
@@ -1012,6 +1020,10 @@ def log_event(
                 "recoveryAttempts": recovery_attempts,
                 "resolutionMs": resolution_ms
             }
+            evasion_suspect = outcome == "RECOVERED" and bool(evasion_markers)
+            if evasion_suspect:
+                event["evasionSuspect"] = True
+                event["evasionMarkers"] = list(evasion_markers or [])
 
             # Permanent Audit & Telemetry Archive (JSONL for product R&D and effectiveness analysis)
             proj_name, proj_root = extract_project_info(target_file)
@@ -1039,6 +1051,9 @@ def log_event(
                 "recoveryAttempts": recovery_attempts,
                 "resolutionMs": resolution_ms
             }
+            if evasion_suspect:
+                telemetry_event["evasionSuspect"] = True
+                telemetry_event["evasionMarkers"] = list(evasion_markers or [])
 
             extra_telemetry_events: List[Dict[str, Any]] = []
             curr_extra_seq = next_seq

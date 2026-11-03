@@ -131,6 +131,36 @@ class TestAuditSubsystem(unittest.TestCase):
             live = json.load(f)
         self.assertIsNone(live["effectiveness"]["ruleStats"]["G0_ENV_PROTECTION"]["medianAttempts"])
 
+    def test_recovery_with_suppression_marker_is_evasion_suspect(self):
+        conv = "conv-evasion"
+        log_event("write", "BLOCKED", "src/x.ts", "silent catch", rule_id="G1_SILENT_EXCEPTION", conversation_id=conv)
+        log_event("write", "APPROVED", "src/x.ts", "passed", rule_id="PASS", conversation_id=conv, evasion_markers=["discarded-error"])
+        live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
+        with open(live_path, "r", encoding="utf-8") as f:
+            live = json.load(f)
+        self.assertEqual(live["effectiveness"]["ruleStats"]["G1_SILENT_EXCEPTION"]["evasionSuspect"], 1)
+        ev = live["events"][0]
+        self.assertTrue(ev["evasionSuspect"])
+        self.assertEqual(ev["evasionMarkers"], ["discarded-error"])
+
+    def test_clean_approval_ignores_markers(self):
+        log_event("write", "APPROVED", "src/y.ts", "passed", rule_id="PASS", conversation_id="conv-clean", evasion_markers=["noqa"])
+        live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
+        with open(live_path, "r", encoding="utf-8") as f:
+            live = json.load(f)
+        self.assertNotIn("evasionSuspect", live["events"][0])
+
+    def test_read_does_not_recover_a_violation(self):
+        conv = "conv-read"
+        log_event("write", "BLOCKED", "src/z.ts", "silent catch", rule_id="G1_SILENT_EXCEPTION", conversation_id=conv)
+        log_event("read_file", "APPROVED", "src/z.ts", "read", rule_id="READ_ALLOW", conversation_id=conv)
+        live_path = os.path.join(self.test_dir, "srp_guardian_live.json")
+        with open(live_path, "r", encoding="utf-8") as f:
+            live = json.load(f)
+        self.assertEqual(live["events"][0]["outcome"], "CLEAN")
+        self.assertEqual(live["effectiveness"]["ruleStats"]["G1_SILENT_EXCEPTION"]["recovered"], 0)
+        self.assertTrue(any(v.get("ruleId") == "G1_SILENT_EXCEPTION" for v in live["activeViolations"].values()))
+
     def test_rule_specific_causal_isolation(self):
         target = "src/app.py"
         # 1. First block is G1

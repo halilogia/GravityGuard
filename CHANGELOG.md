@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Audit statistics layer and measurement fixes (`src/audit_stats.ts`, `src/rule_modes.ts`, `quality_signals.py`, `audit.py`):**
+  - `audit_stats.ts` aggregates the permanent journal per time window (24h / 7d / 30d / all), rule, agent, session and day; cached by file size and mtime. Exposed to every tab as `vm.auditStats`.
+  - A read no longer clears an open violation: `READ_ALLOW` approvals used to be counted as recoveries (38 of 84 recoveries in the maintainer journal). Replays ignore those old records too.
+  - Evasion signal: an approved write that clears a violation while adding suppression markers (`@ts-ignore`, `eslint-disable`, `# noqa`, `# type: ignore`, `void e`, ...) is recorded as `evasionSuspect` and counted per rule.
+  - False alarms: the user can mark an audit event as a false alarm (`gravityguard_false_alarms.jsonl`, undoable); counted per rule.
+  - New shadow-mode rule `OE_SINGLE_IMPL`: an interface, abstract class, ABC or Protocol added together with exactly one implementer. Opt in to warnings with `"rules": { "OE_SINGLE_IMPL": { "mode": "warn" } }`.
+  - `rule_modes.ts` writes rule modes under `rules` (the key the engine reads); mandatory rules cannot be shadowed. Webview commands `setRuleMode`, `markFalseAlarm` and the client action `selectSegment`.
+  - The warning counter no longer counts mandatory JS feedback and pending-evidence notes.
+  - Tests: `tests/audit_stats.test.mjs`, `engine/tests/test_quality_signals.py`, 3 new cases in `test_audit.py`.
+
 - **Token guard reaches Claude Code and Codex reads; long sources go through token-lens (`token_guard.py`, Claude/Codex hooks):**
   - Plain `Read` calls never reached the engine (the adapters drop reads that change nothing), so the read guard was dead in Claude Code and Codex. Both hooks now run `evaluate_read_guard` in-process before the engine, with no extra engine spawn.
   - New rule: a source file (`.py .ts .js .gd .cs .go .rs .java .kt …`) longer than 500 lines cannot be read whole; the deny names token-lens `read_outline` / `read_symbol` / `find_symbol` and the bounded-window alternative. Claude's `offset`/`limit` are understood.

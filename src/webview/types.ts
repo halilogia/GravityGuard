@@ -1,6 +1,7 @@
 import type { TaskFile } from '../tasks';
 import type { MemoryHubData } from '../knowledge';
 import type { HookProposalData } from './hook_proposals';
+import type { AuditStats } from '../audit_stats';
 
 export interface LogEvent {
   status?: string;
@@ -45,4 +46,5 @@ export interface GuardianViewModel {
   defaultTaskPath?: string; // fallback path to create/append tasks when no file exists or for quick-add
   memory?: MemoryHubData; // Knowledge & ADR & Changelog memory hub data
   hookProposals?: HookProposalData; // agent hook proposals awaiting the user, and installed ones
+  auditStats?: AuditStats; // permanent audit journal aggregated per time window, rule, agent and session
 }

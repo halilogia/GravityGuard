@@ -158,6 +158,7 @@ export const resources = {
         governanceWriteFailed: 'Yükümlülük durumu kaydedilemedi. Doğrulama motorunu ve dosya izinlerini kontrol edin.',
         configOpenError: 'Yapılandırma dosyası açılamadı: {{error}}',
         configNoWorkspaceNotice: 'Açık bir çalışma alanı bulunamadı; kullanıcı düzeyindeki yapılandırma (~/.gravityguard.json) açılıyor.',
+        ruleModeError: 'Kural modu yazılamadı: {{path}}',
         reasonCopied: 'Kural engelleme nedeni panoya kopyalandı.'
       },
       hooks: {
@@ -467,6 +468,7 @@ export const resources = {
         governanceWriteFailed: 'Could not save obligation state. Check the validation engine and file permissions.',
         configOpenError: 'Could not open configuration file: {{error}}',
         configNoWorkspaceNotice: 'No active workspace found; opening user-level configuration (~/.gravityguard.json).',
+        ruleModeError: 'Could not write the rule mode: {{path}}',
         reasonCopied: 'Rule violation reason copied to clipboard.'
       },
       hooks: {

@@ -6,6 +6,8 @@ import { t, setLanguage, getCurrentLanguage } from '../i18n';
 import { resolveClearedAfterSeq } from '../view_filter';
 import { scanAllSkills } from '../skills';
 import { handleOpenConfig } from '../commands';
+import { writeFalseAlarm } from '../audit_stats';
+import { RuleModeChoice, writeRuleMode } from '../rule_modes';
 import { getNonce } from './html_utils';
 import { loadGuardianState, getLiveLogPath } from './state';
 import { buildHtmlDocument, extractRootInnerHtml } from './layout';
@@ -137,6 +139,24 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
         } catch (e: any) {
           vscode.window.showErrorMessage(t('actions.fileOpenError', { path: message.path }));
         }
+      } else if (message.command === 'markFalseAlarm' && typeof message.text === 'string' && /^[\w.-]{1,80}$/.test(message.text)
+        && typeof message.title === 'string' && /^[A-Z][A-Z0-9_]{1,63}$/.test(message.title)) {
+        writeFalseAlarm(message.text, message.title, message.decision === 'undo');
+        this._lastHtml = '';
+        this._lastDataSig = '';
+        this.updateHtml(true);
+      } else if (message.command === 'setRuleMode' && typeof message.title === 'string' && typeof message.decision === 'string') {
+        const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const cfgPath = root ? path.join(root, '.gravityguard.json') : path.join(os.homedir(), '.gravityguard.json');
+        try {
+          if (!writeRuleMode(cfgPath, message.title, message.decision as RuleModeChoice)) return;
+        } catch (e) {
+          vscode.window.showErrorMessage(t('actions.ruleModeError', { path: cfgPath }));
+          return;
+        }
+        this._lastHtml = '';
+        this._lastDataSig = '';
+        this.updateHtml(true);
       } else if (message.command === 'openConfig') {
         await handleOpenConfig();
       } else if (message.command === 'copyReason' && message.text) {

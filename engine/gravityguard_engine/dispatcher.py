@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import List, Tuple, Optional, Dict
 
 
+from .quality_signals import check_single_implementation, find_evasion_markers, oe_single_impl_mode
 from .architecture_rules import (
     analyze_python_srp,
     check_arch_file_growth,
@@ -407,8 +408,8 @@ def validate_gravityguard() -> None:
     tool_name = tool_call.get("name", "")
     c_id = payload.get("conversationId", "default")
 
-    def _log(status: str, target: str, reason: str, rule_id: str = "") -> None:
-        log_event(tool_name, status, target, reason, rule_id=rule_id, conversation_id=c_id)
+    def _log(status: str, target: str, reason: str, rule_id: str = "", evasion_markers: Optional[List[str]] = None) -> None:
+        log_event(tool_name, status, target, reason, rule_id=rule_id, conversation_id=c_id, evasion_markers=evasion_markers)
 
     shell_reason = check_shell_command(args)
     if shell_reason:
@@ -813,6 +814,18 @@ def validate_gravityguard() -> None:
             _log("WARNING", target_file, oe_msg, rule_id="OE_SPIKE")
             all_warnings.append(("OE_SPIKE", oe_msg))
 
+    # GUARD 5B: OE_SINGLE_IMPL — abstraction with one implementer (SHADOW by default)
+    if not is_test_file:
+        si_mode = oe_single_impl_mode(cfg)
+        if si_mode != "off":
+            si_triggered, si_msg = check_single_implementation(added_text, file_lower.endswith(".py"))
+            if si_triggered:
+                if si_mode == "warn":
+                    _log("WARNING", target_file, si_msg, rule_id="OE_SINGLE_IMPL")
+                    all_warnings.append(("OE_SINGLE_IMPL", si_msg))
+                else:
+                    _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {si_msg}", rule_id="OE_SINGLE_IMPL")
+
     # ========================================================================
     # GUARD 6: ARCH_FILE_GROWTH — LARGE FILE & RAPID GROWTH (WARN ONLY)
     # ========================================================================
@@ -962,7 +975,8 @@ def validate_gravityguard() -> None:
 
 
     elapsed_ms = (time.perf_counter() - start_time) * 1000
-    _log("APPROVED", target_file, f"All Guards Passed ({elapsed_ms:.1f}ms)", rule_id="PASS")
+    _log("APPROVED", target_file, f"All Guards Passed ({elapsed_ms:.1f}ms)", rule_id="PASS",
+         evasion_markers=find_evasion_markers(added_text))
     res_payload = {"decision": "allow"}
     if all_warnings:
         res_payload["reason"] = " ⚠ ".join(
