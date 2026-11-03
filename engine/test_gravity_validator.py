@@ -2011,6 +2011,31 @@ class TestGravityGuardPhase2(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_static_linter_diagnostics_reported_once(self):
+        """One linter result is one warning: a second write in the freshness window does not repeat it."""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            runtime_dir = os.path.join(temp_dir, ".gravityguard", "runtime")
+            os.makedirs(runtime_dir, exist_ok=True)
+            target_file = os.path.join(temp_dir, "src", "payment.py")
+            os.makedirs(os.path.dirname(target_file), exist_ok=True)
+            with open(target_file, "w", encoding="utf-8") as f:
+                f.write("def pay(): pass\n")
+            stamp = time.time()
+            with open(os.path.join(runtime_dir, "diagnostics.json"), "w", encoding="utf-8") as f:
+                json.dump({"version": 1, "lastUpdated": stamp, "entries": {target_file: {
+                    "tool": "ruff", "timestamp": stamp,
+                    "errors": [{"line": 1, "rule": "F841", "message": "unused"}]}}}, f)
+            payload = {"toolCall": {"name": "replace_file_content", "args": {
+                "TargetFile": target_file, "TargetContent": "def pay(): pass",
+                "ReplacementContent": "def pay():\n    return True\n"}}}
+            first, _ = run_validator(payload)
+            second, _ = run_validator(payload)
+            self.assertIn("STATIC_LINTER_DIAGNOSTIC", _warnings_from(first))
+            self.assertNotIn("STATIC_LINTER_DIAGNOSTIC", _warnings_from(second))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
     def test_static_linter_diagnostics_stale_skipped(self):
         """When diagnostics.json entry is older than 600s, it is treated as stale and skipped"""
         temp_dir = tempfile.mkdtemp()

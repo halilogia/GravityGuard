@@ -41,6 +41,13 @@ export const STREAM_STYLES = `\
             white-space: nowrap;
             border: 1px solid transparent;
           }
+          .agent-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+            flex-shrink: 0;
+          }
           .agent-claude {
             background: rgba(217, 119, 87, 0.15);
             border-color: rgba(217, 119, 87, 0.55);

@@ -16,12 +16,12 @@ function labelWithFallback(key: string, tr: string, en: string, options?: Record
 }
 
 const AGENT_BADGES: Record<AgentType, { label: string; color: string; bg: string }> = {
-  claude: { label: '🟠 Claude', color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.15)' },
-  gemini: { label: '🔵 Antigravity/Gemini', color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.15)' },
-  cursor: { label: '🟣 Cursor', color: '#c084fc', bg: 'rgba(192, 132, 252, 0.15)' },
-  copilot: { label: '🟢 Copilot', color: '#34d399', bg: 'rgba(16, 185, 129, 0.15)' },
-  windsurf: { label: '🌊 Windsurf', color: '#2dd4bf', bg: 'rgba(45, 212, 191, 0.15)' },
-  generic: { label: '⚪ Generic', color: '#94a3b8', bg: 'rgba(255, 255, 255, 0.08)' }
+  claude: { label: 'Claude', color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.15)' },
+  gemini: { label: 'Antigravity/Gemini', color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.15)' },
+  cursor: { label: 'Cursor', color: '#c084fc', bg: 'rgba(192, 132, 252, 0.15)' },
+  copilot: { label: 'Copilot', color: '#34d399', bg: 'rgba(16, 185, 129, 0.15)' },
+  windsurf: { label: 'Windsurf', color: '#2dd4bf', bg: 'rgba(45, 212, 191, 0.15)' },
+  generic: { label: 'Generic', color: '#94a3b8', bg: 'rgba(255, 255, 255, 0.08)' }
 };
 
 export function renderSkillsTab(skillsList: SkillItem[]): string {
@@ -33,7 +33,7 @@ export function renderSkillsTab(skillsList: SkillItem[]): string {
     const ruleCount = skillsList.filter((s) => s.kind === 'rule').length;
     // Of the total, how many are rule / instruction files (CLAUDE.md, rules.md, .gemini/rules/*.md, ...)
     const rulePill = ruleCount > 0
-      ? `<span class="project-pill" style="margin-right: 4px; color: ${RULE_BADGE.color};">${escapeHtml('📜 ' + labelWithFallback('skills.rulesCount', `${ruleCount} Kural`, `${ruleCount} Rules`, { count: ruleCount }))}</span>`
+      ? `<span class="project-pill" style="margin-right: 4px; color: ${RULE_BADGE.color};">${lucide('fileText', { size: 10 })} ${escapeHtml(labelWithFallback('skills.rulesCount', `${ruleCount} Kural`, `${ruleCount} Rules`, { count: ruleCount }))}</span>`
       : '';
     skillsHtml = `
         <div style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
@@ -65,7 +65,7 @@ export function renderSkillsTab(skillsList: SkillItem[]): string {
       const agent = AGENT_BADGES[sk.agentType || 'generic'] || AGENT_BADGES.generic;
       const isRule = sk.kind === 'rule';
       const kindBadge = isRule
-        ? `<span class="status-badge" style="margin-left: 5px; font-size: 8px; padding: 1px 5px; color: ${RULE_BADGE.color}; background: ${RULE_BADGE.bg};">${escapeHtml('📜 ' + labelWithFallback('skills.kindRule', 'Kural', 'Rule'))}</span>`
+        ? `<span class="status-badge" style="margin-left: 5px; font-size: 8px; padding: 1px 5px; color: ${RULE_BADGE.color}; background: ${RULE_BADGE.bg};">${lucide('fileText', { size: 10 })} ${escapeHtml(labelWithFallback('skills.kindRule', 'Kural', 'Rule'))}</span>`
         : '';
       const openTitle = isRule
         ? labelWithFallback('skills.openRuleFile', 'Kural Dosyasını Aç', 'Open Rule File')
@@ -76,7 +76,7 @@ export function renderSkillsTab(skillsList: SkillItem[]): string {
               <div>
                 <span style="font-weight: 700; font-size: 11px; color: var(--text-main);">${escapeHtml(sk.name)}</span>
                 ${kindBadge}
-                <span class="status-badge" style="margin-left: 5px; font-size: 8px; padding: 1px 5px; color: ${agent.color}; background: ${agent.bg};">${escapeHtml(agent.label)}</span>
+                <span class="status-badge" style="margin-left: 5px; font-size: 8px; padding: 1px 5px; color: ${agent.color}; background: ${agent.bg};"><span class="agent-dot"></span>${escapeHtml(agent.label)}</span>
                 <span class="status-badge ${badgeCls}" style="margin-left: 5px; font-size: 8px; padding: 1px 5px;">${scopeLabel}</span>
               </div>
               <button class="mini-icon-btn" data-action="openFile" data-path="${safePath}" title="${escapeHtml(openTitle)}">

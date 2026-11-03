@@ -72,42 +72,42 @@ test('Webview STREAM_STYLES defines grey color for Codex and unique colors for I
   assert.match(STREAM_STYLES, /\.agent-antigravity-sdk\s*\{[^}]*color:\s*#34d399;/);
 });
 
-test('renderAgentBadge renders correct emoji and badge class for all 5 agents', async () => {
+test('renderAgentBadge renders correct dot and badge class for all 5 agents', async () => {
   const { renderAgentBadge } = await import('../dist/webview/tabs/live.js');
 
   // Claude Code
   const claudeBadge = renderAgentBadge('Claude Code', false);
   assert.match(claudeBadge, /agent-claude/);
-  assert.match(claudeBadge, /🟠 Claude Code/);
-  assert.match(renderAgentBadge('Claude Code', true), /🟠 Claude/);
+  assert.match(claudeBadge, /agent-dot"><\/span>Claude Code/);
+  assert.match(renderAgentBadge('Claude Code', true), /agent-dot"><\/span>Claude/);
 
   // Codex (Grey)
   const codexBadge = renderAgentBadge('Codex', false);
   assert.match(codexBadge, /agent-codex/);
-  assert.match(codexBadge, /⚪ Codex/);
+  assert.match(codexBadge, /agent-dot"><\/span>Codex/);
 
   // Antigravity CLI
   const cliBadge = renderAgentBadge('Antigravity CLI', false);
   assert.match(cliBadge, /agent-antigravity-cli/);
-  assert.match(cliBadge, /🟣 Antigravity CLI/);
-  assert.match(renderAgentBadge('Antigravity CLI', true), /🟣 CLI/);
+  assert.match(cliBadge, /agent-dot"><\/span>Antigravity CLI/);
+  assert.match(renderAgentBadge('Antigravity CLI', true), /agent-dot"><\/span>CLI/);
 
   // Antigravity SDK
   const sdkBadge = renderAgentBadge('Antigravity SDK', false);
   assert.match(sdkBadge, /agent-antigravity-sdk/);
-  assert.match(sdkBadge, /🟢 Antigravity SDK/);
-  assert.match(renderAgentBadge('Antigravity SDK', true), /🟢 SDK/);
+  assert.match(sdkBadge, /agent-dot"><\/span>Antigravity SDK/);
+  assert.match(renderAgentBadge('Antigravity SDK', true), /agent-dot"><\/span>SDK/);
 
   // Antigravity IDE (default)
   const ideBadge = renderAgentBadge('Antigravity IDE', false);
   assert.match(ideBadge, /agent-antigravity-ide/);
-  assert.match(ideBadge, /🔵 Antigravity IDE/);
-  assert.match(renderAgentBadge(undefined, true), /🔵 IDE/);
+  assert.match(ideBadge, /agent-dot"><\/span>Antigravity IDE/);
+  assert.match(renderAgentBadge(undefined, true), /agent-dot"><\/span>IDE/);
 
   // OpenCode (black)
   const openCodeBadge = renderAgentBadge('OpenCode', false);
   assert.match(openCodeBadge, /agent-opencode/);
-  assert.match(openCodeBadge, /⚫ OpenCode CLI/);
-  assert.match(renderAgentBadge('OpenCode', true), /⚫ OpenCode/);
+  assert.match(openCodeBadge, /agent-dot"><\/span>OpenCode CLI/);
+  assert.match(renderAgentBadge('OpenCode', true), /agent-dot"><\/span>OpenCode/);
 });
 

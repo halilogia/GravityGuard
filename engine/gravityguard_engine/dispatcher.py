@@ -3,6 +3,8 @@
 GravityGuard Engine — Main Dispatcher & Rule Orchestration Subsystem.
 Zero external dependencies.
 """
+import contextlib
+import io
 import json
 import os
 import re
@@ -619,8 +621,8 @@ def validate_gravityguard() -> None:
         if g7_feedback:
             record_js_mandatory_feedback(target_file, g7_feedback, c_id)
             fb_msg = f"Zorunlu JS Geri Bildirimi onaylandı ve kaydedildi: {g7_feedback}"
-            _log('WARNING', target_file, fb_msg, rule_id='G7_TS_MANDATORY_FEEDBACK')
-            all_warnings.append(('G7_TS_MANDATORY_FEEDBACK', fb_msg))
+            # A justified .js file follows the rule; recording it as a warning inflated every warning count.
+            _log('APPROVED', target_file, fb_msg, rule_id='G7_TS_MANDATORY_FEEDBACK')
         elif g7_blocked:
             if is_rule_shadow("G7_TS_FIRST", cfg):
                 _log('SHADOW_TRIGGER', target_file, f"[SHADOW] {g7_msg}", rule_id='G7_TS_FIRST')
@@ -1058,9 +1060,18 @@ def _audit_recovery(recovery: str, exc: BaseException) -> None:
 
 
 def run_cli() -> None:
+    # Buffer the decision so every rejection can carry its "do this instead" lesson (rule_tips).
+    real_stdout = sys.stdout
+    buf = io.StringIO()
+    exit_code = None
     try:
-        validate_gravityguard()
+        with contextlib.redirect_stdout(buf):
+            try:
+                validate_gravityguard()
+            except SystemExit as done:
+                exit_code = done.code
     except Exception as crash:
+        real_stdout.write(buf.getvalue())
         import traceback
         _log_cli_error(traceback.format_exc())
         recovered = _recover_from_crash()
@@ -1075,3 +1086,14 @@ def run_cli() -> None:
         print("[GravityGuard] validation failed; operation was not validated", file=sys.stderr)
         print(json.dumps({"decision": "continue" if "--stop" in sys.argv else "deny",
                           "reason": "[GUARD_UNAVAILABLE]: Validation could not complete"}))
+        return
+    out = buf.getvalue()
+    try:
+        from .rule_tips import enrich_hook_output
+        out = enrich_hook_output(out)
+    except Exception as tip_err:  # a lesson must never cost the decision itself
+        print(f"[GravityGuard] rule tip failed: {tip_err}", file=sys.stderr)
+    real_stdout.write(out)
+    real_stdout.flush()
+    if exit_code is not None:  # callers and tests rely on the engine's own sys.exit, code 0 included
+        sys.exit(exit_code)

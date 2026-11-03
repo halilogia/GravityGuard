@@ -1,0 +1,82 @@
+import json
+import os
+import sys
+import tempfile
+import unittest
+from datetime import datetime, timedelta, timezone
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from gravityguard_engine.briefing import build_briefing
+from gravityguard_engine.rule_tips import TIPS, enrich_hook_output, lesson_text
+
+
+class EnrichTests(unittest.TestCase):
+    def test_deny_gets_lesson_and_loses_stop_sign(self):
+        out = enrich_hook_output(json.dumps({"decision": "deny", "reason": "\U0001F6D1 [G1_SILENT_EXCEPTION]: 'a.py' - empty except"}) + "\n")
+        payload = json.loads(out)
+        self.assertTrue(payload["reason"].startswith("[G1_SILENT_EXCEPTION]"))
+        self.assertIn("Doğru yol:", payload["reason"])
+        self.assertIn("raise", payload["reason"])
+        self.assertTrue(out.endswith("\n"))
+
+    def test_allow_and_unknown_rules_are_untouched(self):
+        allow = json.dumps({"decision": "allow"})
+        self.assertEqual(enrich_hook_output(allow), allow)
+        unknown = json.dumps({"decision": "deny", "reason": "[NOT_A_RULE_WE_KNOW]: x"})
+        self.assertNotIn("Doğru yol", json.loads(enrich_hook_output(unknown))["reason"])
+
+    def test_non_json_output_passes_through(self):
+        self.assertEqual(enrich_hook_output('{"deny" broken'), '{"deny" broken')
+        self.assertEqual(enrich_hook_output(""), "")
+
+    def test_lesson_is_not_added_twice(self):
+        once = enrich_hook_output(json.dumps({"decision": "deny", "reason": "[G0_SECRET_LEAK]: x"}))
+        twice = enrich_hook_output(once)
+        self.assertEqual(json.loads(twice)["reason"].count("Doğru yol:"), 1)
+
+    def test_tips_have_no_parenthetical_text(self):
+        for rule, (tip, _example) in TIPS.items():
+            self.assertNotRegex(tip, r"\([^)]*\)", rule)
+        self.assertEqual(lesson_text("NOPE"), "")
+
+
+class BriefingTests(unittest.TestCase):
+    def _journal(self, records):
+        fd, path = tempfile.mkstemp(suffix=".jsonl")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            for r in records:
+                f.write(json.dumps(r) + "\n")
+            f.write("{torn\n")
+        self.addCleanup(os.remove, path)
+        return path
+
+    def test_top_rules_for_this_agent_only(self):
+        now = datetime(2026, 11, 3, 12, tzinfo=timezone.utc)
+        ts = (now - timedelta(hours=2)).isoformat()
+        old = (now - timedelta(days=30)).isoformat()
+        rec = lambda agent, status, rule, t=ts, outcome=None: {"agent": agent, "status": status, "ruleId": rule, "timestamp": t, "outcome": outcome or status}
+        path = self._journal(
+            [rec("OpenCode", "WARNING", "ARCH_FILE_GROWTH")] * 3
+            + [rec("OpenCode", "BLOCKED", "G7_TS_FIRST")] * 2
+            + [rec("OpenCode", "WARNING", "G7_TS_MANDATORY_FEEDBACK")] * 9
+            + [rec("OpenCode", "BLOCKED", "G1_SILENT_EXCEPTION", outcome="REPEATED_VIOLATION")] * 5
+            + [rec("OpenCode", "BLOCKED", "SHELL_SECURITY", t=old)] * 9
+            + [rec("Claude Code", "BLOCKED", "G0_SECRET_LEAK")] * 7
+            + [rec("OpenCode", "APPROVED", "PASS", outcome="CLEAN")] * 5
+        )
+        text = build_briefing("OpenCode", journal=path, now=now)
+        lines = text.splitlines()
+        self.assertIn("ARCH_FILE_GROWTH, 3 kez", lines[1])
+        self.assertIn("G7_TS_FIRST, 2 kez", lines[2])
+        for absent in ("G7_TS_MANDATORY_FEEDBACK", "G1_SILENT_EXCEPTION", "SHELL_SECURITY", "G0_SECRET_LEAK"):
+            self.assertNotIn(absent, text)
+        self.assertIn("%42, 5/12", text)  # repeats are write attempts too, as in audit_stats
+        self.assertNotRegex(text, r"\([^)]*\)")
+
+    def test_nothing_to_say(self):
+        self.assertEqual(build_briefing("Codex", journal=self._journal([])), "")
+
+
+if __name__ == "__main__":
+    unittest.main()

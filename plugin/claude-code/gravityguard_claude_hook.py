@@ -302,6 +302,25 @@ def read_bloat_deny(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }}
 
 
+def session_briefing(agent: str = "Claude Code") -> Optional[Dict[str, Any]]:
+    """SessionStart: the rules this agent tripped most lately, as additionalContext. Silent when there is nothing to say.
+
+    Runs in-process from the engine package next to the configured engine; a failure only costs the briefing.
+    """
+    engine_dir = str(engine_path().parent)
+    try:
+        if engine_dir not in sys.path:
+            sys.path.insert(0, engine_dir)
+        from gravityguard_engine.briefing import build_briefing
+        text = build_briefing(agent)
+    except Exception as err:
+        print(f"[GravityGuard Claude adapter] briefing unavailable: {err}", file=sys.stderr)
+        return None
+    if not text:
+        return None
+    return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}
+
+
 def handle(event: Dict[str, Any], stop: bool) -> Optional[Dict[str, Any]]:
     """Claude Code event in, Claude Code answer out (None = say nothing, let it proceed)."""
     if stop:
@@ -327,6 +346,11 @@ def main(argv: Sequence[str]) -> int:
     for stream in (sys.stdin, sys.stdout):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
+    if "--session-start" in argv:
+        result = session_briefing()
+        if result is not None:
+            print(json.dumps(result, ensure_ascii=False))
+        return 0
     try:
         event = json.load(sys.stdin)
     except ValueError:

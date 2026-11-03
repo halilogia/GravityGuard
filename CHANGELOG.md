@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Fewer repeat mistakes: session briefing and lessons in rejections (`briefing.py`, `rule_tips.py`, `dispatcher.py`, Claude Code adapter):**
+  - `SessionStart` hook: the Claude Code adapter (`--session-start`) injects the agent's most frequent rules of the last 7 days with a one-line tip each, plus its first-try clean rate. `settings.example.json` lists the hook.
+  - Every deny decision gets a "Doğru yol" line and, where useful, a short correct example for its rule; the leading stop-sign symbol is dropped. Done once in `run_cli` on the buffered engine output, so all rules share it.
+  - `G7_TS_MANDATORY_FEEDBACK` is logged as an approval note instead of a warning and does not count as a recovery.
+  - A linter result is reported once per file and run (`diagnostics_reported.json`) instead of on every later write inside the freshness window.
+- **No standard emoji in the webview:** Live, Skills and Knowledge tabs use text badges and a coloured agent dot; `tests/no_emoji_ui.test.mjs` fails on emoji in tab sources.
+
 - **Pre-push secret scan no longer crashes on untracked files (`publication_guard.py`):** the hook passes `'.'` as a string; joining an untracked file name onto it raised `TypeError`, which the gate reported as a leaked secret and refused the push. `scan_git_secrets` now coerces the root to `Path`. Test: `test_git_gate_accepts_string_root_with_untracked_files`.
 
 - **Rules tab rebuilt on a rule catalog (`src/rule_catalog.ts`, `src/webview/tabs/rules.ts`):**

@@ -59,7 +59,7 @@ function renderGotchaChip(gotcha: GotchaItem, knowledgePath: string): string {
 }
 
 /**
- * Renders the complete [📚 Hafıza] (Knowledge & ADR Hub) tab.
+ * Renders the complete [Hafıza] (Knowledge & ADR Hub) tab.
  */
 export function renderKnowledgeTab(vm: GuardianViewModel): string {
   const memory: MemoryHubData = (vm as any).memory || {};
@@ -109,7 +109,7 @@ export function renderKnowledgeTab(vm: GuardianViewModel): string {
           <span style="color: var(--color-cyan); flex-shrink: 0;">•</span>
           <span style="flex: 1; word-break: break-word;">${escapeHtml(u)}</span>
         </div>`).join('')
-    : `<div style="font-size: 10px; color: var(--color-amber); padding: 4px 0;">⚠️ ${t('knowledge.unreleasedEmptyNotice')}</div>`;
+    : `<div style="font-size: 10px; color: var(--color-amber); padding: 4px 0;">${lucide('alertTriangle', { size: 11, color: 'var(--color-amber)' })} ${t('knowledge.unreleasedEmptyNotice')}</div>`;
 
   const addChangelogRow = cPath
     ? `

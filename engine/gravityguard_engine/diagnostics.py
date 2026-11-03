@@ -91,8 +91,13 @@ def read_recent_diagnostics(target_file: str) -> List[Tuple[str, str]]:
             err_summary = first_err.get("message", "Lint issue")
             rule = first_err.get("rule", "")
             rule_disp = f" [{rule}]" if rule else ""
+            # One linter run is one finding: later writes to the same file within the freshness window used to
+            # repeat it, which counted a single lint result up to a dozen times.
+            signature = f"{entry_time}:{len(errors)}:{rule}:{err_summary}"
+            if _already_reported(diagnostics_path, norm_target, signature):
+                return []
             msg = (
-                f"Statik Doğrulama Uyarısı (STATIC_LINTER_DIAGNOSTIC): '{tool}' önceki yazımda "
+                f"Statik doğrulama uyarısı: '{tool}' önceki yazımda "
                 f"{len(errors)} hata tespit etti{rule_disp}: {err_summary}"
             )
             return [("STATIC_LINTER_DIAGNOSTIC", msg)]
@@ -100,6 +105,27 @@ def read_recent_diagnostics(target_file: str) -> List[Tuple[str, str]]:
         return []
 
     return []
+
+
+def _already_reported(diagnostics_path: Path, norm_target: str, signature: str) -> bool:
+    """True when this exact lint result was already reported for the file; records it otherwise."""
+    state_path = diagnostics_path.with_name("diagnostics_reported.json")
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.is_file() else {}
+        if not isinstance(state, dict):
+            state = {}
+    except (OSError, ValueError):
+        state = {}
+    if state.get(norm_target) == signature:
+        return True
+    state[norm_target] = signature
+    if len(state) > 500:  # keep the file small; the oldest entries are the least likely to repeat
+        state = dict(list(state.items())[-250:])
+    try:
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+    except OSError as err:
+        sys.stderr.write(f"[GravityGuard] could not record reported diagnostic: {err}\n")
+    return False
 
 
 def trigger_background_validation(target_file: str) -> None:

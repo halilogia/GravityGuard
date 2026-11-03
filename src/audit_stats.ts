@@ -9,7 +9,7 @@ export const WINDOW_KEYS: WindowKey[] = ['24h', '7d', '30d', 'all'];
 const WINDOW_MS: Record<WindowKey, number> = { '24h': 864e5, '7d': 7 * 864e5, '30d': 30 * 864e5, all: Infinity };
 
 /** Approved records that are not the write itself; they never fix a violation (mirrors audit.NON_RECOVERING_RULES). */
-export const NON_RECOVERING_RULES = new Set(['READ_ALLOW', 'T1_PENDING', 'DOC_OBLIGATION_PENDING']);
+export const NON_RECOVERING_RULES = new Set(['READ_ALLOW', 'T1_PENDING', 'DOC_OBLIGATION_PENDING', 'G7_TS_MANDATORY_FEEDBACK']);
 
 /** Rule ids that record compliance or bookkeeping, not a violation. */
 export const NON_VIOLATION_RULES = new Set(['PASS', 'EXEMPT', 'READ_ALLOW', 'G7_TS_MANDATORY_FEEDBACK', 'T1_PENDING', 'DOC_OBLIGATION_PENDING']);

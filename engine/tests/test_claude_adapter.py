@@ -434,5 +434,21 @@ class TestShellDeny(unittest.TestCase):
         self.assertEqual(matcher, "*")
 
 
+
+class TestSessionBriefing(unittest.TestCase):
+    def test_briefing_becomes_session_start_context(self):
+        with mock.patch("gravityguard_engine.briefing.build_briefing", return_value="GravityGuard: tip"):
+            out = adapter.session_briefing("Claude Code")
+        self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "SessionStart")
+        self.assertEqual(out["hookSpecificOutput"]["additionalContext"], "GravityGuard: tip")
+
+    def test_nothing_to_say_is_silent(self):
+        with mock.patch("gravityguard_engine.briefing.build_briefing", return_value=""):
+            self.assertIsNone(adapter.session_briefing("Claude Code"))
+
+    def test_briefing_failure_is_silent(self):
+        with mock.patch("gravityguard_engine.briefing.build_briefing", side_effect=OSError("boom")), redirect_stderr(io.StringIO()):
+            self.assertIsNone(adapter.session_briefing("Claude Code"))
+
 if __name__ == "__main__":
     unittest.main()

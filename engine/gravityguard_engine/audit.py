@@ -443,7 +443,7 @@ def _apply_event_to_live_state(state: Dict[str, Any], ev: Dict[str, Any]) -> Non
 
 
 # Approved records that are not the write itself (a read, a pending-evidence or doc note).
-NON_RECOVERING_RULES = frozenset({"READ_ALLOW", "T1_PENDING", "DOC_OBLIGATION_PENDING"})
+NON_RECOVERING_RULES = frozenset({"READ_ALLOW", "T1_PENDING", "DOC_OBLIGATION_PENDING", "G7_TS_MANDATORY_FEEDBACK"})
 
 
 DETERRENCE_RULES = {

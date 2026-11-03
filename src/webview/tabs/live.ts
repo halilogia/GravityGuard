@@ -6,27 +6,27 @@ import { GuardianViewModel } from '../types';
 
 export function renderAgentBadge(agent: string | undefined, short: boolean): string {
   if (agent === 'Claude Code' || agent === 'claude') {
-    return `<span class="agent-pill agent-claude">🟠 ${short ? 'Claude' : 'Claude Code'}</span>`;
+    return `<span class="agent-pill agent-claude"><span class="agent-dot"></span>${short ? 'Claude' : 'Claude Code'}</span>`;
   }
   if (agent === 'Codex' || agent === 'OpenAI Codex' || agent === 'codex') {
-    return `<span class="agent-pill agent-codex">⚪ ${short ? 'Codex' : 'Codex'}</span>`;
+    return `<span class="agent-pill agent-codex"><span class="agent-dot"></span>${short ? 'Codex' : 'Codex'}</span>`;
   }
   if (agent === 'OpenCode' || agent === 'opencode') {
-    return `<span class="agent-pill agent-opencode">⚫ ${short ? 'OpenCode' : 'OpenCode CLI'}</span>`;
+    return `<span class="agent-pill agent-opencode"><span class="agent-dot"></span>${short ? 'OpenCode' : 'OpenCode CLI'}</span>`;
   }
   if (agent === 'Aider' || agent === 'aider') {
-    return `<span class="agent-pill agent-aider">🔴 ${short ? 'Aider' : 'Aider CLI'}</span>`;
+    return `<span class="agent-pill agent-aider"><span class="agent-dot"></span>${short ? 'Aider' : 'Aider CLI'}</span>`;
   }
   if (agent === 'Freebuff' || agent === 'freebuff') {
-    return `<span class="agent-pill agent-freebuff">💎 ${short ? 'Freebuff' : 'Freebuff CLI'}</span>`;
+    return `<span class="agent-pill agent-freebuff"><span class="agent-dot"></span>${short ? 'Freebuff' : 'Freebuff CLI'}</span>`;
   }
   if (agent === 'Antigravity CLI' || agent === 'agy') {
-    return `<span class="agent-pill agent-antigravity-cli">🟣 ${short ? 'CLI' : 'Antigravity CLI'}</span>`;
+    return `<span class="agent-pill agent-antigravity-cli"><span class="agent-dot"></span>${short ? 'CLI' : 'Antigravity CLI'}</span>`;
   }
   if (agent === 'Antigravity SDK') {
-    return `<span class="agent-pill agent-antigravity-sdk">🟢 ${short ? 'SDK' : 'Antigravity SDK'}</span>`;
+    return `<span class="agent-pill agent-antigravity-sdk"><span class="agent-dot"></span>${short ? 'SDK' : 'Antigravity SDK'}</span>`;
   }
-  return `<span class="agent-pill agent-antigravity-ide">🔵 ${short ? 'IDE' : 'Antigravity IDE'}</span>`;
+  return `<span class="agent-pill agent-antigravity-ide"><span class="agent-dot"></span>${short ? 'IDE' : 'Antigravity IDE'}</span>`;
 }
 
 export function renderCurrentActionCard(vm: GuardianViewModel): string {
