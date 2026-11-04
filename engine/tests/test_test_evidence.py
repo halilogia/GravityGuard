@@ -39,6 +39,17 @@ class TestTestEvidenceDomain(unittest.TestCase):
         self.assertFalse(is_exempt_from_test_evidence("src/core/sqlite_store.ts"))
         self.assertFalse(is_exempt_from_test_evidence("src/billing.py"))
 
+    def test_exempt_patterns_ignore_folders_above_the_project(self):
+        # mkdtemp on Linux gave /tmp/tmp_k3x9a1: "tmp_" matched the whole path and T1/T3 went silent in CI.
+        with tempfile.TemporaryDirectory() as base:
+            for outer in ("tmp_k3x9a1", "tools", ".config"):
+                project = Path(base) / outer / "proj"
+                (project / "src" / "tools").mkdir(parents=True)
+                (project / ".gravityguard.json").write_text("{}", encoding="utf-8")
+                self.assertFalse(is_exempt_from_test_evidence(str(project / "src" / "handler.ts")), outer)
+                # A pattern inside the project still exempts.
+                self.assertTrue(is_exempt_from_test_evidence(str(project / "src" / "tools" / "x.ts")), outer)
+
     def test_resolve_candidate_test_file_normalizes_hyphen_and_underscore(self):
         target = (Path(_ENGINE_DIR) / "gravity-validator.py").as_posix()
         cand, expected = resolve_candidate_test_file(target)

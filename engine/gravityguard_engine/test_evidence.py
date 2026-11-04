@@ -99,12 +99,33 @@ def resolve_subsystem_test_files(target_file: str, cfg: Optional[dict] = None) -
     return found
 
 
+def _project_relative_path(target_file: str) -> str:
+    """Lowercased path inside the project, with a leading "/". Exempt patterns describe project paths: the folders
+    above the project root (/tmp/tmp_x1, ~/tools/, ~/.config/) must not exempt every file in it.
+    Without a .git or .gravityguard.json above the file, the whole path is used as before."""
+    normalized = target_file.replace("\\", "/").lower()
+    if not os.path.isabs(target_file):
+        return normalized
+    try:
+        curr = Path(os.path.abspath(target_file)).parent
+        for _ in range(8):
+            if (curr / ".git").exists() or (curr / ".gravityguard.json").is_file():
+                rel = Path(os.path.abspath(target_file)).relative_to(curr)
+                return "/" + str(rel).replace("\\", "/").lower()
+            if curr.parent == curr:
+                break
+            curr = curr.parent
+    except (ValueError, OSError):
+        pass
+    return normalized
+
+
 def is_exempt_from_test_evidence(target_file: str, cfg: Optional[dict] = None) -> bool:
     """
     Checks if a target file is exempt from test evidence verification (e.g. types, constants, configs, tooling scripts).
     Supports substring patterns and fnmatch glob patterns.
     """
-    normalized = target_file.replace("\\", "/").lower()
+    normalized = _project_relative_path(target_file)
     basename = Path(normalized).name.lower()
 
     exempt_patterns = DEFAULT_EXEMPT_PATTERNS
