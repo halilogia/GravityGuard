@@ -89,8 +89,19 @@ async function launch() {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'gg-chromium-'));
   const server = http.createServer((q, s) => { s.setHeader('content-type', 'text/html'); s.end(HOST_PAGE); });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
-  const proc = spawn(browserPath, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
-    '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--disable-extensions', 'about:blank'], { stdio: 'ignore' });
+  const proc = spawn(browserPath, [
+    '--headless=new',
+    '--remote-debugging-port=0',
+    `--user-data-dir=${profile}`,
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--disable-extensions',
+    'about:blank'
+  ], { stdio: 'ignore' });
   const portFile = path.join(profile, 'DevToolsActivePort');
   await waitFor(() => fs.existsSync(portFile), 20000, 'DevToolsActivePort');
   const port = fs.readFileSync(portFile, 'utf8').split(/\r?\n/)[0];
@@ -151,6 +162,7 @@ function mountProvider(browser, { opts, naive = false } = {}) {
       if (m.command === 'ready') lc.ready(m.nonce);
     }
   }, 5);
+  pump.unref();
   return { lc, st, setVisible, stop: () => { clearInterval(pump); lc.dispose(); } };
 }
 

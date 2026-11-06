@@ -37,6 +37,8 @@ Thumbs.db
 .idea/
 
 # Agent Internal Brain & Scratch
-brain/
+# brain/ tracked for core-docs
+brain/scratch/
+brain/.chat-history/
 tests/sandbox/
 reports/
