@@ -399,19 +399,19 @@ flowchart TD
 <!-- ARCH-AUTO:START (tools/generate_architecture.py --sync; elle düzenlemeyin) -->
 ## Otomatik Metrikler (Stop hook ile güncellenir)
 
-> Üretim tarihi: 2026-11-03 — sürüm 1.5.0
+> Üretim tarihi: 2026-11-06 — sürüm 1.5.0
 
-- Toplam dosya: **133**, dolu satır: **26558**
-- Test dosyası: **50**, test sayısı: **544**
+- Toplam dosya: **150**, dolu satır: **29620**
+- Test dosyası: **58**, test sayısı: **631**
 
 | Katman | Dosya | Dolu satır |
 |---|---:|---:|
-| Tier 1 Fast-Path Guardrail | 5 | 1302 |
+| Tier 1 Fast-Path Guardrail | 5 | 1477 |
 | Tier 4 Deep-Path Güvenlik Denetçisi | 1 | 417 |
-| Yönetişim & Yaşam Döngüsü | 4 | 1747 |
-| Extension UI & Client | 26 | 4125 |
-| `engine/` (alan) | 34 | 12120 |
-| `plugin/` (alan) | 14 | 1108 |
-| `src/` (alan) | 34 | 5938 |
-| `tests/` (alan) | 51 | 7392 |
+| Yönetişim & Yaşam Döngüsü | 4 | 1784 |
+| Extension UI & Client | 27 | 4659 |
+| `engine/` (alan) | 39 | 12910 |
+| `plugin/` (alan) | 14 | 1265 |
+| `src/` (alan) | 38 | 7198 |
+| `tests/` (alan) | 59 | 8247 |
 <!-- ARCH-AUTO:END -->

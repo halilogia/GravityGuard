@@ -28,6 +28,8 @@ from .architecture_rules import (
     check_oe_spike,
     evaluate_g7_ts_first,
     find_design_icon_violations,
+    find_design_responsive_violations,
+    find_design_raw_controls_violations,
     is_ts_cohesive_monolith,
     record_and_check_cumulative_growth,
     record_js_mandatory_feedback,
@@ -642,7 +644,44 @@ def validate_gravityguard() -> None:
         _log('BLOCKED', target_file, deny_msg, rule_id='DESIGN_ICON_RULE')
         print(json.dumps({
             "decision": "deny",
-            "reason": f"🛑 [DESIGN_ICON_RULE]: '{target_file}:{first['line']}' - {deny_msg}"
+            "reason": f"\U0001f6d1 [DESIGN_ICON_RULE]: '{target_file}:{first['line']}' - {deny_msg}"
+        }))
+        sys.exit(0)
+
+    # DESIGN_RESPONSIVE_RULE: Mobile / Phone Viewport (DENY) & Fluid Layout (WARN)
+    responsive_violations = find_design_responsive_violations(target_file, projected_content, added_line_numbers)
+    for viol in responsive_violations:
+        if viol.get("severity") == "DENY":
+            deny_msg = (
+                f"Mobil/Telefon tasar\u0131m kural\u0131 ihlali (Sat\u0131r {viol['line']}): {viol['message']}\n"
+                f"Hatal\u0131 sat\u0131r: '{viol['snippet']}'\n"
+                f"\u00d6neri: {viol['suggestion']}"
+            )
+            _log('BLOCKED', target_file, deny_msg, rule_id='DESIGN_RESPONSIVE_RULE')
+            print(json.dumps({
+                "decision": "deny",
+                "reason": f"\U0001f6d1 [DESIGN_RESPONSIVE_RULE]: '{target_file}:{viol['line']}' - {deny_msg}"
+            }))
+            sys.exit(0)
+        elif viol.get("severity") == "WARN":
+            warn_msg = f"Sat\u0131r {viol['line']}: {viol['message']} \u00d6neri: {viol['suggestion']}"
+            _log('WARNING', target_file, warn_msg, rule_id='DESIGN_RESPONSIVE_RULE')
+            all_warnings.append(('DESIGN_RESPONSIVE_RULE', warn_msg))
+
+    # DESIGN_RAW_CONTROLS_RULE: Raw browser controls (file input, scrollbars, spinners)
+    raw_controls_violations = find_design_raw_controls_violations(target_file, projected_content, added_line_numbers)
+    if raw_controls_violations:
+        first_raw = raw_controls_violations[0]
+        total_raw = len(raw_controls_violations)
+        extra_raw = f" (+{total_raw - 1} di\u011fer sat\u0131r)" if total_raw > 1 else ""
+        raw_deny_msg = (
+            f"Tasar\u0131m kural\u0131 ihlali (Sat\u0131r {first_raw['line']}): {first_raw['message']}{extra_raw}\n"
+            f"Hatal\u0131 sat\u0131r: '{first_raw['snippet']}'"
+        )
+        _log('BLOCKED', target_file, raw_deny_msg, rule_id='DESIGN_RAW_CONTROLS_RULE')
+        print(json.dumps({
+            "decision": "deny",
+            "reason": f"\U0001f6d1 [DESIGN_RAW_CONTROLS_RULE]: '{target_file}:{first_raw['line']}' - {raw_deny_msg}"
         }))
         sys.exit(0)
 

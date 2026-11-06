@@ -28,6 +28,8 @@ from gravityguard_engine.architecture_rules import (
     check_pma_imports,
     evaluate_g7_ts_first,
     find_design_icon_violations,
+    find_design_responsive_violations,
+    find_design_raw_controls_violations,
     extract_js_mandatory_feedback,
     is_cohesive_module_by_filename,
     is_pma_exempt,
@@ -343,6 +345,44 @@ class TestPmaBoundaryDetector(unittest.TestCase):
         self.assertIn("check_pma_imports(target_file, added_text)", src)
         self.assertIn("ARCH_PMA_HORIZONTAL_DENY", src)
         self.assertIn("evaluate_g7_ts_first(target_file, projected_content)", src)
+
+
+class TestDesignResponsiveAndRawControls(unittest.TestCase):
+    def test_responsive_rule_denies_html_without_viewport(self):
+        bad_html = "<!DOCTYPE html><html><head><title>No Viewport</title></head><body></body></html>"
+        violations = find_design_responsive_violations("index.html", bad_html)
+        self.assertEqual(len(violations), 1)
+        self.assertEqual(violations[0]["rule"], "INVALID_VIEWPORT")
+        self.assertEqual(violations[0]["severity"], "DENY")
+
+    def test_responsive_rule_allows_valid_viewport(self):
+        good_html = '<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body></body></html>'
+        violations = find_design_responsive_violations("index.html", good_html)
+        self.assertEqual(len(violations), 0)
+
+    def test_responsive_rule_warns_on_large_fixed_width(self):
+        css = ".container { width: 1200px; }"
+        violations = find_design_responsive_violations("style.css", css)
+        self.assertEqual(len(violations), 1)
+        self.assertEqual(violations[0]["rule"], "LARGE_FIXED_WIDTH")
+        self.assertEqual(violations[0]["severity"], "WARN")
+
+    def test_raw_controls_rule_denies_unstyled_file_input(self):
+        html = '<input type="file" id="upload">'
+        violations = find_design_raw_controls_violations("index.html", html)
+        self.assertEqual(len(violations), 1)
+        self.assertEqual(violations[0]["type"], "RAW_FILE_INPUT")
+
+    def test_raw_controls_rule_allows_styled_file_input(self):
+        html = '<input type="file" id="upload" class="custom-file hidden">'
+        violations = find_design_raw_controls_violations("index.html", html)
+        self.assertEqual(len(violations), 0)
+
+    def test_raw_controls_rule_denies_raw_number_spinner(self):
+        html = '<input type="number" id="qty">'
+        violations = find_design_raw_controls_violations("index.html", html)
+        self.assertEqual(len(violations), 1)
+        self.assertEqual(violations[0]["type"], "RAW_NUMBER_SPINNER")
 
 
 if __name__ == "__main__":

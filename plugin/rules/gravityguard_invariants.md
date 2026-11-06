@@ -29,3 +29,13 @@ GravityGuard executes deterministic deterministic gatekeeping (G0-G4, SRP, and t
 
 6. **§6 Same-Commit Documentation Rule (STOP CHECK)**:
    - If you modify behavioral code in a project with doc governance enabled, update `CHANGELOG.md` in the same commit before completing the turn.
+
+7. **DESIGN_RESPONSIVE_RULE — Mobile Layout (HARD BLOCK / WARN)**:
+   - Every HTML page needs `<meta name="viewport" content="width=device-width, initial-scale=1">` in `<head>`; a missing or invalid viewport is denied.
+   - Fixed CSS widths of 1000px or more (`width`, `min-width`, `inline-size`, `min-inline-size`) trigger a warning; use `max-width`, `%` or fluid units.
+
+8. **DESIGN_RAW_CONTROLS_RULE — No Raw Browser Controls (HARD BLOCK)**:
+   - An unstyled `<input type="file">` is denied: hide it behind a custom button or style it with `::file-selector-button`.
+   - An unstyled `<input type="number">` is denied: hide the stepper with `::-webkit-inner-spin-button { display: none }` and `appearance: textfield`.
+   - Default scrollbars stay covered by `DESIGN_SCROLLBAR_RULE` (warn): give overflowing areas a thin, themed scrollbar.
+   - Only the lines you add or change are checked; the rejection names the exact line and snippet.

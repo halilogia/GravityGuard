@@ -70,6 +70,8 @@ const ROWS: Row[] = [
   ['G3_COMPILER_BYPASS', 'quality', 'warn', 'write', 'shadow'],
   ['STATIC_LINTER_DIAGNOSTIC', 'quality', 'warn', 'write', 'none'],
   ['DESIGN_SCROLLBAR_RULE', 'quality', 'warn', 'write', 'none'],
+  ['DESIGN_RESPONSIVE_RULE', 'quality', 'block', 'write', 'none'],
+  ['DESIGN_RAW_CONTROLS_RULE', 'quality', 'block', 'write', 'none'],
   // Tests and documentation
   ['G2_TEST_INTEGRITY', 'evidence', 'block', 'write', 'shadow'],
   ['T1_MISSING_RELATED_TEST', 'evidence', 'warn', 'write', 'none', testEvidenceOn],

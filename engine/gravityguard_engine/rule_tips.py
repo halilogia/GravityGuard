@@ -20,6 +20,8 @@ TIPS: Dict[str, Tuple[str, str]] = {
     "G7_TS_FIRST": ("Yeni uygulama kodunu .ts olarak yaz; .js gerekiyorsa dosyanın başına kısa bir gerekçe yorumu ekle.", ""),
     "DESIGN_ICON_RULE": ("Standart emoji veya simge karakteri kullanma; projenin ikon bileşenini ya da düz metni kullan.", ""),
     "DESIGN_SCROLLBAR_RULE": ("Varsayılan kaydırma çubuğunu bırakma; ince, temaya uygun scrollbar stili tanımla.", ""),
+    "DESIGN_RESPONSIVE_RULE": ("<head> içine width=device-width ve initial-scale=1 içeren viewport meta etiketini ekle; sabit genişlik yerine max-width veya % kullan.", '<meta name="viewport" content="width=device-width, initial-scale=1">'),
+    "DESIGN_RAW_CONTROLS_RULE": ("Ham kontrolü bırakma: dosya seçiciyi ::file-selector-button ile stillendir, sayı alanında spinner okunu gizle.", "input[type=number]::-webkit-inner-spin-button { display: none; }"),
     "STATIC_LINTER_DIAGNOSTIC": ("Önceki yazımdaki linter hatasını aynı dosyada şimdi düzelt; yeni kod eklemeden önce temizle.", ""),
     "SEC_UNSAFE_PATTERN": ("Riskli yapı yerine güvenli olanı kullan.", "el.textContent = value  // innerHTML yerine"),
     "SHELL_SECURITY": ("İndirileni doğrudan yorumlayıcıya verme; dosyaya indir, içeriğini kontrol et, sonra çalıştır.", ""),

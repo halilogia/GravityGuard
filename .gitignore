@@ -24,6 +24,7 @@ __pycache__/
 archives/audit-logs/*.jsonl
 .gravityguard/*
 !.gravityguard/CONTEXT.md
+**/.gravityguard/runtime/
 
 # OS & Editor
 .DS_Store
