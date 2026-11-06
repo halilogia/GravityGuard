@@ -61,6 +61,8 @@ const ROWS: Row[] = [
   ['WEB_MIXED_RESPONSIBILITIES', 'architecture', 'block', 'write', 'shadow'],
   ['WEB_DOCUMENT_SIZE', 'architecture', 'block', 'write', 'shadow'],
   ['ARCH_FILE_GROWTH', 'architecture', 'warn', 'write', 'shadow'],
+  ['G5_NEW_FILE_BLOAT_DENY', 'architecture', 'block', 'write', 'shadow'],
+  ['STOP_CIRCUIT_BREAKER_BLOCKED', 'architecture', 'block', 'stop', 'none'],
   ['SRP_RESPONSIBILITY_MIX', 'architecture', 'warn', 'write', 'shadow'],
   ['ARCH_RATCHET_REGRESSION_WARN', 'architecture', 'warn', 'write', 'shadow'],
   ['ARCH_RATCHET_REGRESSION', 'architecture', 'block', 'stop', 'shadow'],
@@ -102,7 +104,7 @@ export const NOTE_RULE_IDS: string[] = [
   'PASS', 'READ_ALLOW', 'EXEMPT', 'T1_PENDING', 'DOC_OBLIGATION_PENDING', 'G7_TS_MANDATORY_FEEDBACK', 'BRIEFING_SENT',
   'TASK_ARCHIVE_AUTO', 'TASK_ARCHIVE_ERROR', 'ARCHITECTURE_SYNC_AUTO', 'ARCHITECTURE_SYNC_ERROR',
   'CHANGELOG_AUTO_INJECT', 'KNOWLEDGE_AUTO_INJECT', 'CHANGELOG_AUTO_INJECT_ERROR',
-  'STOP_CIRCUIT_BREAKER', 'REMOVAL_OBSERVER_ERROR', 'DELETE_OBSERVED',
+  'STOP_CIRCUIT_BREAKER', 'KNOWLEDGE_DISTILLED', 'REMOVAL_OBSERVER_ERROR', 'DELETE_OBSERVED',
   'HOOK_PROPOSAL_APPROVED', 'HOOK_PROPOSAL_REJECTED', 'HOOK_PROPOSAL_REVERTED',
   'USER_ADVISORY_WAIVER', 'GUARD_FALLBACK_LKG', 'GUARD_REPAIR_MODE',
 ];

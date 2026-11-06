@@ -9,6 +9,7 @@ import sys
 from typing import Dict, List, Tuple
 
 from .debt_ratchet import evaluate_file_ratchet
+from .refactor_hint import build_refactor_hint
 from .srp_signals import RULE_ID as MIX_RULE_ID, analyze_python_responsibility_mix, analyze_ts_responsibility_mix
 
 RATCHET_WARN_RULE_ID = "ARCH_RATCHET_REGRESSION_WARN"
@@ -22,7 +23,7 @@ def collect_write_signals(
         is_reg, _, _, message = evaluate_file_ratchet(
             project_root, target_file, content=projected_content, threshold=thresholds["ratchetLoc"], auto_record_baseline=False)
         if is_reg and message:
-            signals.append((RATCHET_WARN_RULE_ID, message))
+            signals.append((RATCHET_WARN_RULE_ID, f"{message} {build_refactor_hint(projected_content, target_file)}".strip()))
         if is_python or is_ts:
             mix = analyze_python_responsibility_mix if is_python else analyze_ts_responsibility_mix
             signals.extend((MIX_RULE_ID, msg) for msg in mix(projected_content, target_file, thresholds))

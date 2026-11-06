@@ -61,6 +61,8 @@ from .governance import (
 )
 
 from .write_signals import collect_write_signals
+from .stop_gate import critical_blockers, distill_session_knowledge, note_raised_rules, ratchet_findings
+from .debt_ratchet import check_new_file_bloat
 from .project_context import (
     harden_streams_to_utf8,
     is_doc_governed_target,
@@ -284,12 +286,22 @@ def validate_gravityguard() -> None:
             # Defect A fix: Circuit breaker strictly governed by session continuation retries
             session_retries = get_session_stop_retries(project_root, conversation_id)
             if session_retries >= 5:
+                critical = critical_blockers(project_root, cfg, conversation_id, is_rule_shadow("ARCH_RATCHET_REGRESSION", cfg))
+                if critical:
+                    reason = (
+                        f"Devre kesici: {session_retries} deneme aşıldı ancak kritik mimari/test regresyonu mevcut; "
+                        "manuel müdahale veya refactoring zorunlu. | " + " | ".join(f"[{rule}] {msg}" for rule, msg in critical)
+                    )
+                    log_event("stop", "BLOCKED", "workspace", reason, rule_id="STOP_CIRCUIT_BREAKER_BLOCKED", conversation_id=conversation_id)
+                    print(json.dumps({"decision": "continue", "reason": reason}))
+                    sys.exit(0)
                 log_event(
                     "stop", "WARNING", "workspace",
                     f"Circuit breaker triggered (retries={session_retries}): allowing stop despite obligations",
                     rule_id="STOP_CIRCUIT_BREAKER",
                     conversation_id=conversation_id
                 )
+                distill_session_knowledge(project_root, conversation_id, forgiven=True)
                 reset_session_stop_retries(project_root, conversation_id)
                 _perform_task_archiving(project_root, conversation_id)
                 print(json.dumps({"decision": "allow"}))
@@ -371,32 +383,13 @@ def validate_gravityguard() -> None:
                 log_event("stop", "WARNING", "workspace", doc_warn, rule_id="DOC_OBLIGATION_UNRESOLVED", conversation_id=conversation_id)
                 warn_reasons.append(f"[DOC_OBLIGATION_UNRESOLVED] {doc_warn}")
 
-            # Technical Debt Ratchet Gate: evaluate working tree changes against architectural bloat
-            ratchet_regressions = []
-            try:
-                from .debt_ratchet import get_session_changed_files, evaluate_changed_files_ratchet
-                changed_candidates = get_session_changed_files(str(project_root))
-                for doc_p in unresolved_docs.keys():
-                    if doc_p not in changed_candidates:
-                        changed_candidates.append(doc_p)
-                c_thresh = resolve_complexity_thresholds(cfg)["ratchetLoc"]
-                ratchet_regressions = evaluate_changed_files_ratchet(
-                    project_root=str(project_root),
-                    changed_files=changed_candidates,
-                    threshold=c_thresh
-                )
-                if is_rule_shadow("ARCH_RATCHET_REGRESSION", cfg):
-                    for rel_f, base_l, delta_l, reg_msg in ratchet_regressions:
-                        log_event("stop", "SHADOW_TRIGGER", rel_f, f"[SHADOW] {reg_msg}", rule_id="ARCH_RATCHET_REGRESSION", conversation_id=conversation_id)
-                    ratchet_regressions = []
-                for rel_f, base_l, delta_l, reg_msg in ratchet_regressions:
-                    # target = the file itself, so a later clean write to it supersedes the warning on the Live tab
-                    log_event("stop", "WARNING", rel_f, reg_msg, rule_id="ARCH_RATCHET_REGRESSION", conversation_id=conversation_id)
-                    warn_reasons.append(f"[ARCH_RATCHET_REGRESSION] {reg_msg}")
-            except Exception as ratchet_err:
-                sys.stderr.write(f"[GravityGuard StopHook] Ratchet check error: {ratchet_err}\n")
+            # Technical Debt Ratchet Gate: working-tree files that grew past their accepted ceiling (stop_gate.py)
+            ratchet_regressions = ratchet_findings(
+                project_root, cfg, conversation_id, is_rule_shadow("ARCH_RATCHET_REGRESSION", cfg), list(unresolved_docs))
+            warn_reasons += [f"[ARCH_RATCHET_REGRESSION] {msg}" for _rel, msg in ratchet_regressions]
 
             if warn_reasons:
+                note_raised_rules(project_root, conversation_id, (r[1:r.index("]")] for r in warn_reasons if r.startswith("[")))
                 increment_session_stop_retries(project_root, conversation_id)
                 _mark = lambda ok: chr(0x2713) if ok else chr(0x2717)
                 status_summary = (
@@ -409,6 +402,7 @@ def validate_gravityguard() -> None:
                 full_reason = f"{status_summary} | " + " | ".join(warn_reasons)
                 print(json.dumps({"decision": "continue", "reason": full_reason}))
             else:
+                distill_session_knowledge(project_root, conversation_id)
                 reset_session_stop_retries(project_root, conversation_id)
                 _perform_task_archiving(project_root, conversation_id)
                 print(json.dumps({"decision": "allow"}))
@@ -887,6 +881,16 @@ def validate_gravityguard() -> None:
                     all_warnings.append(("OE_SINGLE_IMPL", si_msg))
                 else:
                     _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {si_msg}", rule_id="OE_SINGLE_IMPL")
+
+    # GUARD 5C: G5_NEW_FILE_BLOAT_DENY — a brand-new source file above newFileMaxLoc never reaches the disk
+    bloat_msg = check_new_file_bloat(str(p_root), target_file, old_full_content, projected_content, complexity_thresholds["newFileMaxLoc"])
+    if bloat_msg:
+        if is_rule_shadow("G5_NEW_FILE_BLOAT_DENY", cfg):
+            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {bloat_msg}", rule_id="G5_NEW_FILE_BLOAT_DENY")
+        else:
+            _log("BLOCKED", target_file, bloat_msg, rule_id="G5_NEW_FILE_BLOAT_DENY")
+            print(json.dumps({"decision": "deny", "reason": f"🛑 [G5_NEW_FILE_BLOAT_DENY]: '{target_file}' - {bloat_msg}"}))
+            sys.exit(0)
 
     # ========================================================================
     # GUARD 6: ARCH_FILE_GROWTH — LARGE FILE & RAPID GROWTH (WARN ONLY)

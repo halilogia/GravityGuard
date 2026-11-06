@@ -14,6 +14,7 @@ from .doc_policy import is_doc_governed_path
 DEFAULT_COMPLEXITY_THRESHOLDS: Dict[str, int] = {
     "monolithLoc": 1000,              # projected LOC that makes a file a monolith
     "ratchetLoc": 500,                # debt ratchet: an over-this file may never grow again (debt_ratchet.py)
+    "newFileMaxLoc": 600,             # G5_NEW_FILE_BLOAT_DENY: a brand-new source file above this is denied at write time
     "srpMixedImportsMinLoc": 150,     # UI + network imports only block once the file is this big
     "srpMinClassLoc": 25,             # a class shorter than this is a helper, not a "major" class (God module count)
     "srpMixMinLoc": 400,              # SRP_RESPONSIBILITY_MIX: file size where mixed concerns are reported
@@ -28,6 +29,7 @@ DEFAULT_COMPLEXITY_THRESHOLDS: Dict[str, int] = {
 _COMPLEXITY_THRESHOLD_FLOORS: Dict[str, int] = {
     "monolithLoc": 100,
     "ratchetLoc": 100,
+    "newFileMaxLoc": 100,
     "srpMixedImportsMinLoc": 20,
     "srpMinClassLoc": 5,
     "srpMixMinLoc": 100,

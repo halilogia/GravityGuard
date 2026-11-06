@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Intelligence cage, four gaps closed (`stop_gate.py`, `refactor_hint.py`, `debt_ratchet.py`):**
+  - Circuit breaker: after five retries it still forgives soft obligations (documentation, screenshot) but never an `ARCH_RATCHET_REGRESSION` or a failing test run (`T0_TEST_RUN_FAILED`); it answers `continue` with `STOP_CIRCUIT_BREAKER_BLOCKED` ("manual intervention or refactoring required"). A user cancel still ends the session.
+  - `G5_NEW_FILE_BLOAT_DENY`: a brand-new source file written above `complexity.newFileMaxLoc` (default 600, floor 100) is denied in PreToolUse before it reaches the disk. Tests, data/doc files and `srp: allow-monolith` files are exempt; shadow mode is honoured.
+  - Refactoring blueprint: ratchet regressions (Stop and write-time), the Python God-module / UI+network SRP block and the new-file deny now end with "Öneri: '<file>' içindeki '<Class>' sınıfını (<n> satır) '<dir>/<stem>_<class>.py' altına taşıyarak dosyayı hafifletin", from the AST (Python) or declaration lines (TS/JS/Go/Rust/GDScript).
+  - Session knowledge: a session that was held up and then ends (`allow`) appends one line to `brain/knowledge.md` under "Otomatik Oturum Notları" (rule ids raised; says so when the breaker forgave soft items), deduplicated, newest 40 kept, line endings preserved. No `brain/knowledge.md`, no note.
+  - The Stop-hook ratchet block moved out of `dispatcher.py` into `stop_gate.py`.
+
 - **SRP false positives and false negatives (`srp_python.py`, `srp_signals.py`, `write_signals.py`):** the Python SRP engine moved out of `architecture_rules.py` (1008 -> 884 lines, still re-exported) and was tuned.
   - Fewer false blocks: UI + network imports only block from `complexity.srpMixedImportsMinLoc` (150) lines; imports match the top-level package, never a substring (`awxlib` no longer counts as `wx`), and `urllib.parse` / `http.HTTPStatus` are not network use. The God-module count ignores `dataclass(...)`, `NamedTuple`, `TypedDict`, `Protocol[T]`, `Flag`, pydantic settings and classes shorter than `srpMinClassLoc` (25) lines. Test files and `conftest.py` are exempt inside the analyzer.
   - New warn-only `SRP_RESPONSIBILITY_MIX` for what the blocking check cannot see: a class-less file touching three of database / file system / network / UI / subprocess work from `srpMixMinLoc` (400) lines (two from twice that), a function of `srpMaxFunctionLoc` (120)+ lines mixing two concerns, and for TypeScript / JavaScript the same file rule plus a 25+ export "kitchen sink". It honours `srp: allow-monolith` and shadow mode.

@@ -14,6 +14,7 @@ import re
 from typing import Dict, Optional, Set, Tuple
 
 from .project_context import DEFAULT_COMPLEXITY_THRESHOLDS
+from .refactor_hint import build_refactor_hint
 
 _UI_PACKAGES = re.compile(r"^(?:tkinter|customtkinter|pyqt\d?|pyside\d?|wx|kivy)$")
 _NET_PACKAGES = {"requests", "aiohttp", "httpx", "websockets", "websocket", "socket", "urllib3"}
@@ -137,8 +138,8 @@ def analyze_python_srp(content: str, file_path: str = "", thresholds: Optional[D
     if {"ui", "net"} <= kinds and _loc(content) >= mixed_min_loc:
         return True, (
             f"Sorumluluk Çakışması: Dosya hem UI (Arayüz) hem de Network (Ağ/HTTP) kütüphanelerini aynı anda barındırıyor "
-            f"({_loc(content)} LOC >= {mixed_min_loc})! Ağ kodunu ayrı bir modüle taşıyın."
-        )
+            f"({_loc(content)} LOC >= {mixed_min_loc})! Ağ kodunu ayrı bir modüle taşıyın. {build_refactor_hint(content, file_path)}"
+        ).strip()
 
     min_class_loc = thresholds["srpMinClassLoc"]
     major_classes = [
@@ -151,8 +152,8 @@ def analyze_python_srp(content: str, file_path: str = "", thresholds: Optional[D
         names = [c.name for c in major_classes]
         return True, (
             f"Çoklu Sorumluluk İhlali (God Module): Dosya {len(major_classes)} bağımsız ana iş sınıfı "
-            f"({', '.join(names[:3])}...) barındırıyor! Sınıfları ayrı dosyalara taşıyın."
-        )
+            f"({', '.join(names[:3])}...) barındırıyor! Sınıfları ayrı dosyalara taşıyın. {build_refactor_hint(content, file_path)}"
+        ).strip()
 
     return False, "SRP Compliant"
 

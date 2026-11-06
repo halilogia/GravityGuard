@@ -155,6 +155,7 @@ Both rules are WARN-only and both are calibrated against 6,404 real production f
 |---|---|---|
 | `monolithLoc` | 1000 | File size at which a module is a monolith. Fires on the **crossing** write. |
 | `ratchetLoc` | 500 | Debt ratchet ceiling (`debt_ratchet.py`): a file over this size may never grow again; shrinking it lowers its accepted ceiling for good. First-seen baseline = size at git HEAD. |
+| `newFileMaxLoc` | 600 | `G5_NEW_FILE_BLOAT_DENY`: a brand-new source file written above this size is denied before it reaches the disk. |
 | `srpMixedImportsMinLoc` | 150 | UI + network imports in one Python file block (`SRP_BOUNDARY`) only from this size. |
 | `srpMinClassLoc` | 25 | A class shorter than this does not count toward the 4-class God-module limit. |
 | `srpMixMinLoc` | 400 | `SRP_RESPONSIBILITY_MIX` (warn): file size from which 3 mixed concerns are reported (2 concerns at twice this). |
