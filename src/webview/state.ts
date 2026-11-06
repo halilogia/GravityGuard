@@ -7,6 +7,7 @@ import { TaskFile, collectTasks, resolveDefaultTaskFilePath } from '../tasks';
 import { MemoryHubData, collectMemoryHubData } from '../knowledge';
 import { GuardianData, GuardianViewModel } from './types';
 import { AuditStats, loadAuditStats } from '../audit_stats';
+import { GateStage, loadVerificationGate } from '../verification_gate';
 
 /**
  * Absolute path of the live guardian log written by the SRP guardian.
@@ -179,6 +180,13 @@ export function loadGuardianState(clearedAfterSeq: number | null): GuardianViewM
     console.debug('[GravityGuard] Audit journal aggregation failed:', e);
   }
 
+  let verificationGate: GateStage[] | undefined;
+  try {
+    verificationGate = loadVerificationGate(workspaceRoot, eventsList);
+  } catch (e) {
+    console.debug('[GravityGuard] Verification gate failed:', e);
+  }
+
   return {
     data,
     eventsList,
@@ -195,6 +203,7 @@ export function loadGuardianState(clearedAfterSeq: number | null): GuardianViewM
     tasks,
     defaultTaskPath,
     memory,
-    auditStats
+    auditStats,
+    verificationGate
   };
 }

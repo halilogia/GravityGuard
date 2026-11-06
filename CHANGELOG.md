@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Verification gate card on the Live tab (`src/verification_gate.ts`, `src/webview/tabs/verification.ts`):** four rows, compiler and types, GravityGuard shield, logic tests, live preview, each with a status dot, a one-line detail and the time; the header shows the worst status. Only this project's events count.
+  - Shield: the latest event per file; an unrecovered block fails, a warning warns, pending-evidence notes do not count.
+  - Compile and tests: recorded by `gravityguard gate run <compile|tests> -- <command>`, which takes pass or fail from the exit code and the last output line as detail. An open `STATIC_LINTER_DIAGNOSTIC` or a `T0_*` test result newer than the record replaces it.
+  - Preview: `gravityguard gate preview --screenshot <png> --console-errors <n>` passes only with a screenshot on disk and zero console errors; a delivery receipt screenshot alone is a warning.
+  - A recorded pass turns back to pending with "a file changed since" once a file is written after it, so an old green does not stand for new code.
+  - Results live in `.gravityguard/runtime/verification.json` (`engine/gravityguard_engine/verification_gate.py`); there is no command that sets a status by hand. Tests: `tests/verification_gate.test.mjs`, `engine/tests/test_verification_gate.py`.
 - **Mobile layout rule `DESIGN_RESPONSIVE_RULE` (`architecture_rules.py`, `dispatcher.py`):** an HTML page without a valid viewport meta (`width=device-width, initial-scale=1`) is denied; a fixed CSS width of 1000px or more (`width`, `min-width`, `inline-size`, `min-inline-size`) warns. Listed in the rule catalog, both languages of the Rules tab, `rule_tips.py` and as invariant 7 in `plugin/rules/gravityguard_invariants.md`.
 - **Raw control rule `DESIGN_RAW_CONTROLS_RULE`:** an unstyled `<input type="file">` (no hiding class, no `::file-selector-button`) or `<input type="number">` with the native spinner left visible is denied. Default scrollbars stay with `DESIGN_SCROLLBAR_RULE`. Invariant 8.
 - **Line-targeted design diagnostics:** both rules check only the lines the write adds or changes, and the rejection names `file:line`, the offending snippet (cut at 80 characters) and a fix; when several lines break the raw-control rule the first is shown with a "+N other lines" count. Tests in `engine/tests/test_architecture_rules.py`.

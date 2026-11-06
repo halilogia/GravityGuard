@@ -16,7 +16,8 @@ import {
   renderSkillsTab,
   renderTasksTab,
   renderKnowledgeTab,
-  renderHooksTab
+  renderHooksTab,
+  renderVerificationGateCard
 } from './tabs';
 
 export interface LayoutParams {
@@ -43,6 +44,7 @@ export function buildHtmlDocument(p: LayoutParams): string {
 
   const currentCardHtml = renderCurrentActionCard(vm);
   const liveHtml = renderLiveTab(vm);
+  const gateHtml = renderVerificationGateCard(vm.verificationGate);
   const obligationsHtml = renderObligationsTab(vm);
   const rulesHtml = renderRulesTab(vm);
   const insightsHtml = renderInsightsTab(vm);
@@ -108,6 +110,7 @@ ${WEBVIEW_STYLES}
 
         <!-- Panes -->
         <div id="tab-live" class="tab-pane ${activeTab === 'live' ? 'active' : ''}">
+          ${gateHtml}
           ${liveHtml}
         </div>
         <div id="tab-tasks" class="tab-pane ${activeTab === 'tasks' ? 'active' : ''}">

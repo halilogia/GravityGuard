@@ -6,3 +6,4 @@ export * from './tabs/skills';
 export * from './tabs/tasks';
 export * from './tabs/knowledge';
 export * from './tabs/hooks';
+export * from './tabs/verification';
