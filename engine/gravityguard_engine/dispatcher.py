@@ -60,6 +60,7 @@ from .governance import (
     resolve_pending_test_evidence,
 )
 
+from .write_signals import collect_write_signals
 from .project_context import (
     harden_streams_to_utf8,
     is_doc_governed_target,
@@ -910,24 +911,13 @@ def validate_gravityguard() -> None:
             _log("WARNING", target_file, arch_msg, rule_id="ARCH_FILE_GROWTH")
             all_warnings.append(("ARCH_FILE_GROWTH", arch_msg))
 
-    # Ratchet is independent of the growth heuristic: any growth of an over-threshold file is surfaced (read-only; Stop hook records)
-    try:
-        from .debt_ratchet import evaluate_file_ratchet
-        thresh = complexity_thresholds["ratchetLoc"]
-        is_reg, base_l, delta_l, reg_m = evaluate_file_ratchet(
-            project_root=str(p_root),
-            file_path=target_file,
-            content=projected_content,
-            threshold=thresh,
-            auto_record_baseline=False
-        )
-        if is_reg and reg_m and is_rule_shadow("ARCH_RATCHET_REGRESSION_WARN", cfg):
-            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {reg_m}", rule_id="ARCH_RATCHET_REGRESSION_WARN")
-        elif is_reg and reg_m:
-            _log("WARNING", target_file, reg_m, rule_id="ARCH_RATCHET_REGRESSION_WARN")
-            all_warnings.append(("ARCH_RATCHET_REGRESSION_WARN", reg_m))
-    except Exception as _r_err:
-        sys.stderr.write(f"[GravityGuard PreTool] Ratchet check error: {_r_err}\n")
+    # Warn-only signals independent of the growth heuristic (ratchet ceiling, mixed responsibilities); see write_signals.py
+    for signal_id, signal_msg in collect_write_signals(str(p_root), target_file, projected_content, complexity_thresholds, is_python, is_ts):
+        if is_rule_shadow(signal_id, cfg):
+            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {signal_msg}", rule_id=signal_id)
+        else:
+            _log("WARNING", target_file, signal_msg, rule_id=signal_id)
+            all_warnings.append((signal_id, signal_msg))
 
     # ========================================================================
     # GUARD 7: EXISTING SRP (Single Responsibility Principle & Web SRP)
@@ -954,7 +944,7 @@ def validate_gravityguard() -> None:
                     sys.exit(0)
 
         elif is_python:
-            is_violation, reason = analyze_python_srp(projected_content, file_path=target_file)
+            is_violation, reason = analyze_python_srp(projected_content, file_path=target_file, thresholds=complexity_thresholds)
             if is_violation:
                 if is_rule_shadow("SRP_BOUNDARY", cfg):
                     _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {reason}", rule_id="SRP_BOUNDARY")

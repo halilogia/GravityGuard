@@ -11,7 +11,6 @@ Implements:
 - ARCH_PMA_*: Pragmatic Modular Architecture boundary detector (BLOCK)
 Zero external dependencies.
 """
-import ast
 from html.parser import HTMLParser
 import json
 import os
@@ -24,6 +23,15 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .audit import _resolve_log_dir
 from .project_context import DEFAULT_COMPLEXITY_THRESHOLDS, load_gravityguard_config
+# Python SRP analysis lives in srp_python.py; re-exported so existing imports (dispatcher, gravity-validator) keep working.
+from . import srp_python
+COHESIVE_MODULE_PATTERNS = srp_python.COHESIVE_MODULE_PATTERNS
+analyze_python_srp = srp_python.analyze_python_srp
+analyze_python_srp_regex_fallback = srp_python.analyze_python_srp_regex_fallback
+is_cohesive_module_by_filename = srp_python.is_cohesive_module_by_filename
+is_py_cohesive_monolith = srp_python.is_py_cohesive_monolith
+_get_base_name = srp_python._get_base_name
+_is_exempt_class_ast = srp_python._is_exempt_class_ast
 
 
 # --- DESIGN_ICON_RULE: STANDARD EMOJI / ICON USAGE (STRICT DENY) ---
@@ -874,135 +882,3 @@ def is_ts_cohesive_monolith(content: str) -> bool:
     multi_card = card_groups >= 3 and grid_blocks >= 3
 
     return not (multi_section or multi_card)
-
-
-def is_py_cohesive_monolith(content: str) -> bool:
-    if re.search(r"#\s*(?:srp:\s*(?:allow-monolith|cohesive-monolith|bypass|noqa)|noqa:\s*srp)\b", content, re.IGNORECASE):
-        return True
-    return False
-
-
-COHESIVE_MODULE_PATTERNS: Set[str] = {
-    "_models.py", "models.py",
-    "_types.py", "types.py",
-    "_events.py", "events.py",
-    "_schemas.py", "schemas.py", "schema.py",
-    "_dtos.py", "dtos.py",
-    "_interfaces.py", "interfaces.py",
-    "_protocols.py", "protocols.py",
-    "_properties.py", "properties.py",
-    "_operators.py", "operators.py",
-    "_constants.py", "constants.py",
-    "_exceptions.py", "exceptions.py",
-}
-
-
-def is_cohesive_module_by_filename(file_path: str) -> bool:
-    if not file_path:
-        return False
-    base_name = os.path.basename(file_path.replace("\\", "/")).lower()
-    return any(base_name == pat or base_name.endswith(pat) for pat in COHESIVE_MODULE_PATTERNS)
-
-
-def _get_base_name(node: ast.expr) -> str:
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        return node.attr
-    return ""
-
-
-def _is_exempt_class_ast(cls_node: ast.ClassDef, file_path: str) -> bool:
-    EXEMPT_BASE_NAMES = {
-        "Exception", "BaseException", "Error",
-        "Panel", "Operator", "PropertyGroup", "Menu", "Header", "UIList",
-        "BaseModel", "Schema",
-        "Enum", "IntEnum", "StrEnum",
-        "Protocol", "ABC",
-    }
-    for base in cls_node.bases:
-        base_name = _get_base_name(base)
-        if base_name in EXEMPT_BASE_NAMES or base_name.endswith("Error") or base_name.endswith("Exception"):
-            return True
-
-    for dec in cls_node.decorator_list:
-        dec_name = _get_base_name(dec)
-        if dec_name in {"dataclass", "pydantic_dataclass"}:
-            return True
-
-    file_lower = file_path.lower().replace("\\", "/")
-    if ("bpy" in file_lower or "blender" in file_lower or "addon" in file_lower) and cls_node.name.startswith(("OBJECT_OT_", "MESH_OT_", "VIEW3D_PT_", "WM_OT_")):
-        return True
-
-    return False
-
-
-def analyze_python_srp(content: str, file_path: str = "") -> Tuple[bool, str]:
-    if is_py_cohesive_monolith(content) or is_cohesive_module_by_filename(file_path):
-        return False, "Exempt cohesive module"
-
-    try:
-        tree = ast.parse(content)
-    except SyntaxError:
-        return analyze_python_srp_regex_fallback(content, file_path)
-    except Exception:
-        # Fall back to regex path to keep guard alive
-        try:
-            return analyze_python_srp_regex_fallback(content, file_path)
-        except Exception:
-            raise
-
-    has_ui_imports = False
-    has_net_imports = False
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                name = alias.name.lower()
-                if any(pkg in name for pkg in ["tkinter", "pyqt", "pyside", "wx", "kivy"]):
-                    has_ui_imports = True
-                if any(pkg in name for pkg in ["urllib", "requests", "http.client", "aiohttp", "httpx", "websockets", "socket"]):
-                    has_net_imports = True
-        elif isinstance(node, ast.ImportFrom):
-            mod = (node.module or "").lower()
-            if any(pkg in mod for pkg in ["tkinter", "pyqt", "pyside", "wx", "kivy"]):
-                has_ui_imports = True
-            if any(pkg in mod for pkg in ["urllib", "requests", "http", "aiohttp", "httpx", "websockets", "socket"]):
-                has_net_imports = True
-
-    if has_ui_imports and has_net_imports:
-        return True, "Sorumluluk Çakışması: Dosya hem UI (Arayüz) hem de Network (Ağ/HTTP) kütüphanelerini aynı anda barındırıyor!"
-
-    top_level_classes = [n for n in tree.body if isinstance(n, ast.ClassDef)]
-    major_classes = [c for c in top_level_classes if not _is_exempt_class_ast(c, file_path)]
-
-    if len(major_classes) >= 4:
-        names = [c.name for c in major_classes]
-        return True, (
-            f"Çoklu Sorumluluk İhlali (God Module): Dosya {len(major_classes)} bağımsız ana iş sınıfı "
-            f"({', '.join(names[:3])}...) barındırıyor! Sınıfları ayrı dosyalara taşıyın."
-        )
-
-    return False, "SRP Compliant"
-
-
-def analyze_python_srp_regex_fallback(content: str, file_path: str = "") -> Tuple[bool, str]:
-    lines = content.splitlines()
-    line_count = len(lines)
-
-    has_ui = bool(re.search(r"\b(import\s+tkinter|import\s+PyQt|from\s+bpy\.types\s+import\s+.*Panel)", content, re.IGNORECASE))
-    has_net = bool(re.search(r"\b(import\s+requests|import\s+urllib|import\s+aiohttp|import\s+websockets)", content, re.IGNORECASE))
-
-    if has_ui and has_net:
-        return True, "Sorumluluk Çakışması: Dosya hem UI hem de Network kütüphanelerini aynı anda barındırıyor!"
-
-    class_matches = re.findall(r"^class\s+([A-Za-z0-9_]+)(?:\(([^)]*)\))?:", content, re.MULTILINE)
-    major_classes = [name for name, bases in class_matches if not any(k in bases for k in ["Exception", "Error", "Panel", "Operator", "Enum", "ABC"])]
-
-    if len(major_classes) >= 5:
-        return True, (
-            f"Çoklu Sınıf İhlali (God Module): Dosya {len(major_classes)} bağımsız ana sınıf "
-            f"({', '.join(major_classes[:4])}...) barındırıyor!"
-        )
-
-    return False, f"SRP Compliant (Fallback check: {line_count} lines)"

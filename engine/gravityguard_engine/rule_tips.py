@@ -26,6 +26,7 @@ TIPS: Dict[str, Tuple[str, str]] = {
     "SEC_UNSAFE_PATTERN": ("Riskli yapı yerine güvenli olanı kullan.", "el.textContent = value  // innerHTML yerine"),
     "SHELL_SECURITY": ("İndirileni doğrudan yorumlayıcıya verme; dosyaya indir, içeriğini kontrol et, sonra çalıştır.", ""),
     "ARCH_FILE_GROWTH": ("Büyük kodu tek dosyaya yığma; sorumluluğa göre ayrı modüllere böl.", ""),
+    "SRP_RESPONSIBILITY_MIX": ("Veri erişimi, dosya/ağ işleri ve iş mantığını ayrı modüllere/işlevlere böl.", ""),
     "ARCH_RATCHET_REGRESSION": ("Eşiği aşmış dosyaya satır ekleme; yeni mantığı ayrı modüle çıkar.", ""),
     "ARCH_RATCHET_REGRESSION_WARN": ("Eşiği aşmış dosyaya satır ekleme; yeni mantığı ayrı modüle çıkar.", ""),
     "SRP_BOUNDARY": ("Tek dosyada birden çok sorumluluk toplama; yeni sorumluluğu kendi modülüne taşı.", ""),

@@ -14,6 +14,10 @@ from .doc_policy import is_doc_governed_path
 DEFAULT_COMPLEXITY_THRESHOLDS: Dict[str, int] = {
     "monolithLoc": 1000,              # projected LOC that makes a file a monolith
     "ratchetLoc": 500,                # debt ratchet: an over-this file may never grow again (debt_ratchet.py)
+    "srpMixedImportsMinLoc": 150,     # UI + network imports only block once the file is this big
+    "srpMinClassLoc": 25,             # a class shorter than this is a helper, not a "major" class (God module count)
+    "srpMixMinLoc": 400,              # SRP_RESPONSIBILITY_MIX: file size where mixed concerns are reported
+    "srpMaxFunctionLoc": 120,         # SRP_RESPONSIBILITY_MIX: one function this long mixing concerns is reported
     "singleWriteLoc": 200,            # one tool call adding this much to an EXISTING file
     "creepBaseLoc": 800,              # file size above which additions are "creep"
     "creepAddedLoc": 80,              # addition that counts as creep on such a file
@@ -24,6 +28,10 @@ DEFAULT_COMPLEXITY_THRESHOLDS: Dict[str, int] = {
 _COMPLEXITY_THRESHOLD_FLOORS: Dict[str, int] = {
     "monolithLoc": 100,
     "ratchetLoc": 100,
+    "srpMixedImportsMinLoc": 20,
+    "srpMinClassLoc": 5,
+    "srpMixMinLoc": 100,
+    "srpMaxFunctionLoc": 40,
     "singleWriteLoc": 10,
     "creepBaseLoc": 100,
     "creepAddedLoc": 10,

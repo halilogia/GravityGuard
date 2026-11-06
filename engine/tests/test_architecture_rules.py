@@ -208,13 +208,14 @@ class TestArchitectureRulesDomain(unittest.TestCase):
         self.assertFalse(is_cohesive_module_by_filename("src/god_page.py"))
 
     def test_srp_detects_ui_and_network_conflict(self):
-        content = "import tkinter\nimport requests\nclass App: pass\n"
+        content = "import tkinter\nimport requests\n" + "".join(f"x{i} = {i}\n" for i in range(200))
         violates, reason = analyze_python_srp(content, "src/app.py")
         self.assertTrue(violates)
         self.assertIn("Sorumluluk Çakışması", reason)
 
     def test_srp_detects_god_module(self):
-        content = "\n".join([f"class Service{i}:\n    def execute(self):\n        pass\n" for i in range(5)])
+        body = "".join(f"        self.v{j} = {j}\n" for j in range(30))
+        content = "\n".join([f"class Service{i}:\n    def execute(self):\n{body}" for i in range(5)])
         violates, reason = analyze_python_srp(content, "src/services.py")
         self.assertTrue(violates)
         self.assertIn("God Module", reason)

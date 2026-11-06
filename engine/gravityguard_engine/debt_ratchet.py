@@ -64,6 +64,10 @@ def is_test_or_exempt_file(file_path: str) -> bool:
     if basename.startswith("test_") or basename.endswith(("_test.py", ".test.ts", ".spec.ts", ".test.js", ".spec.js")):
         return True
 
+    # Translation tables are data: every new rule adds one line per language
+    if any(part in {"i18n", "locales", "locale"} for part in parts[:-1]):
+        return True
+
     # Documentation, data & binary assets
     return basename.endswith(EXEMPT_SUFFIXES)
 

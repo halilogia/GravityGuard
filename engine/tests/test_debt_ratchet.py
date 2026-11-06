@@ -205,6 +205,7 @@ class TestDebtRatchet(unittest.TestCase):
         self.assertFalse(is_test_or_exempt_file("src/engine.py"))
         self.assertTrue(is_test_or_exempt_file("node_modules/pkg/index.js"))
         self.assertTrue(is_test_or_exempt_file("../outside.py"))
+        self.assertTrue(is_test_or_exempt_file("src/i18n/index.ts"))
         # project living under a folder named tests must not be exempt
         path = self._write("tests_root/app.py", 600)
         self.assertEqual(evaluate_file_ratchet(self.project_root, path)[1], 600)

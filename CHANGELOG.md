@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **SRP false positives and false negatives (`srp_python.py`, `srp_signals.py`, `write_signals.py`):** the Python SRP engine moved out of `architecture_rules.py` (1008 -> 884 lines, still re-exported) and was tuned.
+  - Fewer false blocks: UI + network imports only block from `complexity.srpMixedImportsMinLoc` (150) lines; imports match the top-level package, never a substring (`awxlib` no longer counts as `wx`), and `urllib.parse` / `http.HTTPStatus` are not network use. The God-module count ignores `dataclass(...)`, `NamedTuple`, `TypedDict`, `Protocol[T]`, `Flag`, pydantic settings and classes shorter than `srpMinClassLoc` (25) lines. Test files and `conftest.py` are exempt inside the analyzer.
+  - New warn-only `SRP_RESPONSIBILITY_MIX` for what the blocking check cannot see: a class-less file touching three of database / file system / network / UI / subprocess work from `srpMixMinLoc` (400) lines (two from twice that), a function of `srpMaxFunctionLoc` (120)+ lines mixing two concerns, and for TypeScript / JavaScript the same file rule plus a 25+ export "kitchen sink". It honours `srp: allow-monolith` and shadow mode.
+  - The ratchet exempts `i18n` / `locales` translation tables.
+
 - **Ratchet wired into the rule system:** `ARCH_RATCHET_REGRESSION` (stop) and `ARCH_RATCHET_REGRESSION_WARN` (write) are in the rule catalog, i18n and rule tips, and honour `"mode": "shadow"`. The ceiling is the new `complexity.ratchetLoc` (default 500, floor 100); Stop previously read a non-existent `complexityThresholds` key and always used 500 while PreToolUse used `monolithLoc` (1000). The Stop event now targets the offending file, so a later clean write supersedes the Live-tab shield warning instead of it sticking to `workspace`.
 
 - **Technical debt ratchet (`engine/gravityguard_engine/debt_ratchet.py`, `gravityguard debt [--scan]`):** a source file over `monolithLoc` (500) may not grow. Stop hook blocks on any regression; PreToolUse warns read-only (`ARCH_RATCHET_REGRESSION_WARN`, independent of the growth heuristic); shrinking a file lowers its ceiling for good.
