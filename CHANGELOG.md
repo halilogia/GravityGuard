@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Technical debt ratchet (`engine/gravityguard_engine/debt_ratchet.py`, `gravityguard debt [--scan]`):** a source file over `monolithLoc` (500) may not grow. Stop hook blocks on any regression; PreToolUse warns read-only (`ARCH_RATCHET_REGRESSION_WARN`, independent of the growth heuristic); shrinking a file lowers its ceiling for good.
+  - First-seen baseline is the size at git HEAD (new files start at the threshold), so a late evaluation cannot grandfather freshly added bloat; outside git it is the current size.
+  - One store read/write per batch under a lock file, unique temp file for the atomic write, corrupt store moved to `.corrupt` instead of silently reset, garbage baselines tolerated.
+  - Git discovery uses `status --porcelain -z --untracked-files=all` (spaces, non-ASCII, untracked folders, renames, deletes, subfolder roots, Windows short paths). Exemptions work on project-relative paths and honour the excluded folders.
+
 - **Verification gate card on the Live tab (`src/verification_gate.ts`, `src/webview/tabs/verification.ts`):** four rows, compiler and types, GravityGuard shield, logic tests, live preview, each with a status dot, a one-line detail and the time; the header shows the worst status. Only this project's events count.
   - Shield: the latest event per file; an unrecovered block fails, a warning warns, pending-evidence notes do not count.
   - Compile and tests: recorded by `gravityguard gate run <compile|tests> -- <command>`, which takes pass or fail from the exit code and the last output line as detail. An open `STATIC_LINTER_DIAGNOSTIC` or a `T0_*` test result newer than the record replaces it.

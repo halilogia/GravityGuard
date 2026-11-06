@@ -46,6 +46,25 @@ def _confirm(prompt: str, expected: str) -> bool:
     return input(f"{prompt} ").strip() == expected
 
 
+def _debt(args) -> int:
+    from gravityguard_engine import debt_ratchet
+    root = str(Path(args.root).resolve())
+    if args.scan:
+        print(f"{debt_ratchet.scan_project(root, threshold=args.threshold)} kaynak dosya tarandi.")
+    summary = debt_ratchet.get_project_debt_summary(root, threshold=args.threshold)
+    print(f"\n== GravityGuard Teknik Borc & Ratchet Raporu ({root}) ==")
+    print(f"Esik: {summary['threshold']} satir | Borclu Dosyalar: {summary['total_files_with_debt']} | Toplam Borc: {summary['total_debt_loc']} LOC | Regresyon: {summary['total_regressions']}")
+    if not summary['files']:
+        print("  [TEMIZ] Ratchet uzerinde kayitli asiri buyuk veya borclu dosya yok.")
+        return 0
+    print("\n  Dosya                                              Mevcut / Tavan   Borc   Durum")
+    print("  " + "-" * 75)
+    for f in summary['files']:
+        status_badge = "[GUVENLI]" if f["status"] == "LOCKED" else ("[IYILESTI]" if f["status"] == "IMPROVED" else "[REGRESYON / BLOKE]")
+        print(f"  {f['path']:48} {f['current_loc']:4d} / {f['baseline_loc']:4d} LOC   +{f['debt_loc']:4d}   {status_badge}")
+    return 1 if summary['total_regressions'] > 0 else 0
+
+
 def _gate(args) -> int:
     root = Path(args.root).resolve()
     if args.action == "run":
@@ -83,11 +102,17 @@ def main(argv=None) -> int:
     gate.add_argument("--root", default=os.getcwd(), help="project root (default: current folder)")
     gate.add_argument("--screenshot", default="")
     gate.add_argument("--console-errors", type=int, default=None)
+    debt = sub.add_parser("debt", help="technical debt ratchet report")
+    debt.add_argument("--root", default=os.getcwd(), help="project root (default: current folder)")
+    debt.add_argument("--threshold", type=int, default=500, help="monolith line threshold (default: 500)")
+    debt.add_argument("--scan", action="store_true", help="walk the project and register every file over the threshold")
     args = parser.parse_args(argv)
     for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding="utf-8", errors="replace")
     if args.group == "gate":
         return _gate(args)
+    if args.group == "debt":
+        return _debt(args)
     root = Path(args.root).resolve()
     if args.action != "list" and not args.id:
         parser.error(f"'{args.action}' bir öneri kimliği ister")

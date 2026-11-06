@@ -370,6 +370,26 @@ def validate_gravityguard() -> None:
                 log_event("stop", "WARNING", "workspace", doc_warn, rule_id="DOC_OBLIGATION_UNRESOLVED", conversation_id=conversation_id)
                 warn_reasons.append(f"[DOC_OBLIGATION_UNRESOLVED] {doc_warn}")
 
+            # Technical Debt Ratchet Gate: evaluate working tree changes against architectural bloat
+            ratchet_regressions = []
+            try:
+                from .debt_ratchet import get_session_changed_files, evaluate_changed_files_ratchet
+                changed_candidates = get_session_changed_files(str(project_root))
+                for doc_p in unresolved_docs.keys():
+                    if doc_p not in changed_candidates:
+                        changed_candidates.append(doc_p)
+                c_thresh = cfg.get("complexityThresholds", {}).get("monolithLoc", 500) if isinstance(cfg, dict) else 500
+                ratchet_regressions = evaluate_changed_files_ratchet(
+                    project_root=str(project_root),
+                    changed_files=changed_candidates,
+                    threshold=c_thresh
+                )
+                for rel_f, base_l, delta_l, reg_msg in ratchet_regressions:
+                    log_event("stop", "WARNING", "workspace", reg_msg, rule_id="ARCH_RATCHET_REGRESSION", conversation_id=conversation_id)
+                    warn_reasons.append(f"[ARCH_RATCHET_REGRESSION] {reg_msg}")
+            except Exception as ratchet_err:
+                sys.stderr.write(f"[GravityGuard StopHook] Ratchet check error: {ratchet_err}\n")
+
             if warn_reasons:
                 increment_session_stop_retries(project_root, conversation_id)
                 _mark = lambda ok: chr(0x2713) if ok else chr(0x2717)
@@ -377,7 +397,8 @@ def validate_gravityguard() -> None:
                     f"Aşama Durumu: [Kod: {_mark(True)}] "
                     f"[Test: {_mark(not (unresolved_tests or t0_findings))}] "
                     f"[Görsel: {_mark(ui_allowed)}] "
-                    f"[Doküman: {_mark(not unresolved_docs)}]"
+                    f"[Doküman: {_mark(not unresolved_docs)}] "
+                    f"[Mimari Ratchet: {_mark(not ratchet_regressions)}]"
                 )
                 full_reason = f"{status_summary} | " + " | ".join(warn_reasons)
                 print(json.dumps({"decision": "continue", "reason": full_reason}))
@@ -883,6 +904,23 @@ def validate_gravityguard() -> None:
         else:
             _log("WARNING", target_file, arch_msg, rule_id="ARCH_FILE_GROWTH")
             all_warnings.append(("ARCH_FILE_GROWTH", arch_msg))
+
+    # Ratchet is independent of the growth heuristic: any growth of an over-threshold file is surfaced (read-only; Stop hook records)
+    try:
+        from .debt_ratchet import evaluate_file_ratchet
+        thresh = complexity_thresholds.get("monolithLoc", 500) if complexity_thresholds else 500
+        is_reg, base_l, delta_l, reg_m = evaluate_file_ratchet(
+            project_root=str(p_root),
+            file_path=target_file,
+            content=projected_content,
+            threshold=thresh,
+            auto_record_baseline=False
+        )
+        if is_reg and reg_m:
+            _log("WARNING", target_file, reg_m, rule_id="ARCH_RATCHET_REGRESSION_WARN")
+            all_warnings.append(("ARCH_RATCHET_REGRESSION_WARN", reg_m))
+    except Exception as _r_err:
+        sys.stderr.write(f"[GravityGuard PreTool] Ratchet check error: {_r_err}\n")
 
     # ========================================================================
     # GUARD 7: EXISTING SRP (Single Responsibility Principle & Web SRP)
