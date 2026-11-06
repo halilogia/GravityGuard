@@ -1745,18 +1745,25 @@ class TestGravityGuardPhase2(unittest.TestCase):
         self.assertEqual(res.get("decision"), "allow")
         self.assertNotIn("ARCH_FILE_GROWTH", _warnings_from(res))
 
-        monolith = {
-            "toolCall": {
-                "name": "write_to_file",
-                "args": {
-                    "TargetFile": "C:/fake_project/src/fresh_monolith.py",
-                    "CodeContent": "\n".join([f"var_{i} = {i}" for i in range(1100)])
+        # G5_NEW_FILE_BLOAT_DENY (newFileMaxLoc) would deny a 1100-line creation outright; shadow it to reach Guard 6.
+        temp_dir = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(temp_dir, ".gravityguard.json"), "w", encoding="utf-8") as f:
+                json.dump({"rules": {"G5_NEW_FILE_BLOAT_DENY": "shadow"}}, f)
+            monolith = {
+                "toolCall": {
+                    "name": "write_to_file",
+                    "args": {
+                        "TargetFile": os.path.join(temp_dir, "fresh_monolith.py"),
+                        "CodeContent": "\n".join([f"var_{i} = {i}" for i in range(1100)])
+                    }
                 }
             }
-        }
-        res, _ = run_validator(monolith)
-        self.assertEqual(res.get("decision"), "allow")
-        self.assertIn("ARCH_FILE_GROWTH", _warnings_from(res))
+            res, _ = run_validator(monolith)
+            self.assertEqual(res.get("decision"), "allow")
+            self.assertIn("ARCH_FILE_GROWTH", _warnings_from(res))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_arch_file_growth_is_a_growth_event_not_a_file_state(self):
         """An already-monolithic file warns when it grows, not on every later touch.
@@ -1834,7 +1841,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
         )
         self.assertEqual(
             gv.resolve_complexity_thresholds({"complexity": {"monolithLoc": 2000}}),
-            {**gv.DEFAULT_COMPLEXITY_THRESHOLDS, "monolithLoc": 2000},
+            {**gv.DEFAULT_COMPLEXITY_THRESHOLDS, "monolithLoc": 2000, "newFileMaxLoc": 2000},  # new-file cap follows
         )
         for bad in (
             {"complexity": {"monolithLoc": 3}},                 # below the floor: rule would be meaningless
@@ -1870,10 +1877,14 @@ class TestGravityGuardPhase2(unittest.TestCase):
 
         temp_dir = tempfile.mkdtemp()
         try:
+            # Default thresholds, with only the G5 new-file cap (600) shadowed so the 1100-line creation reaches Guard 6.
+            with open(os.path.join(temp_dir, ".gravityguard.json"), "w", encoding="utf-8") as f:
+                json.dump({"rules": {"G5_NEW_FILE_BLOAT_DENY": "shadow"}}, f)
             res, _ = run_validator(payload_for(os.path.join(temp_dir, "default_module.py")))
             self.assertEqual(res.get("decision"), "allow")
             self.assertIn("ARCH_FILE_GROWTH", _warnings_from(res), "precondition: default warns")
 
+            # Relaxing monolithLoc alone must also relax the new-file cap (no G5 shadow needed any more).
             with open(os.path.join(temp_dir, ".gravityguard.json"), "w", encoding="utf-8") as f:
                 json.dump({"complexity": {"monolithLoc": 2000}}, f)
 

@@ -199,6 +199,7 @@ def resolve_complexity_thresholds(cfg: Optional[dict]) -> Dict[str, int]:
         return DEFAULT_COMPLEXITY_THRESHOLDS
 
     resolved = dict(DEFAULT_COMPLEXITY_THRESHOLDS)
+    applied = set()
     for key, floor in _COMPLEXITY_THRESHOLD_FLOORS.items():
         value = block.get(key)
         if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -206,6 +207,11 @@ def resolve_complexity_thresholds(cfg: Optional[dict]) -> Dict[str, int]:
         if value < floor:
             continue
         resolved[key] = int(value)
+        applied.add(key)
+
+    # A project that relaxed the monolith line did not mean to keep a stricter new-file cap than its monoliths.
+    if "monolithLoc" in applied and "newFileMaxLoc" not in applied:
+        resolved["newFileMaxLoc"] = max(resolved["newFileMaxLoc"], resolved["monolithLoc"])
 
     return resolved
 

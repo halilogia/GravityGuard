@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **`complexity.monolithLoc` now carries the new-file cap with it:** when a project sets a valid `monolithLoc` but no `newFileMaxLoc`, `G5_NEW_FILE_BLOAT_DENY` uses `max(600, monolithLoc)`, so relaxing the monolith line to 2000 no longer leaves a stricter 600-line cap on new files. The legacy `ARCH_FILE_GROWTH` creation tests shadow G5 to keep testing Guard 6.
+
 - **Intelligence cage, four gaps closed (`stop_gate.py`, `refactor_hint.py`, `debt_ratchet.py`):**
   - Circuit breaker: after five retries it still forgives soft obligations (documentation, screenshot) but never an `ARCH_RATCHET_REGRESSION` or a failing test run (`T0_TEST_RUN_FAILED`); it answers `continue` with `STOP_CIRCUIT_BREAKER_BLOCKED` ("manual intervention or refactoring required"). A user cancel still ends the session.
   - `G5_NEW_FILE_BLOAT_DENY`: a brand-new source file written above `complexity.newFileMaxLoc` (default 600, floor 100) is denied in PreToolUse before it reaches the disk. Tests, data/doc files and `srp: allow-monolith` files are exempt; shadow mode is honoured.

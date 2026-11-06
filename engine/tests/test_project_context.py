@@ -88,6 +88,13 @@ class TestProjectContextAndMultiRoot(unittest.TestCase):
         self.assertEqual(resolved["monolithLoc"], DEFAULT_COMPLEXITY_THRESHOLDS["monolithLoc"])
         self.assertEqual(resolved["singleWriteLoc"], DEFAULT_COMPLEXITY_THRESHOLDS["singleWriteLoc"])
 
+    def test_relaxing_monolith_line_relaxes_new_file_cap_unless_set_explicitly(self):
+        self.assertEqual(resolve_complexity_thresholds({})["newFileMaxLoc"], 600)
+        self.assertEqual(resolve_complexity_thresholds({"complexity": {"monolithLoc": 2000}})["newFileMaxLoc"], 2000)
+        self.assertEqual(resolve_complexity_thresholds({"complexity": {"monolithLoc": 300}})["newFileMaxLoc"], 600)
+        explicit = {"complexity": {"monolithLoc": 2000, "newFileMaxLoc": 700}}
+        self.assertEqual(resolve_complexity_thresholds(explicit)["newFileMaxLoc"], 700)
+
     def test_ratchet_threshold_is_configurable_and_floored(self):
         self.assertEqual(resolve_complexity_thresholds({})["ratchetLoc"], 500)
         self.assertEqual(resolve_complexity_thresholds({"complexity": {"ratchetLoc": 300}})["ratchetLoc"], 300)
