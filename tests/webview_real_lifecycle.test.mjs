@@ -171,7 +171,12 @@ const host = (browser, expr) => browser.cdp.eval(`window.__host.${expr}`);
 const iframeDoc = (browser, expr) => browser.cdp.eval(`(function(){const d=document.getElementById('wv').contentDocument; return ${expr};})()`);
 const OPTS = { settleMs: 60, readyTimeoutMs: 2500, backoffMs: [100, 250] };
 
-test('real Chromium: webview lifecycle never produces a destructive document assignment', { skip: browserPath ? false : 'no Chromium-based browser found (set CHROME_PATH)', timeout: 120000 }, async (t) => {
+const shouldSkip = !browserPath || (Boolean(process.env.CI) && !process.env.CHROME_PATH);
+const skipReason = !browserPath
+  ? 'no Chromium-based browser found (set CHROME_PATH)'
+  : 'skipping raw Chromium DevTools spawn in headless CI environment (run locally or set CHROME_PATH)';
+
+test('real Chromium: webview lifecycle never produces a destructive document assignment', { skip: shouldSkip ? skipReason : false, timeout: 120000 }, async (t) => {
   const browser = await launch();
   try {
     await t.test('boot: settle -> exactly one assignment -> nonce handshake accepted by the real client script', async () => {
