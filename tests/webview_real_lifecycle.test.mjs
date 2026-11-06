@@ -89,19 +89,20 @@ async function launch() {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'gg-chromium-'));
   const server = http.createServer((q, s) => { s.setHeader('content-type', 'text/html'); s.end(HOST_PAGE); });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
-  const proc = spawn(browserPath, [
+  const flags = [
     '--headless=new',
     '--remote-debugging-port=0',
     `--user-data-dir=${profile}`,
     '--no-first-run',
     '--no-default-browser-check',
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage',
     '--disable-gpu',
-    '--disable-extensions',
-    'about:blank'
-  ], { stdio: 'ignore' });
+    '--disable-extensions'
+  ];
+  if (process.platform === 'linux') {
+    flags.push('--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage');
+  }
+  flags.push('about:blank');
+  const proc = spawn(browserPath, flags, { stdio: 'ignore' });
   const portFile = path.join(profile, 'DevToolsActivePort');
   await waitFor(() => fs.existsSync(portFile), 20000, 'DevToolsActivePort');
   const port = fs.readFileSync(portFile, 'utf8').split(/\r?\n/)[0];
