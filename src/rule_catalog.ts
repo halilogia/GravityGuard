@@ -61,6 +61,8 @@ const ROWS: Row[] = [
   ['WEB_MIXED_RESPONSIBILITIES', 'architecture', 'block', 'write', 'shadow'],
   ['WEB_DOCUMENT_SIZE', 'architecture', 'block', 'write', 'shadow'],
   ['ARCH_FILE_GROWTH', 'architecture', 'warn', 'write', 'shadow'],
+  ['ARCH_RATCHET_REGRESSION_WARN', 'architecture', 'warn', 'write', 'shadow'],
+  ['ARCH_RATCHET_REGRESSION', 'architecture', 'block', 'stop', 'shadow'],
   ['OE_SPIKE', 'architecture', 'warn', 'write', 'shadow'],
   ['OE_SINGLE_IMPL', 'architecture', 'shadow', 'write', 'select'],
   // Code quality

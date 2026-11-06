@@ -88,6 +88,11 @@ class TestProjectContextAndMultiRoot(unittest.TestCase):
         self.assertEqual(resolved["monolithLoc"], DEFAULT_COMPLEXITY_THRESHOLDS["monolithLoc"])
         self.assertEqual(resolved["singleWriteLoc"], DEFAULT_COMPLEXITY_THRESHOLDS["singleWriteLoc"])
 
+    def test_ratchet_threshold_is_configurable_and_floored(self):
+        self.assertEqual(resolve_complexity_thresholds({})["ratchetLoc"], 500)
+        self.assertEqual(resolve_complexity_thresholds({"complexity": {"ratchetLoc": 300}})["ratchetLoc"], 300)
+        self.assertEqual(resolve_complexity_thresholds({"complexity": {"ratchetLoc": 5}})["ratchetLoc"], 500)
+
     def test_log_dir_override_does_not_replace_project_root_or_config(self):
         proj = Path(self.temp_dir) / "proj"
         logs = Path(self.temp_dir) / "logs"

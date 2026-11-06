@@ -378,14 +378,19 @@ def validate_gravityguard() -> None:
                 for doc_p in unresolved_docs.keys():
                     if doc_p not in changed_candidates:
                         changed_candidates.append(doc_p)
-                c_thresh = cfg.get("complexityThresholds", {}).get("monolithLoc", 500) if isinstance(cfg, dict) else 500
+                c_thresh = resolve_complexity_thresholds(cfg)["ratchetLoc"]
                 ratchet_regressions = evaluate_changed_files_ratchet(
                     project_root=str(project_root),
                     changed_files=changed_candidates,
                     threshold=c_thresh
                 )
+                if is_rule_shadow("ARCH_RATCHET_REGRESSION", cfg):
+                    for rel_f, base_l, delta_l, reg_msg in ratchet_regressions:
+                        log_event("stop", "SHADOW_TRIGGER", rel_f, f"[SHADOW] {reg_msg}", rule_id="ARCH_RATCHET_REGRESSION", conversation_id=conversation_id)
+                    ratchet_regressions = []
                 for rel_f, base_l, delta_l, reg_msg in ratchet_regressions:
-                    log_event("stop", "WARNING", "workspace", reg_msg, rule_id="ARCH_RATCHET_REGRESSION", conversation_id=conversation_id)
+                    # target = the file itself, so a later clean write to it supersedes the warning on the Live tab
+                    log_event("stop", "WARNING", rel_f, reg_msg, rule_id="ARCH_RATCHET_REGRESSION", conversation_id=conversation_id)
                     warn_reasons.append(f"[ARCH_RATCHET_REGRESSION] {reg_msg}")
             except Exception as ratchet_err:
                 sys.stderr.write(f"[GravityGuard StopHook] Ratchet check error: {ratchet_err}\n")
@@ -908,7 +913,7 @@ def validate_gravityguard() -> None:
     # Ratchet is independent of the growth heuristic: any growth of an over-threshold file is surfaced (read-only; Stop hook records)
     try:
         from .debt_ratchet import evaluate_file_ratchet
-        thresh = complexity_thresholds.get("monolithLoc", 500) if complexity_thresholds else 500
+        thresh = complexity_thresholds["ratchetLoc"]
         is_reg, base_l, delta_l, reg_m = evaluate_file_ratchet(
             project_root=str(p_root),
             file_path=target_file,
@@ -916,7 +921,9 @@ def validate_gravityguard() -> None:
             threshold=thresh,
             auto_record_baseline=False
         )
-        if is_reg and reg_m:
+        if is_reg and reg_m and is_rule_shadow("ARCH_RATCHET_REGRESSION_WARN", cfg):
+            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {reg_m}", rule_id="ARCH_RATCHET_REGRESSION_WARN")
+        elif is_reg and reg_m:
             _log("WARNING", target_file, reg_m, rule_id="ARCH_RATCHET_REGRESSION_WARN")
             all_warnings.append(("ARCH_RATCHET_REGRESSION_WARN", reg_m))
     except Exception as _r_err:

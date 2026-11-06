@@ -154,6 +154,7 @@ Both rules are WARN-only and both are calibrated against 6,404 real production f
 | Key | Default | Meaning |
 |---|---|---|
 | `monolithLoc` | 1000 | File size at which a module is a monolith. Fires on the **crossing** write. |
+| `ratchetLoc` | 500 | Debt ratchet ceiling (`debt_ratchet.py`): a file over this size may never grow again; shrinking it lowers its accepted ceiling for good. First-seen baseline = size at git HEAD. |
 | `singleWriteLoc` | 180 | One tool call adding this much to an **existing** file. |
 | `creepBaseLoc` | 800 | File size above which additions count as creep. |
 | `creepAddedLoc` | 80 | Addition that counts as creep on such a file. |

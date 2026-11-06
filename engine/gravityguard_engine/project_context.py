@@ -13,6 +13,7 @@ from .doc_policy import is_doc_governed_path
 
 DEFAULT_COMPLEXITY_THRESHOLDS: Dict[str, int] = {
     "monolithLoc": 1000,              # projected LOC that makes a file a monolith
+    "ratchetLoc": 500,                # debt ratchet: an over-this file may never grow again (debt_ratchet.py)
     "singleWriteLoc": 200,            # one tool call adding this much to an EXISTING file
     "creepBaseLoc": 800,              # file size above which additions are "creep"
     "creepAddedLoc": 80,              # addition that counts as creep on such a file
@@ -22,6 +23,7 @@ DEFAULT_COMPLEXITY_THRESHOLDS: Dict[str, int] = {
 
 _COMPLEXITY_THRESHOLD_FLOORS: Dict[str, int] = {
     "monolithLoc": 100,
+    "ratchetLoc": 100,
     "singleWriteLoc": 10,
     "creepBaseLoc": 100,
     "creepAddedLoc": 10,

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Ratchet wired into the rule system:** `ARCH_RATCHET_REGRESSION` (stop) and `ARCH_RATCHET_REGRESSION_WARN` (write) are in the rule catalog, i18n and rule tips, and honour `"mode": "shadow"`. The ceiling is the new `complexity.ratchetLoc` (default 500, floor 100); Stop previously read a non-existent `complexityThresholds` key and always used 500 while PreToolUse used `monolithLoc` (1000). The Stop event now targets the offending file, so a later clean write supersedes the Live-tab shield warning instead of it sticking to `workspace`.
+
 - **Technical debt ratchet (`engine/gravityguard_engine/debt_ratchet.py`, `gravityguard debt [--scan]`):** a source file over `monolithLoc` (500) may not grow. Stop hook blocks on any regression; PreToolUse warns read-only (`ARCH_RATCHET_REGRESSION_WARN`, independent of the growth heuristic); shrinking a file lowers its ceiling for good.
   - First-seen baseline is the size at git HEAD (new files start at the threshold), so a late evaluation cannot grandfather freshly added bloat; outside git it is the current size.
   - One store read/write per batch under a lock file, unique temp file for the atomic write, corrupt store moved to `.corrupt` instead of silently reset, garbage baselines tolerated.
