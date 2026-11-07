@@ -250,3 +250,5 @@ The doc set is six files, and they fail in different ways, so each has a rule:
 ## Otomatik Oturum Notları
 - 2026-11-06 · Oturumda aşılan engeller: T1_FINAL_UNRESOLVED — hepsi çözülerek kapatıldı.
 - 2026-11-06 · Oturumda aşılan engeller: T3_SYMBOL_TO_TEST_LINK — hepsi çözülerek kapatıldı.
+- 2026-11-07 · Oturumda aşılan engeller: T1_FINAL_UNRESOLVED — hepsi çözülerek kapatıldı.
+- 2026-11-07 · Oturumda aşılan engeller: T3_SYMBOL_TO_TEST_LINK — hepsi çözülerek kapatıldı.

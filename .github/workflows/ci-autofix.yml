@@ -67,6 +67,7 @@ jobs:
 
       - uses: anthropics/claude-code-action@v1
         if: env.HAS_TOKEN == 'true'
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         with:
