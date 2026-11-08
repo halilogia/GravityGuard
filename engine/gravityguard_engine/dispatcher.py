@@ -41,6 +41,7 @@ from .diagnostics import read_recent_diagnostics, trigger_background_validation
 from .diffing import get_diff_analysis, get_projected_and_old_content, ProjectionError
 from .engine_integrity import engine_source_defect, repair_reason, run_lkg
 from .policy_integrity import MANDATORY_RULES, check_policy_change, is_runtime_control_file
+from .session_quarantine import session_logger
 from .shell_rules import check_shell_command
 from .token_guard import evaluate_token_guard
 from .publication_guard import scan_git_secrets
@@ -427,10 +428,9 @@ def validate_gravityguard() -> None:
     tool_name = tool_call.get("name", "")
     c_id = payload.get("conversationId", "default")
 
-    def _log(status: str, target: str, reason: str, rule_id: str = "", evasion_markers: Optional[List[str]] = None) -> None:
-        log_event(tool_name, status, target, reason, rule_id=rule_id, conversation_id=c_id, evasion_markers=evasion_markers)
+    _log = session_logger(log_event, tool_name, c_id)
 
-    shell_reason = check_shell_command(args)
+    shell_reason = check_shell_command(args, payload.get("cwd"), c_id)
     if shell_reason:
         _log("BLOCKED", "shell", shell_reason, rule_id="SHELL_SECURITY")
         print(json.dumps({"decision": "deny", "reason": shell_reason}))

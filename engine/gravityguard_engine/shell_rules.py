@@ -1,7 +1,9 @@
 """Shared command-text checks; intentionally not a shell interpreter or sandbox."""
 import fnmatch
 import re
+from .session_quarantine import denied_targets
 from .security_rules import check_g0_secret_leak, is_protected_env_file
+from .shell_control_guard import writes_control_file, writes_denied_target
 from .shell_danger import dangerous_command_reason, parse_command
 
 _SEGMENTS = re.compile(r"[;&|\n(`]+")
@@ -70,7 +72,8 @@ def command_text(args: dict):
     return None
 
 
-def check_shell_command(args: dict) -> str:
+def check_shell_command(args: dict, cwd: str | None = None, conversation_id: str | None = None) -> str:
+    """`conversation_id` selects the file targets a file tool already refused in it (session quarantine)."""
     command = command_text(args)
     if command is None:
         return ""
@@ -83,6 +86,12 @@ def check_shell_command(args: dict) -> str:
     danger = dangerous_command_reason(command)
     if danger:
         return f"[G0_DANGEROUS_COMMAND]: Blocked {danger}"
+    if writes_denied_target(command, denied_targets(conversation_id) if conversation_id else (), cwd):
+        return ("[HOOK_EVASION_DETECTED]: A file tool was already denied a write to a file this command writes; "
+                "doing the same change through the shell is an evasion attempt. Fix the cause of the denial instead")
+    if writes_control_file(command, cwd):
+        return ("[POLICY_INTEGRITY]: Installed guard hooks, receipts and runtime state require a trusted host action; "
+                "shell writes, moves, deletes and interpreter scripts targeting them are denied")
     for segment in _SEGMENTS.split(command):
         reason = _protected_read_reason(segment)
         if reason:

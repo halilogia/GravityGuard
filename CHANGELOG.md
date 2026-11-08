@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Shell evasion of the file-tool guard closed (`shell_control_guard.py`, `session_quarantine.py`, `shell_rules.py`):** an agent denied a `write_file` (`[POLICY_INTEGRITY]`) used to finish the same write through the shell (`python scratch/temp.py` doing `open(<protected file>, "w")`).
+  - `check_shell_command` now denies with `[POLICY_INTEGRITY]` any command that writes, moves or deletes a runtime control file (hooks, `.claude/settings*.json`, `.gravityguard/runtime|reviews`, the installed plugin): `>` / `>>`, `tee`, `Set-Content`, `Add-Content`, `Out-File`, `New-Item`, `rm` / `del` / `Remove-Item`, `mv` / `Move-Item`, `cp` / `Copy-Item` onto it, `sed -i`, an interpreter given the path as an argument, and an interpreter script (or inline / heredoc code) whose body names the path and uses a write API. `.sh` / `.ps1` / `.bat` script bodies are checked as commands too.
+  - Session quarantine: every file target a tool call was `BLOCKED` on is remembered per conversation (`denied_targets.json` in the guard state dir). Any later shell write to that target, directly or through a script, is denied with `[HOOK_EVASION_DETECTED]`, which wins over the control-file rule. Reads, `git diff` and running the denied file itself stay allowed.
+  - Relative names resolve against the tool call's `cwd`, except when the command changes directory first (`cd x && echo > a`). Filesystem resolutions per command are capped, so adversarial inputs stay linear. Both denials are audited as `SHELL_SECURITY`.
+  - Limits: command-text analysis, not an OS sandbox. A script that builds a protected path from `Path.home()` pieces without the `.claude` / `.agents` / `.gemini` names, or imports a module that writes, is not seen.
+  - Tests: `engine/tests/test_shell_evasion.py`.
+
 - **`complexity.monolithLoc` now carries the new-file cap with it:** when a project sets a valid `monolithLoc` but no `newFileMaxLoc`, `G5_NEW_FILE_BLOAT_DENY` uses `max(600, monolithLoc)`, so relaxing the monolith line to 2000 no longer leaves a stricter 600-line cap on new files. The legacy `ARCH_FILE_GROWTH` creation tests shadow G5 to keep testing Guard 6.
 
 - **Intelligence cage, four gaps closed (`stop_gate.py`, `refactor_hint.py`, `debt_ratchet.py`):**
