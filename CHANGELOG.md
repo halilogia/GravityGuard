@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Session scope: touched files are kept in `governance.json` (`sessions.<id>.touched_files`) until the session ends clean, so the Stop hook still evaluates a file the agent already committed.
   - Sprawl: `resolve_project_root` never takes a system/user folder (home, `C:\Users`, Desktop, Documents, Downloads, drive root, `GitHub` and `GitHub\Public|Private` containers, anything under `.obsidian`) as a project root, and runtime data of such a folder (governance state, delivery receipt, ratchet store, baselines) goes to `~/.gravityguard/ephemeral/<name>-<hash>/` instead of a local `.gravityguard`.
   - The G5 new-file deny and the growth deny share one PreToolUse loop; their deny text no longer carries the emoji prefix.
+  - Registered in `rule_catalog.ts`, `rule_tips.py` and both i18n languages (`ARCH_RATCHET_GROWTH_DENY`, descriptions without parentheses as the catalog test requires).
   - Tests: `engine/tests/test_ratchet_growth.py`.
 
 - **Shell evasion of the file-tool guard closed (`shell_control_guard.py`, `session_quarantine.py`, `shell_rules.py`):** an agent denied a `write_file` (`[POLICY_INTEGRITY]`) used to finish the same write through the shell (`python scratch/temp.py` doing `open(<protected file>, "w")`).
