@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Smart refactor hints (`refactor_cluster.py`, `refactor_hint.py`):** the `Öneri:` tip on `ARCH_RATCHET_GROWTH_DENY` and the other bloat messages no longer only names the longest unit.
+  - Clusters functions that share a name prefix (`parse_*`, `_helper_*`) or a public function with the private helpers only it calls, and proposes one sibling module for the whole group.
+  - Gives a copy-paste re-export line (`from .foo_parse import a, b` for Python, `import { a, b } from './foo_parse';` for TS/JS) and lists the imports the new module needs.
+  - Warns about circular imports when the moved code still uses names that stay in the original file.
+  - A giant class gets a mixin split of its prefix-grouped methods, or helper-function extraction when no prefix group exists. Falls back to the previous single-unit tip otherwise.
+  - Tests: `engine/tests/test_refactor_cluster.py`.
 - **Shell evasion of the file-tool guard closed (`shell_control_guard.py`, `session_quarantine.py`, `shell_rules.py`):** an agent denied a `write_file` (`[POLICY_INTEGRITY]`) used to finish the same write through the shell (`python scratch/temp.py` doing `open(<protected file>, "w")`).
   - `check_shell_command` now denies with `[POLICY_INTEGRITY]` any command that writes, moves or deletes a runtime control file (hooks, `.claude/settings*.json`, `.gravityguard/runtime|reviews`, the installed plugin): `>` / `>>`, `tee`, `Set-Content`, `Add-Content`, `Out-File`, `New-Item`, `rm` / `del` / `Remove-Item`, `mv` / `Move-Item`, `cp` / `Copy-Item` onto it, `sed -i`, an interpreter given the path as an argument, and an interpreter script (or inline / heredoc code) whose body names the path and uses a write API. `.sh` / `.ps1` / `.bat` script bodies are checked as commands too.
   - Session quarantine: every file target a tool call was `BLOCKED` on is remembered per conversation (`denied_targets.json` in the guard state dir). Any later shell write to that target, directly or through a script, is denied with `[HOOK_EVASION_DETECTED]`, which wins over the control-file rule. Reads, `git diff` and running the denied file itself stay allowed.

@@ -10,6 +10,8 @@ import os
 import re
 from typing import List, Tuple
 
+from .refactor_cluster import block_candidates, python_candidates
+
 _MIN_UNIT_LOC = 15
 _DECL_RE = re.compile(
     r"^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:abstract\s+)?(?:pub\s+)?"
@@ -35,34 +37,44 @@ def _python_units(content: str) -> List[Tuple[str, str, int]]:
     return units
 
 
-def _declaration_units(content: str) -> List[Tuple[str, str, int]]:
+def _declaration_blocks(content: str) -> List[Tuple[str, bool, int, str]]:
+    """(name, is_function, loc, text) per top-level declaration line to the next one."""
     lines = content.splitlines()
     starts = [(i, m) for i, line in enumerate(lines) if (m := _DECL_RE.match(line))]
-    units = []
+    blocks = []
     for idx, (line_no, match) in enumerate(starts):
         end = starts[idx + 1][0] if idx + 1 < len(starts) else len(lines)
-        kind = "işlevini" if match["kind"] in ("function", "func", "fn") else "sınıfını"
-        units.append((match["name"], kind, end - line_no))
-    return units
+        blocks.append((match["name"], match["kind"] in ("function", "func", "fn"), end - line_no, "\n".join(lines[line_no:end])))
+    return blocks
+
+
+def _declaration_units(content: str) -> List[Tuple[str, str, int]]:
+    return [(name, "işlevini" if is_func else "sınıfını", loc) for name, is_func, loc, _ in _declaration_blocks(content)]
 
 
 def build_refactor_hint(content: str, file_path: str, limit: int = 2) -> str:
-    """'Öneri: ...' sentence for the biggest movable units of `file_path`, or '' when none is worth moving."""
+    """'Öneri: ...' sentence for the best clusters / movable units of `file_path`, or '' when none is worth moving."""
     stem, ext = os.path.splitext(os.path.basename(file_path))
     ext = ext.lower()
     if ext == ".py":
-        units = _python_units(content)
+        units, smart = _python_units(content), python_candidates(content, file_path)
     elif ext in _CODE_SUFFIXES:
-        units = _declaration_units(content)
+        units, smart = _declaration_units(content), block_candidates(_declaration_blocks(content), content, file_path)
     else:
         return ""
-    big = sorted((u for u in units if u[2] >= _MIN_UNIT_LOC), key=lambda u: -u[2])[:limit]
-    if not big:
-        return ""
-    folder = os.path.dirname(file_path.replace("\\", "/"))
+    covered = set().union(*(c[2] for c in smart)) if smart else set()
     base = os.path.basename(file_path)
-    tips = []
-    for name, kind, loc in big:
-        suggested = "/".join(p for p in (folder, f"{stem}_{_snake(name)}{ext}") if p)
-        tips.append(f"'{base}' içindeki '{name}' {kind} ({loc} satır) '{suggested}' altına taşıyarak")
-    return "Öneri: " + " ve ".join(tips) + " dosyayı hafifletin."
+    folder = os.path.dirname(file_path.replace("\\", "/"))
+    ranked = [(loc, text, True) for loc, text, _ in smart]
+    for name, kind, loc in units:
+        if loc >= _MIN_UNIT_LOC and name not in covered:
+            suggested = "/".join(p for p in (folder, f"{stem}_{_snake(name)}{ext}") if p)
+            ranked.append((loc, f"'{base}' içindeki '{name}' {kind} ({loc} satır) '{suggested}' altına taşıyarak", False))
+    top = sorted(ranked, key=lambda c: -c[0])[:limit]
+    if not top:
+        return ""
+    sentences = [text for _, text, is_smart in top if is_smart]
+    legacy = [text for _, text, is_smart in top if not is_smart]
+    if legacy:
+        sentences.append(" ve ".join(legacy) + " dosyayı hafifletin.")
+    return "Öneri: " + " ".join(sentences)
