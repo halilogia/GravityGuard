@@ -13,10 +13,17 @@ class ProjectionError(ValueError):
     """A proposed mutation cannot be projected faithfully."""
 
 
+def _lf(text: str) -> str:
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def _replace(content: str, args: dict) -> str:
-    target = args["TargetContent"]
+    # The file is read in text mode (CRLF already folded to LF); a search block copied from a CRLF file keeps its
+    # \r\n and would never match, so every operand is compared in LF form. Projection is analysis-only.
+    target = _lf(args["TargetContent"])
     if not target:
         raise ProjectionError("Empty search text requires an explicit insertion adapter")
+    content = _lf(content)
     lines = content.splitlines(keepends=True)
     start = args.get("StartLine", 1) - 1
     end = args.get("EndLine", len(lines))
@@ -25,11 +32,12 @@ def _replace(content: str, args: dict) -> str:
     window = "".join(lines[start:end])
     count = window.count(target)
     if count == 0:
-        raise ProjectionError("Search text was not found in the requested range")
+        head = target[:120].replace("\n", "\\n")
+        raise ProjectionError(f"Search text was not found in the requested range (lines {start + 1}-{end}; searched: '{head}')")
     multiple = args.get("AllowMultiple", False)
     if count > 1 and not multiple:
         raise ProjectionError("Search text is ambiguous; specify a range or replace_all")
-    changed = window.replace(target, args["ReplacementContent"], -1 if multiple else 1)
+    changed = window.replace(target, _lf(args["ReplacementContent"]), -1 if multiple else 1)
     return "".join(lines[:start]) + changed + "".join(lines[end:])
 
 

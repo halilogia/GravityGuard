@@ -58,6 +58,13 @@ class TestDesignIconRule(unittest.TestCase):
         self.assertEqual(check_design_icon_rule('src/button.ts', 'const label = "Kaydet";'), [])
         self.assertEqual(check_design_icon_rule('src/button.ts', '✅ ✅ 🗑️'), ['✅', '🗑️'])
 
+    def test_icon_rule_exempts_scratch_dirs_and_regex_lines(self):
+        content = 'import re\nP = re.compile(r"^## (✦|📜)\\s+")\n'
+        self.assertEqual(find_design_icon_violations('brain/abc/scratch/fix.py', 'x = "✦"'), [])
+        self.assertEqual(find_design_icon_violations('tools/strip.py', content), [])
+        hit = find_design_icon_violations('tools/ui.py', 'label = "✦"')
+        self.assertEqual(len(hit), 1)
+
     def test_find_design_icon_violations_returns_line_numbers_and_snippets(self):
         content = "const a = 1;\nconst icon = '⚡';\nconst clean = 'ok';\nconst end = '🚀';"
         violations = find_design_icon_violations('src/app.ts', content)

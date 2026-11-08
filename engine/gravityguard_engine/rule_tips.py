@@ -42,7 +42,7 @@ TIPS: Dict[str, Tuple[str, str]] = {
     "T3_SYMBOL_TO_TEST_LINK": ("Değiştirdiğin fonksiyonun testini de güncelle veya ekle.", ""),
     "T1_FINAL_UNRESOLVED": ("Değiştirdiğin üretim kodu için testi çalıştır veya ekle; oturumu test kanıtı olmadan kapatma.", ""),
     "TOOL_OUTPUT_BLOAT": ("Büyük dosyayı bütün okuma; satır aralığıyla oku veya önce taslağını çıkar.", ""),
-    "PROJECTION_UNSUPPORTED": ("Düzenlemeden önce dosyanın güncel hâlini oku; aranan metin dosyada birebir bulunmalı.", ""),
+    "PROJECTION_UNSUPPORTED": ("Aranan metin dosyada yok: dosyayı yeniden oku, bloğu bir iki satıra kısalt ya da StartLine/EndLine ver; kabuk veya python -c ile düzenlemeye kaçma.", ""),
     "ENGINE_SELF_INTEGRITY": ("Motor dosyasını bozacak yazımı yapma; tanımsız adları ve importları kontrol et.", ""),
 }
 

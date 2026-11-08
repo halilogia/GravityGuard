@@ -51,8 +51,8 @@ def find_design_icon_violations(
     name = parts[-1]
     if not name.endswith((".ts", ".tsx", ".js", ".jsx", ".html", ".vue", ".svelte", ".css", ".py", ".gd", ".gdshader")):
         return []
-    if any(part in {"doc", "docs", "documentation", "test", "tests", "__tests__"} for part in parts[:-1]):
-        return []
+    from .icon_exemptions import is_emoji_pattern_line, is_icon_exempt_path
+    if is_icon_exempt_path(parts): return []
     if any(marker in name for marker in ("test_", "_test.", ".test.", "spec.")):
         return []
 
@@ -62,7 +62,7 @@ def find_design_icon_violations(
     for idx, line in enumerate(lines, 1):
         if added_line_numbers is not None and idx not in added_line_numbers:
             continue
-        found = icon_regex.findall(line)
+        found = [] if is_emoji_pattern_line(line) else icon_regex.findall(line)
         if found:
             distinct_icons = list(dict.fromkeys(found))
             snippet = line.strip()

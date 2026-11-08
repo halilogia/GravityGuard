@@ -54,6 +54,21 @@ class SecurityHardeningTests(unittest.TestCase):
         self.assert_rule(self.call("future", {"path": str(self.root / ".gravityguard.json"), "content": json.dumps(cfg)}), "POLICY_INTEGRITY")
         self.assert_rule(self.call("future", {"path": str(self.root / ".agents" / "hooks.json"), "content": "{}"}), "POLICY_INTEGRITY")
 
+    def test_projection_matches_crlf_file_with_crlf_or_lf_search(self):
+        file = self.root / "rules.md"
+        file.write_bytes(b"# T\r\nalpha\r\nbeta\r\ngamma\r\n")
+        for search in ("alpha\r\nbeta", "alpha\nbeta"):
+            _, projected = get_projected_and_old_content(
+                str(file), "future", {"path": str(file), "old_string": search, "new_string": "x\r\ny"})
+            self.assertEqual(projected, "# T\nx\ny\ngamma\n")
+
+    def test_projection_error_names_the_searched_text(self):
+        file = self.root / "m.md"
+        file.write_text("one\n", encoding="utf-8")
+        with self.assertRaises(ProjectionError) as ctx:
+            get_projected_and_old_content(str(file), "future", {"path": str(file), "old_string": "missing line", "new_string": "x"})
+        self.assertIn("missing line", str(ctx.exception))
+
     def test_projection_rejects_mismatch_ambiguity_missing_and_read_error(self):
         file = self.root / "model.py"
         file.write_text("same\nsame\n", encoding="utf-8")
