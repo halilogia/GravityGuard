@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Shell guard CI performance:** replace character-by-character `shlex` tokenization with a linear scanner in `shell_tokens.py`, preserving non-POSIX quoting, Windows paths and malformed-quote fallback. Exhaustive short-input equivalence tests and the existing adversarial command timing gate cover the change; the two-second limit is unchanged.
+
 - **Smart refactor hints (`refactor_cluster.py`, `refactor_hint.py`):** the `Öneri:` tip on `ARCH_RATCHET_GROWTH_DENY` and the other bloat messages no longer only names the longest unit.
   - Clusters functions that share a name prefix (`parse_*`, `_helper_*`) or a public function with the private helpers only it calls, and proposes one sibling module for the whole group.
   - Gives a copy-paste re-export line (`from .foo_parse import a, b` for Python, `import { a, b } from './foo_parse';` for TS/JS) and lists the imports the new module needs.

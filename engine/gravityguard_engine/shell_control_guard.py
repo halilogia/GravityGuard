@@ -6,11 +6,11 @@ script the command runs); like the rest of the shell rules it is not a shell int
 """
 import os
 import re
-import shlex
 from collections.abc import Callable, Sequence
 from typing import NamedTuple
 
 from .policy_integrity import is_runtime_control_file
+from .shell_tokens import split_command
 
 _SEGMENTS = re.compile(r"[;&|\n(`]+")
 _WORD = re.compile(r"[a-z][a-z0-9_.-]*")
@@ -112,10 +112,7 @@ def _denied_target(cwd: str, denied: Sequence[str]) -> _Target:
 
 
 def _tokens(segment: str) -> list[str]:
-    try:
-        return shlex.split(segment, posix=False)
-    except ValueError:
-        return segment.split()
+    return split_command(segment)
 
 
 def _script_files(tokens: Sequence[str], cwd: str) -> list[str]:
