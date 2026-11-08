@@ -276,8 +276,16 @@ class TestEndToEnd(unittest.TestCase):
         self.assertEqual(blocked["decision"], "block")
         self.assertIsNone(self.hook("B", stop=True), "session B touched nothing and must be allowed to stop")
 
-    def test_open_obligation_keeps_blocking_through_stop_hook_active_until_the_engine_breaker_releases(self):
+    def test_open_test_obligation_reminds_once_then_releases_the_stop(self):
         self.hook("A", "Write", {"file_path": os.path.join(self.proj, "foo.py"), "content": "def foo():\n    return 1\n"})
+        self.assertEqual(self.hook("A", stop=True)["decision"], "block")
+        self.assertIsNone(self.hook("A", stop=True, stop_hook_active=True), "test evidence is a one-shot reminder, not a hold")
+
+    def test_open_doc_obligation_keeps_blocking_in_strict_mode_until_the_engine_breaker_releases(self):
+        (Path(self.proj) / ".gravityguard.json").write_text(
+            json.dumps({"governance": {"enforceDocObligations": True, "docObligationMode": "strict"}, "testEvidence": {"exemptPatterns": ["engine/*"]}}),
+            encoding="utf-8")
+        self.hook("A", "Write", {"file_path": os.path.join(self.proj, "engine", "foo.py"), "content": "def foo():\n    return 1\n"})
         self.assertEqual(self.hook("A", stop=True)["decision"], "block")
         for attempt in range(2, 6):          # Claude Code reports stop_hook_active from the second stop on
             out = self.hook("A", stop=True, stop_hook_active=True)
@@ -301,6 +309,7 @@ class TestEndToEnd(unittest.TestCase):
         root = Path(self.proj)
         (root / "CHANGELOG.md").write_text("## [Unreleased]\n", encoding="utf-8")
         (root / "KNOWLEDGE.md").write_text("# Knowledge\n", encoding="utf-8")
+        (root / ".gravityguard.json").write_text(json.dumps({"governance": {"docObligationMode": "strict"}}), encoding="utf-8")
         target = root / "hooks.json"
         out = self.hook("knowledge", "Write", {"file_path": str(target), "content": "{}\n"})
         if out:

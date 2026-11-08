@@ -38,9 +38,8 @@ class TestWebSrpAnalyzer(unittest.TestCase):
 </body>
 </html>"""
         is_violation, rule_id, reason, warnings = analyze_html_srp(html, "index.html")
-        self.assertTrue(is_violation)
-        self.assertEqual(rule_id, "WEB_INLINE_JS_BUDGET")
-        self.assertIn("35 satır çalıştırılabilir", reason)
+        self.assertFalse(is_violation, "inline JS budget is advisory")
+        self.assertIn("35 satır çalıştırılabilir", dict(warnings)["WEB_INLINE_JS_BUDGET"])
 
     def test_inline_js_budget_warn(self):
         """T04: Inline executable JS between 11 and 30 LOC must be ALLOWED with a WARN."""
@@ -73,9 +72,8 @@ class TestWebSrpAnalyzer(unittest.TestCase):
 <body><h1>App</h1></body>
 </html>"""
         is_violation, rule_id, reason, warnings = analyze_html_srp(html, "index.html")
-        self.assertTrue(is_violation)
-        self.assertEqual(rule_id, "WEB_INLINE_CSS_BUDGET")
-        self.assertIn("65 satır gömülü", reason)
+        self.assertFalse(is_violation, "inline CSS budget is advisory")
+        self.assertIn("65 satır gömülü", dict(warnings)["WEB_INLINE_CSS_BUDGET"])
 
     def test_non_executable_scripts_exempt(self):
         """T06: Data blocks like type='application/json' must be EXEMPT from the executable JS budget."""
@@ -121,9 +119,8 @@ class TestWebSrpAnalyzer(unittest.TestCase):
 </body>
 </html>"""
         is_violation, rule_id, reason, warnings = analyze_html_srp(html, "index.html")
-        self.assertTrue(is_violation)
-        self.assertEqual(rule_id, "WEB_INLINE_JS_BUDGET")
-        self.assertIn("KiB", reason)
+        self.assertFalse(is_violation, "inline JS byte budget is advisory")
+        self.assertIn("KiB", dict(warnings)["WEB_INLINE_JS_BUDGET"])
 
     def test_multi_block_js_aggregation(self):
         """T08: Multiple inline script blocks must have their LOC aggregated."""
@@ -143,9 +140,8 @@ class TestWebSrpAnalyzer(unittest.TestCase):
 </body>
 </html>"""
         is_violation, rule_id, reason, warnings = analyze_html_srp(html, "index.html")
-        self.assertTrue(is_violation)
-        self.assertEqual(rule_id, "WEB_INLINE_JS_BUDGET")
-        self.assertIn("36 satır çalıştırılabilir", reason)
+        self.assertFalse(is_violation, "inline JS budget is advisory")
+        self.assertIn("36 satır çalıştırılabilir", dict(warnings)["WEB_INLINE_JS_BUDGET"])
 
     def test_mixed_responsibilities_deny(self):
         """T10: Embedding both JS (>10 LOC) and CSS (>20 LOC) in HTML violates Separation of Concerns."""
@@ -190,7 +186,7 @@ class TestWebSrpAnalyzer(unittest.TestCase):
 </html>"""
         is_violation, rule_id, reason, warnings = analyze_html_srp(html, "index.html")
         self.assertTrue(is_violation, "Original 880 LOC monolith must be blocked by GravityGuard")
-        self.assertIn(rule_id, ["WEB_INLINE_JS_BUDGET", "WEB_INLINE_CSS_BUDGET", "WEB_MIXED_RESPONSIBILITIES", "WEB_DOCUMENT_SIZE"])
+        self.assertEqual(rule_id, "WEB_MIXED_RESPONSIBILITIES")  # the budget rules only warn now
 
     def test_escape_hatch_marker(self):
         """T11: Explicit escape hatch marker allows monolith when consciously required."""

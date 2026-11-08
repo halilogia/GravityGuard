@@ -52,7 +52,7 @@ test('effective mode comes from the config; shadowed rule is not shown as blocki
   assert.match(rowOf(html, 'G1_SILENT_EXCEPTION'), /data-mode="default"/);
   assert.match(rowOf(html, 'OE_SINGLE_IMPL'), /mode-warn/);
   assert.match(rowOf(html, 'OE_SINGLE_IMPL'), /data-mode="off"/);
-  assert.match(rowOf(html, 'G7_TS_FIRST'), /mode-block/);
+  assert.match(rowOf(html, 'G7_TS_FIRST'), /mode-warn/);
 });
 
 test('mandatory rules have a lock and no mode buttons', () => {

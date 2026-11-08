@@ -480,7 +480,7 @@ def record_pending_doc_obligation(
             "baseline_hashes": baseline_hashes,
             "timestamp": time.time(),
             "reason": reason,
-            "agent": agent_name
+            "agent": agent_name, "root": str(root)  # docs are verified where the code edit was governed
         }
         state.setdefault("doc_obligations", {}).setdefault("pending", {})[norm] = entry
         cid = conversation_id or "default"
@@ -686,7 +686,7 @@ def reconcile_obligations_on_disk(
             ts = doc_info.get("timestamp", 0)
             all_satisfied = True
             for req in req_docs:
-                doc_path = (root / req).resolve()
+                doc_path = (Path(doc_info.get("root") or root) / req).resolve()
                 if doc_path in active_intent_paths:
                     all_satisfied = False
                     break

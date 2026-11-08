@@ -37,13 +37,17 @@ class TestDocPolicy(unittest.TestCase):
         return is_doc_governed_path(str(self.root / rel), cfg, self.root)
 
     def test_default_directories_are_governed(self):
-        for rel in ("engine/a.py", "src/a.ts", "plugin/a.py", "rules/a.py", "scripts/a.sh", "tools/a.py", "engine/pkg/deep/a.py"):
+        for rel in ("engine/a.py", "src/a.ts", "plugin/a.py", "rules/a.py", "engine/pkg/deep/a.py"):
             self.assertTrue(self.governed(rel), rel)
 
-    def test_scripts_and_tools_are_governed_by_both_gates(self):
-        """The two gates once disagreed: `scripts` only at Stop, `tools` only at commit."""
-        self.assertTrue(self.governed("scripts/x.py"))
-        self.assertTrue(self.governed("tools/x.py"))
+    def test_scripts_and_tools_owe_nothing_by_default_at_both_gates(self):
+        """`scripts`/`tools` hold helpers; a project that wants them governed lists them in `docGovernedDirs`."""
+        for rel in ("scripts/x.py", "tools/x.py", "scripts/a.sh"):
+            self.assertFalse(self.governed(rel), rel)
+            self.assertFalse(verifier.is_governed_code_file(str(self.root / rel), None, self.root), rel)
+        opted_in = {"governance": {"docGovernedDirs": ["scripts", "tools"]}}
+        self.assertTrue(self.governed("scripts/x.py", opted_in))
+        self.assertTrue(self.governed("tools/x.py", opted_in))
 
     def test_tests_caches_runtime_dirs_and_non_code_never_owe_docs(self):
         for rel in ("tests/test_a.py", "engine/tests/test_a.py", "engine/test_a.py", "engine/a_test.py", "engine/a.spec.ts",

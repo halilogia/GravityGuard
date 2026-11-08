@@ -23,19 +23,16 @@ from gravityguard_engine.architecture_rules import (
     check_design_scrollbar_rule,
     check_g3_compiler_bypass,
     check_g7_ts_first,
-    check_oe_spike,
     check_pma_horizontal,
     check_pma_imports,
     evaluate_g7_ts_first,
     find_design_icon_violations,
     find_design_responsive_violations,
     find_design_raw_controls_violations,
-    extract_js_mandatory_feedback,
     is_cohesive_module_by_filename,
     is_pma_exempt,
     is_py_cohesive_monolith,
     is_ts_cohesive_monolith,
-    record_js_mandatory_feedback,
 )
 
 
@@ -130,7 +127,7 @@ class TestDesignScrollbarRule(unittest.TestCase):
 
 
 class TestG7TypeScriptFirst(unittest.TestCase):
-    def test_blocks_raw_js_application_files_including_antigravity_scratch(self):
+    def test_flags_raw_js_application_files_including_antigravity_scratch(self):
         for path in (
             "src/app.js",
             "js/formations.js",
@@ -138,10 +135,10 @@ class TestG7TypeScriptFirst(unittest.TestCase):
             "src/utils/helper.mjs",
             "C:/Users/Halil Emre/.gemini/antigravity/scratch/fm-tactic-viewer/js/app.js",
         ):
-            blocked, msg, fb = evaluate_g7_ts_first(path, "const x = 1;\n")
+            blocked, msg = evaluate_g7_ts_first(path, "const x = 1;\n")
             self.assertTrue(blocked, path)
-            self.assertIn("G7 TypeScript-First İhlali", msg)
-            self.assertIsNone(fb)
+            self.assertIn("G7 TypeScript-First Uyarısı", msg)
+            self.assertEqual(len(msg.splitlines()), 1)
             self.assertIsNotNone(check_g7_ts_first(path, "const x = 1;\n"))
 
     def test_allows_deterministic_mandatory_js_files(self):
@@ -165,33 +162,16 @@ class TestG7TypeScriptFirst(unittest.TestCase):
             "src/app.ts",
             "src/Component.tsx",
         ):
-            blocked, msg, fb = evaluate_g7_ts_first(path, "module.exports = {};\n")
+            blocked, msg = evaluate_g7_ts_first(path, "module.exports = {};\n")
             self.assertFalse(blocked, path)
             self.assertEqual(msg, "")
-            self.assertIsNone(fb)
 
-    def test_allows_and_logs_valid_ai_mandatory_js_feedback(self):
+    def test_js_justification_comment_no_longer_exempts_or_logs_feedback(self):
         tag = "@" + "ts-mandatory"
-        code = f"// {tag}: Electron main process requires direct CommonJS entrypoint without compilation step\nconst {{ app }} = require('electron');\n"
-        self.assertIsNotNone(extract_js_mandatory_feedback(code))
-        blocked, msg, fb = evaluate_g7_ts_first("main.js", code)
-        self.assertFalse(blocked)
-        self.assertEqual(msg, "")
-        self.assertIn("Electron main process", fb)
-
-        # Trivial or short reasons must be rejected
-        bad_code = f"// {tag}: test\nconst x = 1;\n"
-        self.assertIsNone(extract_js_mandatory_feedback(bad_code))
-        self.assertTrue(evaluate_g7_ts_first("main.js", bad_code)[0])
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("gravityguard_engine.architecture_rules._resolve_log_dir", return_value=tmpdir):
-                record_js_mandatory_feedback("main.js", fb, "conv-123")
-                ledger = Path(tmpdir) / "gravityguard_js_feedback.jsonl"
-                self.assertTrue(ledger.exists())
-                record = json.loads(ledger.read_text(encoding="utf-8").strip())
-                self.assertEqual(record["file"], "main.js")
-                self.assertIn("Electron main process", record["reason"])
+        code = f"// {tag}: Electron main process requires direct CommonJS entrypoint without compilation step\nconst x = 1;\n"
+        blocked, msg = evaluate_g7_ts_first("main.js", code)
+        self.assertTrue(blocked)
+        self.assertEqual(len(msg.splitlines()), 1)
 
 
 class TestArchitectureRulesDomain(unittest.TestCase):
@@ -202,11 +182,18 @@ class TestArchitectureRulesDomain(unittest.TestCase):
         matches = check_g3_compiler_bypass(added)
         self.assertIn(supp, matches)
 
-    def test_oe_spike_detects_premature_abstraction(self):
-        added = "class A:\n    pass\nclass B:\n    pass\nclass C:\n    pass\n"
-        triggered, msg = check_oe_spike(added)
+    def test_arch_file_growth_has_one_threshold_and_oe_spike_is_gone(self):
+        old = "".join(f"x{i} = {i}\n" for i in range(900))
+        added = [f"y{i} = {i}" for i in range(300)]
+        triggered, msg = check_arch_file_growth("src/svc.py", old, old + "\n".join(added), added)
         self.assertTrue(triggered)
-        self.assertIn("Aşırı Soyutlama Uyarısı", msg)
+        self.assertIn("+300 LOC", msg)
+        self.assertNotIn("ayırmayı değerlendirin", msg)
+        self.assertFalse(check_arch_file_growth("src/svc.py", old, old + "\n".join(added[:299]), added[:299])[0])
+        self.assertFalse(check_arch_file_growth("src/new.py", "", "\n".join(added), added)[0])  # creation: G5's business
+        self.assertTrue(check_arch_file_growth("src/svc.py", old, old, added[:10], cumulative_loc=300)[0])  # cumulative
+        from gravityguard_engine import architecture_rules
+        self.assertFalse(hasattr(architecture_rules, "check_oe_spike"))
 
     def test_cohesive_module_filename_detection(self):
         self.assertTrue(is_cohesive_module_by_filename("src/models.py"))

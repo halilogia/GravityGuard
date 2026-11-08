@@ -25,17 +25,15 @@ from .architecture_rules import (
     check_g7_ts_first,
     check_pma_horizontal,
     check_pma_imports,
-    check_oe_spike,
     evaluate_g7_ts_first,
     find_design_icon_violations,
     find_design_responsive_violations,
     find_design_raw_controls_violations,
     is_ts_cohesive_monolith,
     record_and_check_cumulative_growth,
-    record_js_mandatory_feedback,
 )
 from .audit import log_event
-from .doc_automation import is_knowledge_governed_path, resolve_knowledge_doc
+from .doc_automation import doc_obligation_auto, is_knowledge_governed_path, resolve_knowledge_doc
 from .state_lock import StateLockTimeout
 from .diagnostics import read_recent_diagnostics, trigger_background_validation
 from .diffing import get_diff_analysis, get_projected_and_old_content, ProjectionError
@@ -62,8 +60,9 @@ from .governance import (
 )
 
 from .write_signals import collect_write_signals
-from .stop_gate import critical_blockers, distill_session_knowledge, note_raised_rules, ratchet_findings
+from .stop_gate import critical_blockers, note_touched_file, other_stop_roots, ratchet_findings
 from .debt_ratchet import check_new_file_bloat
+from .ratchet_gate import RULE_ID as RATCHET_GROWTH_RULE_ID, check_ratchet_growth
 from .project_context import (
     harden_streams_to_utf8,
     is_doc_governed_target,
@@ -111,41 +110,6 @@ def is_rule_shadow(rule_id: str, cfg: Optional[dict]) -> bool:
         if r_entry == "shadow":
             return True
     return False
-
-
-def _other_stop_roots(payload: dict, primary: Path) -> List[Path]:
-    """Other roots of a multi-root window that already keep governance state, for the Stop check.
-
-    A Stop carries no target file, so the primary root is only the first declared workspace; a conversation that edited
-    the second root would otherwise end with its obligations unseen. Only roots that already have a state file are
-    returned (the check never creates state in a root this conversation did not touch), and obligations are session
-    scoped, so another conversation's debt in those roots is not seen either. With the log-directory override
-    (tests, isolated runs) the single override root is used as before.
-    """
-    if os.environ.get("GRAVITYGUARD_LOG_DIR"):
-        return []
-    workspaces = payload.get("workspacePaths", [])
-    if not isinstance(workspaces, list):
-        return []
-    try:
-        seen = {str(primary.resolve()).lower()}
-    except OSError:
-        seen = set()
-    roots: List[Path] = []
-    for ws in workspaces:
-        if not ws:
-            continue
-        candidate = Path(str(ws))
-        try:
-            key = str(candidate.resolve()).lower()
-        except OSError:
-            continue
-        if key in seen or not candidate.is_dir():
-            continue
-        seen.add(key)
-        if (candidate / ".gravityguard" / "runtime" / "governance.json").is_file():
-            roots.append(candidate)
-    return roots
 
 
 # A conversation id becomes a directory name below the user's brain folder: only plain identifiers are accepted,
@@ -273,7 +237,7 @@ def validate_gravityguard() -> None:
 
             # Mandatory security scans run before the advisory circuit breaker.
             security_findings = []
-            for scan_root in [project_root, *_other_stop_roots(payload, project_root)]:
+            for scan_root in [project_root, *other_stop_roots(payload, project_root)]:
                 security_findings.extend(scan_git_secrets(scan_root))
             if security_findings:
                 reason = " | ".join(security_findings)
@@ -287,7 +251,7 @@ def validate_gravityguard() -> None:
             # Defect A fix: Circuit breaker strictly governed by session continuation retries
             session_retries = get_session_stop_retries(project_root, conversation_id)
             if session_retries >= 5:
-                critical = critical_blockers(project_root, cfg, conversation_id, is_rule_shadow("ARCH_RATCHET_REGRESSION", cfg))
+                critical = critical_blockers(project_root, cfg)
                 if critical:
                     reason = (
                         f"Devre kesici: {session_retries} deneme aşıldı ancak kritik mimari/test regresyonu mevcut; "
@@ -302,7 +266,6 @@ def validate_gravityguard() -> None:
                     rule_id="STOP_CIRCUIT_BREAKER",
                     conversation_id=conversation_id
                 )
-                distill_session_knowledge(project_root, conversation_id, forgiven=True)
                 reset_session_stop_retries(project_root, conversation_id)
                 _perform_task_archiving(project_root, conversation_id)
                 print(json.dumps({"decision": "allow"}))
@@ -313,7 +276,7 @@ def validate_gravityguard() -> None:
 
             unresolved_tests = dict(get_unresolved_test_evidence(project_root, conversation_id))
             unresolved_docs = dict(get_unresolved_doc_obligations(project_root, conversation_id))
-            for other_root in _other_stop_roots(payload, project_root):
+            for other_root in other_stop_roots(payload, project_root):
                 other_cfg = load_gravityguard_config("", other_root)
                 reconcile_obligations_on_disk(other_root, conversation_id, other_cfg)
                 unresolved_tests.update(get_unresolved_test_evidence(other_root, conversation_id))
@@ -340,7 +303,7 @@ def validate_gravityguard() -> None:
                 warn_reasons.append(f"[TEST_DELETED_SUBJECT_REMAINS] {removal_warn}")
             for t_rule, t_msg in final_test_evidence_warnings(unresolved_tests):
                 log_event("stop", "WARNING", "workspace", t_msg, rule_id=t_rule, conversation_id=conversation_id)
-                warn_reasons.append(f"[{t_rule}] {t_msg}")
+                warn_reasons += [f"[{t_rule}] {t_msg}"] if session_retries < 1 else []  # one-shot: told once, never holds Stop
 
             # T0: dynamic test run + LCOV gate (opt-in via testEvidence.dynamicExecution)
             t0_findings = evaluate_t0_gate(str(project_root), cfg)
@@ -359,7 +322,7 @@ def validate_gravityguard() -> None:
                 log_event("stop", "WARNING", "workspace", ui_warn, rule_id="EBDG_UI_SCREENSHOT_PENDING", conversation_id=conversation_id)
                 warn_reasons.append(f"[EBDG_UI_SCREENSHOT_PENDING] {ui_warn}")
 
-            if unresolved_docs and session_retries >= 4:
+            if unresolved_docs and (session_retries >= 4 or doc_obligation_auto(cfg)):
                 for closed in _auto_resolve_changelog(project_root, conversation_id, unresolved_docs):
                     unresolved_docs.pop(closed, None)
 
@@ -390,7 +353,6 @@ def validate_gravityguard() -> None:
             warn_reasons += [f"[ARCH_RATCHET_REGRESSION] {msg}" for _rel, msg in ratchet_regressions]
 
             if warn_reasons:
-                note_raised_rules(project_root, conversation_id, (r[1:r.index("]")] for r in warn_reasons if r.startswith("[")))
                 increment_session_stop_retries(project_root, conversation_id)
                 _mark = lambda ok: chr(0x2713) if ok else chr(0x2717)
                 status_summary = (
@@ -403,7 +365,6 @@ def validate_gravityguard() -> None:
                 full_reason = f"{status_summary} | " + " | ".join(warn_reasons)
                 print(json.dumps({"decision": "continue", "reason": full_reason}))
             else:
-                distill_session_knowledge(project_root, conversation_id)
                 reset_session_stop_retries(project_root, conversation_id)
                 _perform_task_archiving(project_root, conversation_id)
                 print(json.dumps({"decision": "allow"}))
@@ -442,7 +403,7 @@ def validate_gravityguard() -> None:
     token_finding = evaluate_token_guard(
         tool_name,
         raw_args,
-        cwd=_guard_cwd if isinstance(_guard_cwd, str) else os.getcwd(),
+        cwd=_guard_cwd if isinstance(_guard_cwd, str) else os.getcwd(), conversation_id=c_id,
     )
     if token_finding:
         _guard_target = str(
@@ -632,15 +593,10 @@ def validate_gravityguard() -> None:
         print(json.dumps({"decision": "allow"}))
         sys.exit(0)
 
-    # G7: TypeScript First Enforcement & Mandatory JS Feedback Channel (BLOCK + FEEDBACK)
+    # G7: TypeScript-first, advisory only (one-line warning for application .js)
     if not is_vendor_or_cache and not is_test_file:
-        g7_blocked, g7_msg, g7_feedback = evaluate_g7_ts_first(target_file, projected_content)
-        if g7_feedback:
-            record_js_mandatory_feedback(target_file, g7_feedback, c_id)
-            fb_msg = f"Zorunlu JS Geri Bildirimi onaylandı ve kaydedildi: {g7_feedback}"
-            # A justified .js file follows the rule; recording it as a warning inflated every warning count.
-            _log('APPROVED', target_file, fb_msg, rule_id='G7_TS_MANDATORY_FEEDBACK')
-        elif g7_blocked:
+        g7_blocked, g7_msg = evaluate_g7_ts_first(target_file, projected_content)
+        if g7_blocked:
             if is_rule_shadow("G7_TS_FIRST", cfg):
                 _log('SHADOW_TRIGGER', target_file, f"[SHADOW] {g7_msg}", rule_id='G7_TS_FIRST')
             else:
@@ -851,17 +807,6 @@ def validate_gravityguard() -> None:
             }))
             sys.exit(0)
 
-    # ========================================================================
-    # GUARD 5: OE_SPIKE — OVER-ENGINEERING (WARN ONLY)
-    # ========================================================================
-    oe_triggered, oe_msg = check_oe_spike(added_text, complexity_thresholds)
-    if oe_triggered:
-        if is_rule_shadow("OE_SPIKE", cfg):
-            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {oe_msg}", rule_id="OE_SPIKE")
-        else:
-            _log("WARNING", target_file, oe_msg, rule_id="OE_SPIKE")
-            all_warnings.append(("OE_SPIKE", oe_msg))
-
     # GUARD 5B: OE_SINGLE_IMPL — abstraction with one implementer (SHADOW by default)
     if not is_test_file:
         si_mode = oe_single_impl_mode(cfg)
@@ -882,6 +827,16 @@ def validate_gravityguard() -> None:
         else:
             _log("BLOCKED", target_file, bloat_msg, rule_id="G5_NEW_FILE_BLOAT_DENY")
             print(json.dumps({"decision": "deny", "reason": f"🛑 [G5_NEW_FILE_BLOAT_DENY]: '{target_file}' - {bloat_msg}"}))
+            sys.exit(0)
+
+    # GUARD 5D: ARCH_RATCHET_GROWTH_DENY — a file over ratchetLoc takes no net new lines (shrinking is always allowed)
+    growth_msg = check_ratchet_growth(str(p_root), target_file, old_full_content, projected_content, complexity_thresholds["ratchetLoc"])
+    if growth_msg:
+        if is_rule_shadow(RATCHET_GROWTH_RULE_ID, cfg):
+            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {growth_msg}", rule_id=RATCHET_GROWTH_RULE_ID)
+        else:
+            _log("BLOCKED", target_file, growth_msg, rule_id=RATCHET_GROWTH_RULE_ID)
+            print(json.dumps({"decision": "deny", "reason": f"[{RATCHET_GROWTH_RULE_ID}]: '{target_file}' - {growth_msg}"}))
             sys.exit(0)
 
     # ========================================================================
@@ -1030,7 +985,7 @@ def validate_gravityguard() -> None:
             record_pending_doc_obligation(pending_doc_record, required_docs=required_docs, project_root=p_root, conversation_id=c_id)
             _log("APPROVED", pending_doc_record, f"Pending doc obligation recorded ({', '.join(required_docs)})", rule_id="DOC_OBLIGATION_PENDING")
 
-        # Review obligation removed (AI review disabled).
+        note_touched_file(p_root, c_id, target_file)  # the Stop ratchet check must still see it after a `git commit`
     except StateLockTimeout as lock_err:
         _log("BLOCKED", target_file, f"State lock timeout: {lock_err}", rule_id="STATE_LOCK_TIMEOUT")
         print(json.dumps({

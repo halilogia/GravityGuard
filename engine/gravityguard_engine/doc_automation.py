@@ -26,6 +26,14 @@ UNRELEASED_HEADING = "## [Unreleased]"
 AUTO_ENTRY_PREFIX = "- **[auto]**"
 
 
+def doc_obligation_auto(cfg: Optional[dict] = None) -> bool:
+    """Doc obligations are closed automatically at the first Stop (default). `governance.docObligationMode: "strict"`
+    in `.gravityguard.json` restores the old flow: Stop blocks until the agent writes the entry, auto-add on retry 5."""
+    governance = cfg.get("governance") if isinstance(cfg, dict) else None
+    mode = governance.get("docObligationMode") if isinstance(governance, dict) else None
+    return str(mode or "auto").strip().lower() != "strict"
+
+
 def _git(project_root: Path, *args: str) -> str:
     try:
         res = subprocess.run(

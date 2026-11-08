@@ -108,7 +108,8 @@ test('--session-start marks the briefed session in the journal', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gg-codex-brief-'));
   const journal = path.join(dir, 'gravityguard_permanent_audit.jsonl');
   const ts = new Date().toISOString();
-  fs.writeFileSync(journal, JSON.stringify({ agent: 'Codex', status: 'BLOCKED', ruleId: 'G1_SILENT_EXCEPTION', timestamp: ts }) + '\n');
+  const row = JSON.stringify({ agent: 'Codex', status: 'BLOCKED', ruleId: 'G1_SILENT_EXCEPTION', timestamp: ts });
+  fs.writeFileSync(journal, [row, row, row].join('\n') + '\n'); // the briefing only names rules hit at least 3 times in 24 h
   const r = runHook({ session_id: 'abc', hook_event_name: 'SessionStart' }, ['--session-start'], { GRAVITYGUARD_LOG_DIR: dir });
   assert.equal(r.status, 0, r.stderr);
   assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /G1_SILENT_EXCEPTION/);

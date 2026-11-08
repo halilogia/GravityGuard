@@ -29,6 +29,8 @@ class TestTestEvidenceDomain(unittest.TestCase):
         self.assertTrue(is_exempt_from_test_evidence("src/types.ts"))
         self.assertTrue(is_exempt_from_test_evidence("src/constants.py"))
         self.assertTrue(is_exempt_from_test_evidence("src/models.d.ts"))
+        for glue in ("docs/guide.md", "src/settings.json", "src/theme.css", "src/api_adapter.py", "src/shim.ts"):
+            self.assertTrue(is_exempt_from_test_evidence(glue), glue)
         self.assertTrue(is_exempt_from_test_evidence("web/lang-en.js"))
         self.assertTrue(is_exempt_from_test_evidence("web/lang-tr.js"))
         self.assertTrue(is_exempt_from_test_evidence("web/app.js"))

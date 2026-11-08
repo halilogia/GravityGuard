@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 _ENGINE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ENGINE_DIR not in sys.path:
@@ -136,6 +137,40 @@ class TokenGuardTests(unittest.TestCase):
 
     def test_cat_small_file_is_allowed(self):
         self.assertIsNone(evaluate_command_guard("run_command", {"CommandLine": f"cat {self.small}"}, cwd=self.dir))
+
+    def test_depth_limited_or_filtered_output_is_not_warned(self):
+        for cmd in (
+            "Get-ChildItem -Recurse -Depth 2",
+            "Get-ChildItem -Recurse | Select-Object Name",
+            "Get-ChildItem -Recurse -Name | Select -First 30",
+            "dir /s /b | findstr /i foo",
+            "find / -name x | head -20",
+            "git log | Select-Object -First 5",
+            "git log | tail -n 5",
+            "Get-ChildItem -Recurse | Measure-Object",
+        ):
+            self.assertIsNone(evaluate_command_guard("run_command", {"CommandLine": cmd}, cwd=self.dir), cmd)
+        self.assertIsNotNone(evaluate_command_guard("run_command", {"CommandLine": "Get-ChildItem -Recurse"}, cwd=self.dir))
+
+    def test_warning_is_said_once_per_conversation(self):
+        log_dir = tempfile.mkdtemp(prefix="gg_token_once_")
+        with mock.patch.dict(os.environ, {"GRAVITYGUARD_LOG_DIR": log_dir}):
+            args = {"CommandLine": "git log"}
+            first = evaluate_token_guard("run_command", args, cwd=self.dir, conversation_id="conv-a")
+            again = evaluate_token_guard("run_command", args, cwd=self.dir, conversation_id="conv-a")
+            other = evaluate_token_guard("run_command", args, cwd=self.dir, conversation_id="conv-b")
+            no_id = evaluate_token_guard("run_command", args, cwd=self.dir)
+        self.assertIsNotNone(first)
+        self.assertIsNone(again)
+        self.assertIsNotNone(other)
+        self.assertIsNotNone(no_id)
+
+    def test_deny_is_never_suppressed_by_the_once_rule(self):
+        log_dir = tempfile.mkdtemp(prefix="gg_token_deny_")
+        with mock.patch.dict(os.environ, {"GRAVITYGUARD_LOG_DIR": log_dir}):
+            for _ in range(2):
+                result = evaluate_token_guard("read_file", {"Path": self.big}, cwd=self.dir, conversation_id="conv-d")
+                self.assertEqual(result.level, "deny")
 
     def test_deny_beats_warn(self):
         args = {"Path": self.big, "CommandLine": "dir /s"}

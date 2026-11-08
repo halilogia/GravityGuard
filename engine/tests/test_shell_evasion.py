@@ -164,9 +164,9 @@ class TestSessionQuarantine(_Workspace):
         self.assertTrue(self.check("python scratch/fix.py", "conv-1").startswith("[HOOK_EVASION_DETECTED]"))
 
     def test_quarantine_is_scoped_to_the_conversation_and_to_writes(self):
-        self.script("scratch/fix.py", "from pathlib import Path\nPath('src/app.py').write_text('patched')\n")
-        self.assertEqual(self.check("python scratch/fix.py", "conv-2"), "")
-        self.assertEqual(self.check("python scratch/fix.py"), "")
+        self.script("tools/sync_app.py", "from pathlib import Path\nPath('src/app.py').write_text('patched')\n")
+        self.assertEqual(self.check("python tools/sync_app.py", "conv-2"), "")
+        self.assertEqual(self.check("python tools/sync_app.py"), "")
         for command in ("cat src/app.py", "git diff src/app.py", "python -m pytest -q", "echo x > other.txt",
                         "python src/app.py", "rm src/other.py"):
             with self.subTest(command=command):
@@ -177,6 +177,46 @@ class TestSessionQuarantine(_Workspace):
         record_denied_target("conv-1", hooks)
         self.assertTrue(self.check(f'echo {{}} > "{hooks}"', "conv-1").startswith("[HOOK_EVASION_DETECTED]"))
         self.assertTrue(self.check(f'echo {{}} > "{hooks}"', "conv-2").startswith("[POLICY_INTEGRITY]"))
+
+
+class TestScratchPatchDeny(_Workspace):
+    PATCHER = "from pathlib import Path\np = Path('src/app.py')\np.write_text(p.read_text().replace('a', 'b'))\n"
+
+    def test_throwaway_script_rewriting_source_is_denied(self):
+        for name in ("patch_app.py", "temp_fix.py", "scratch/scratch_edit.py", "fix.py", "tmp-apply.py"):
+            with self.subTest(name=name):
+                self.script(name, self.PATCHER)
+                self.assertTrue(self.check(f"python {name}").startswith("[SCRATCH_PATCH_DENY]"))
+
+    def test_inline_and_heredoc_source_rewrites_are_denied(self):
+        for command in (
+            "python -c \"open('src/app.py', 'w').write('x')\"",
+            "python - <<'EOF'\nfrom pathlib import Path\nPath('src/app.ts').write_text('x')\nEOF",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.check(command).startswith("[SCRATCH_PATCH_DENY]"))
+
+    def test_legitimate_scratch_and_named_scripts_stay_allowed(self):
+        self.script("scratch/analyze.py", "import json\nopen('scratch/out.json', 'w').write(json.dumps({}))\n")
+        self.script("scratch/patch_notes.py", "open('brain/scratch/notes.py', 'w').write('x')\n")
+        self.script("tools/build.py", self.PATCHER)
+        self.script("temp_read.py", "print(open('src/app.py').read())\n")
+        for command in ("python scratch/analyze.py", "python scratch/patch_notes.py", "python tools/build.py",
+                        "python temp_read.py", "python -c \"print(open('src/app.py').read())\"",
+                        "python -c \"import json; json.dump({}, open('out.json', 'w'))\"", "python -m pytest tests/test_a.py"):
+            with self.subTest(command=command):
+                self.assertEqual(self.check(command), "")
+
+    def test_dispatcher_denies_a_patch_script_run(self):
+        self.script("patch_app.py", self.PATCHER)
+        payload = {"conversationId": "e2e", "workspacePaths": [self.root], "cwd": self.root,
+                   "toolCall": {"name": "run_command", "args": {"CommandLine": "python patch_app.py", "Cwd": self.root}}}
+        env = {**os.environ, "GRAVITYGUARD_LOG_DIR": self.state, "PYTHONIOENCODING": "utf-8"}
+        proc = subprocess.run([sys.executable, str(VALIDATOR)], input=json.dumps(payload), capture_output=True,
+                              text=True, encoding="utf-8", env=env, cwd=self.root, timeout=60, check=False)
+        shell = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertEqual(shell["decision"], "deny")
+        self.assertIn("SCRATCH_PATCH_DENY", shell["reason"])
 
 
 class TestDispatcherEndToEnd(_Workspace):

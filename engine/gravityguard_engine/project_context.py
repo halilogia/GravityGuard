@@ -12,22 +12,17 @@ from typing import Dict, List, Optional, Tuple
 from .doc_policy import is_doc_governed_path
 
 DEFAULT_COMPLEXITY_THRESHOLDS: Dict[str, int] = {
-    "monolithLoc": 1000,              # projected LOC that makes a file a monolith
-    "ratchetLoc": 500,                # debt ratchet: an over-this file may never grow again (debt_ratchet.py)
+    "ratchetLoc": 500,                # debt ratchet: an over-this file may not grow past a small edit (debt_ratchet.py)
     "newFileMaxLoc": 600,             # G5_NEW_FILE_BLOAT_DENY: a brand-new source file above this is denied at write time
+                                      # (legacy key `monolithLoc` is an alias of this one)
     "srpMixedImportsMinLoc": 150,     # UI + network imports only block once the file is this big
     "srpMinClassLoc": 25,             # a class shorter than this is a helper, not a "major" class (God module count)
     "srpMixMinLoc": 400,              # SRP_RESPONSIBILITY_MIX: file size where mixed concerns are reported
     "srpMaxFunctionLoc": 120,         # SRP_RESPONSIBILITY_MIX: one function this long mixing concerns is reported
-    "singleWriteLoc": 200,            # one tool call adding this much to an EXISTING file
-    "creepBaseLoc": 800,              # file size above which additions are "creep"
-    "creepAddedLoc": 80,              # addition that counts as creep on such a file
-    "overEngineeringMaxLoc": 50,      # "small change" window for the abstraction spike
-    "overEngineerAbstractions": 2,    # declarations inside that window that trip it
+    "singleWriteLoc": 300,            # ARCH_FILE_GROWTH: LOC added to an EXISTING file in one call or within 15 minutes
 }
 
 _COMPLEXITY_THRESHOLD_FLOORS: Dict[str, int] = {
-    "monolithLoc": 100,
     "ratchetLoc": 100,
     "newFileMaxLoc": 100,
     "srpMixedImportsMinLoc": 20,
@@ -35,10 +30,6 @@ _COMPLEXITY_THRESHOLD_FLOORS: Dict[str, int] = {
     "srpMixMinLoc": 100,
     "srpMaxFunctionLoc": 40,
     "singleWriteLoc": 10,
-    "creepBaseLoc": 100,
-    "creepAddedLoc": 10,
-    "overEngineeringMaxLoc": 5,
-    "overEngineerAbstractions": 2,
 }
 
 
@@ -199,19 +190,12 @@ def resolve_complexity_thresholds(cfg: Optional[dict]) -> Dict[str, int]:
         return DEFAULT_COMPLEXITY_THRESHOLDS
 
     resolved = dict(DEFAULT_COMPLEXITY_THRESHOLDS)
-    applied = set()
+    block = {"newFileMaxLoc": block.get("monolithLoc"), **{k: v for k, v in block.items() if v is not None}}  # legacy alias
     for key, floor in _COMPLEXITY_THRESHOLD_FLOORS.items():
         value = block.get(key)
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            continue
-        if value < floor:
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < floor:
             continue
         resolved[key] = int(value)
-        applied.add(key)
-
-    # A project that relaxed the monolith line did not mean to keep a stricter new-file cap than its monoliths.
-    if "monolithLoc" in applied and "newFileMaxLoc" not in applied:
-        resolved["newFileMaxLoc"] = max(resolved["newFileMaxLoc"], resolved["monolithLoc"])
 
     return resolved
 

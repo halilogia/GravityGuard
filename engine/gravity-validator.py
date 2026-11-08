@@ -105,7 +105,6 @@ try:
         check_arch_file_growth,
         check_g3_compiler_bypass,
         check_g4_import_matrix,
-        check_oe_spike,
         is_cohesive_module_by_filename,
         is_py_cohesive_monolith,
         is_ts_cohesive_monolith,

@@ -427,24 +427,24 @@ class TestProjectIsolation(unittest.TestCase):
         self.assertEqual(get_unresolved_test_evidence(self.proj_b, "S"), {})
 
     def test_other_stop_roots_only_returns_roots_that_already_keep_state(self):
-        from gravityguard_engine.dispatcher import _other_stop_roots
+        from gravityguard_engine.stop_gate import other_stop_roots
         record_pending_test_evidence("src/x.py", None, "test_x.py", "no test", project_root=self.proj_b, conversation_id="S")
         payload = {"workspacePaths": [str(self.proj_a), str(self.proj_b), str(Path(self.base) / "missing")]}
-        self.assertEqual([p.name for p in _other_stop_roots(payload, self.proj_a)], ["b"])
+        self.assertEqual([p.name for p in other_stop_roots(payload, self.proj_a)], ["b"])
         self.assertFalse((self.proj_a / ".gravityguard").exists(), "the Stop check must not create state in the primary root")
 
     def test_other_stop_roots_does_not_create_state_in_an_untouched_root(self):
-        from gravityguard_engine.dispatcher import _other_stop_roots
+        from gravityguard_engine.stop_gate import other_stop_roots
         payload = {"workspacePaths": [str(self.proj_a), str(self.proj_b)]}
-        self.assertEqual(_other_stop_roots(payload, self.proj_a), [])
+        self.assertEqual(other_stop_roots(payload, self.proj_a), [])
         self.assertFalse((self.proj_b / ".gravityguard").exists())
 
     def test_other_stop_roots_is_empty_with_the_log_dir_override(self):
-        from gravityguard_engine.dispatcher import _other_stop_roots
+        from gravityguard_engine.stop_gate import other_stop_roots
         record_pending_test_evidence("src/x.py", None, "test_x.py", "no test", project_root=self.proj_b, conversation_id="S")
         os.environ["GRAVITYGUARD_LOG_DIR"] = self.base
         try:
-            self.assertEqual(_other_stop_roots({"workspacePaths": [str(self.proj_a), str(self.proj_b)]}, self.proj_a), [])
+            self.assertEqual(other_stop_roots({"workspacePaths": [str(self.proj_a), str(self.proj_b)]}, self.proj_a), [])
         finally:
             os.environ.pop("GRAVITYGUARD_LOG_DIR", None)
 

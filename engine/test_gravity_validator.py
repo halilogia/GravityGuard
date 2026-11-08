@@ -39,6 +39,12 @@ VALIDATOR_PATH = os.path.join(os.path.dirname(__file__), "gravity-validator.py")
 SCHEMA_ALLOWED_KEYS = {"decision", "reason", "permissionOverrides", "overwrite"}
 
 
+def _shadow_ratchet_growth(project_dir: str) -> None:
+    """ARCH_RATCHET_GROWTH_DENY would deny growing a 500+ line fixture outright; shadow it to reach ARCH_FILE_GROWTH."""
+    with open(os.path.join(project_dir, ".gravityguard.json"), "w", encoding="utf-8") as f:
+        json.dump({"rules": {"ARCH_RATCHET_GROWTH_DENY": "shadow"}}, f)
+
+
 def _warnings_from(res: dict) -> str:
     """Warnings are delivered through `reason` (the only schema-valid, agent-visible
     field). This helper keeps call sites readable."""
@@ -318,8 +324,8 @@ class TestGravityGuardPhase1(unittest.TestCase):
                 os.remove(cfg_path)
 
     # --- OE_SPIKE ---
-    def test_oe_spike_warn(self):
-        """OE_SPIKE produces WARN log, but does NOT block"""
+    def test_oe_spike_is_removed_two_new_classes_stay_silent(self):
+        """OE_SPIKE no longer exists: two small new classes neither block nor warn about abstraction"""
         payload = {
             "toolCall": {
                 "name": "replace_file_content",
@@ -332,6 +338,7 @@ class TestGravityGuardPhase1(unittest.TestCase):
         }
         res, ms = run_validator(payload)
         self.assertEqual(res.get("decision"), "allow")  # Never blocks
+        self.assertNotIn("Aşırı Soyutlama", res.get("reason", ""))
 
     # --- PERFORMANCE TIMING ---
     def test_sub_50ms_performance(self):
@@ -1068,7 +1075,7 @@ class TestGravityGuardPhase1(unittest.TestCase):
             t0 = time.perf_counter()
             added_lines, added_text, added_line_nos = gv.get_diff_analysis(old_code, new_code)
             gv.check_g1_silent_exception(added_lines, added_text, added_line_nos, new_code, True, False)
-            gv.check_oe_spike(added_text)
+            gv.check_arch_file_growth("src/calc.py", old_code, new_code, added_lines)
             elapsed_ms = (time.perf_counter() - t0) * 1000
             timings.append(elapsed_ms)
 
@@ -1663,18 +1670,19 @@ class TestGravityGuardPhase2(unittest.TestCase):
     # PHASE 2.5 TESTS: ARCH_FILE_GROWTH & STATIC LINTER DIAGNOSTICS
     # ========================================================================
 
-    def test_arch_file_growth_over_1000_loc_triggers_warn(self):
-        """When projected content exceeds 1000 non-empty lines, ARCH_FILE_GROWTH warns without blocking"""
+    def test_arch_file_growth_over_300_added_loc_on_a_big_file_triggers_warn(self):
+        """When one write adds 300+ non-empty lines to a big file, ARCH_FILE_GROWTH warns without blocking"""
         temp_dir = tempfile.mkdtemp()
         try:
+            _shadow_ratchet_growth(temp_dir)
             prod_file = os.path.join(temp_dir, "large_service.py")
             # 950 lines initial
             initial_lines = [f"def func_{i}():\n    return {i}\n" for i in range(475)]
             with open(prod_file, "w", encoding="utf-8") as f:
                 f.writelines(initial_lines)
 
-            # Add 80 more lines (total ~1030 lines)
-            added_content = "\n".join([f"def new_func_{i}():\n    return {i}" for i in range(40)])
+            # Add 320 more lines (total ~1270 lines)
+            added_content = "\n".join([f"def new_func_{i}():\n    return {i}" for i in range(160)])
             payload = {
                 "toolCall": {
                     "name": "replace_file_content",
@@ -1692,15 +1700,14 @@ class TestGravityGuardPhase2(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def test_arch_file_growth_single_addition_over_180_loc_triggers_warn(self):
-        """A single tool-call adding 180+ clean lines to an EXISTING file warns.
+    def test_arch_file_growth_single_addition_over_300_loc_triggers_warn(self):
+        """A single tool-call adding 300+ clean lines to an EXISTING file warns.
 
         v1.2.7 asserted this on a file that did not exist. Calibrated against
         1,636 real file creations, 359 of which add 180+ lines: warning on a
         brand-new module penalises exactly the modularisation the rule asks
-        for, and creations now fall under the crossing rule instead (a new file
-        still warns once it passes the monolith line). See
-        test_arch_file_growth_new_large_file_does_not_warn_but_monolith_does.
+        for; creations are governed by G5_NEW_FILE_BLOAT_DENY alone. See
+        test_arch_file_growth_never_warns_for_new_files.
         """
         temp_dir = tempfile.mkdtemp()
         try:
@@ -1708,7 +1715,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             with open(prod_file, "w", encoding="utf-8") as f:
                 f.write("def anchor():\n    return 0\n")
 
-            big_block = "\n".join([f"var_{i} = {i}" for i in range(200)])
+            big_block = "\n".join([f"var_{i} = {i}" for i in range(320)])
             payload = {
                 "toolCall": {
                     "name": "replace_file_content",
@@ -1725,12 +1732,10 @@ class TestGravityGuardPhase2(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def test_arch_file_growth_new_large_file_does_not_warn_but_monolith_does(self):
-        """A NEW file of 200 lines is silent; a NEW file past the monolith line is not.
+    def test_arch_file_growth_never_warns_for_new_files(self):
+        """Creation size is not accumulation: neither a 200-line nor a 1100-line NEW file gets ARCH_FILE_GROWTH.
 
-        This is the calibration in both directions: creation size is not
-        accumulation, but a file that is born over `monolithLoc` is still a
-        monolith and must be reported.
+        A file born over `newFileMaxLoc` is G5_NEW_FILE_BLOAT_DENY's business.
         """
         moderate = {
             "toolCall": {
@@ -1746,7 +1751,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
         self.assertNotIn("ARCH_FILE_GROWTH", _warnings_from(res))
 
         # G5_NEW_FILE_BLOAT_DENY (newFileMaxLoc) would deny a 1100-line creation outright; shadow it to reach Guard 6.
-        temp_dir = tempfile.mkdtemp()
+        temp_dir = tempfile.mkdtemp()  # (Guard 6 stays silent for it)
         try:
             with open(os.path.join(temp_dir, ".gravityguard.json"), "w", encoding="utf-8") as f:
                 json.dump({"rules": {"G5_NEW_FILE_BLOAT_DENY": "shadow"}}, f)
@@ -1761,7 +1766,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             }
             res, _ = run_validator(monolith)
             self.assertEqual(res.get("decision"), "allow")
-            self.assertIn("ARCH_FILE_GROWTH", _warnings_from(res))
+            self.assertNotIn("ARCH_FILE_GROWTH", _warnings_from(res))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -1791,7 +1796,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             "a two-line edit to a 1,200-line file must not repeat the monolith warning"
         )
 
-        big_addition = old + "\n".join(f"new_line_{i} = {i}" for i in range(120)) + "\n"
+        big_addition = old + "\n".join(f"new_line_{i} = {i}" for i in range(320)) + "\n"
         added_lines, _added_text, _nums = gv.get_diff_analysis(old, big_addition)
         triggered, reason = gv.check_arch_file_growth(
             "src/legacy_service.py", old, big_addition, added_lines, False
@@ -1813,11 +1818,11 @@ class TestGravityGuardPhase2(unittest.TestCase):
         spec.loader.exec_module(gv)
 
         old = "\n".join(f"line_{i} = {i}" for i in range(820)) + "\n"
-        new = old + "\n".join(f"extra_{i} = {i}" for i in range(100)) + "\n"
+        new = old + "\n".join(f"extra_{i} = {i}" for i in range(320)) + "\n"
         added_lines, _added_text, _nums = gv.get_diff_analysis(old, new)
         self.assertTrue(
             gv.check_arch_file_growth("src/table_module.py", old, new, added_lines, False)[0],
-            "precondition: an 820-line file growing by 100 lines must warn",
+            "precondition: an 820-line file growing by 320 lines must warn",
         )
 
         marked_new = "# srp: allow-monolith\n" + new
@@ -1841,7 +1846,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
         )
         self.assertEqual(
             gv.resolve_complexity_thresholds({"complexity": {"monolithLoc": 2000}}),
-            {**gv.DEFAULT_COMPLEXITY_THRESHOLDS, "monolithLoc": 2000, "newFileMaxLoc": 2000},  # new-file cap follows
+            {**gv.DEFAULT_COMPLEXITY_THRESHOLDS, "newFileMaxLoc": 2000},  # legacy monolithLoc is an alias of the new-file cap
         )
         for bad in (
             {"complexity": {"monolithLoc": 3}},                 # below the floor: rule would be meaningless
@@ -1857,14 +1862,8 @@ class TestGravityGuardPhase2(unittest.TestCase):
                 f"invalid config must degrade to defaults, got {bad}",
             )
 
-    def test_configured_complexity_threshold_actually_changes_the_verdict(self):
-        """A project that allows 2,000-line modules stops being warned at 1,000.
-
-        The case is a file CREATION, which is the only shape where the monolith
-        line can fire on its own: for a modification, passing 1,000 lines always
-        implies an addition big enough to trip the creep or single-write rule
-        anyway, so the crossing event is only load-bearing here.
-        """
+    def test_configured_complexity_threshold_changes_the_new_file_verdict(self):
+        """A project that sets legacy `monolithLoc: 2000` may create a 1,100-line module; the default denies it."""
         body = "\n".join(f"var_{i} = {i}" for i in range(1100))
 
         def payload_for(path: str) -> dict:
@@ -1877,63 +1876,51 @@ class TestGravityGuardPhase2(unittest.TestCase):
 
         temp_dir = tempfile.mkdtemp()
         try:
-            # Default thresholds, with only the G5 new-file cap (600) shadowed so the 1100-line creation reaches Guard 6.
             with open(os.path.join(temp_dir, ".gravityguard.json"), "w", encoding="utf-8") as f:
-                json.dump({"rules": {"G5_NEW_FILE_BLOAT_DENY": "shadow"}}, f)
+                json.dump({}, f)
             res, _ = run_validator(payload_for(os.path.join(temp_dir, "default_module.py")))
-            self.assertEqual(res.get("decision"), "allow")
-            self.assertIn("ARCH_FILE_GROWTH", _warnings_from(res), "precondition: default warns")
+            self.assertEqual(res.get("decision"), "deny", "precondition: default new-file cap denies")
+            self.assertIn("G5_NEW_FILE_BLOAT_DENY", _warnings_from(res))
 
-            # Relaxing monolithLoc alone must also relax the new-file cap (no G5 shadow needed any more).
+            # monolithLoc is an alias of newFileMaxLoc, so relaxing it relaxes the new-file cap.
             with open(os.path.join(temp_dir, ".gravityguard.json"), "w", encoding="utf-8") as f:
                 json.dump({"complexity": {"monolithLoc": 2000}}, f)
 
             res, _ = run_validator(payload_for(os.path.join(temp_dir, "relaxed_module.py")))
             self.assertEqual(res.get("decision"), "allow")
-            self.assertNotIn("ARCH_FILE_GROWTH", _warnings_from(res))
+            self.assertNotIn("G5_NEW_FILE_BLOAT_DENY", _warnings_from(res))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def test_oe_spike_threshold_is_configurable(self):
-        """`complexity.overEngineerAbstractions` retunes the abstraction-spike window."""
+    def test_removed_complexity_keys_are_ignored_and_the_legacy_keys_still_work(self):
+        """Old `.gravityguard.json` files keep loading: dropped keys are ignored, `monolithLoc` aliases `newFileMaxLoc`."""
         import importlib.util
         spec = importlib.util.spec_from_file_location("gravity_validator", VALIDATOR_PATH)
         gv = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(gv)
 
-        two_classes = "class Alpha:\n    pass\n\nclass Beta:\n    pass\n"
-        self.assertTrue(gv.check_oe_spike(two_classes)[0], "precondition: 2 classes trip the default")
-        self.assertFalse(
-            gv.check_oe_spike(
-                two_classes, gv.resolve_complexity_thresholds({"complexity": {"overEngineerAbstractions": 3}})
-            )[0],
-            "a project that tolerates three declarations must not be warned here",
+        legacy = {"complexity": {"overEngineerAbstractions": 3, "creepAddedLoc": 500, "singleWriteLoc": 400}}
+        self.assertEqual(
+            gv.resolve_complexity_thresholds(legacy),
+            {**gv.DEFAULT_COMPLEXITY_THRESHOLDS, "singleWriteLoc": 400},
         )
+        explicit = {"complexity": {"monolithLoc": 2000, "newFileMaxLoc": 700}}
+        self.assertEqual(gv.resolve_complexity_thresholds(explicit)["newFileMaxLoc"], 700)
+        self.assertFalse(hasattr(gv, "check_oe_spike"))
 
-        longer = (
-            "class Alpha:\n    def __init__(self):\n        self.value = 1\n\n"
-            "class Beta:\n    def __init__(self):\n        self.value = 2\n"
-        )
-        self.assertTrue(gv.check_oe_spike(longer)[0], "precondition: still inside the 50-LOC window")
-        self.assertFalse(
-            gv.check_oe_spike(
-                longer, gv.resolve_complexity_thresholds({"complexity": {"overEngineeringMaxLoc": 5}})
-            )[0],
-            "a project that only calls a change 'small' below 6 LOC is not warned here",
-        )
-
-    def test_arch_file_growth_creeping_growth_800_plus_80_triggers_warn(self):
-        """When an 800+ LOC file receives 80+ lines, ARCH_FILE_GROWTH warns"""
+    def test_arch_file_growth_creeping_growth_800_plus_300_triggers_warn(self):
+        """When an 800+ LOC file receives 300+ lines, ARCH_FILE_GROWTH warns"""
         temp_dir = tempfile.mkdtemp()
         try:
+            _shadow_ratchet_growth(temp_dir)
             prod_file = os.path.join(temp_dir, "creeping_module.py")
             # 820 lines initial
             initial_lines = [f"line_{i} = {i}\n" for i in range(820)]
             with open(prod_file, "w", encoding="utf-8") as f:
                 f.writelines(initial_lines)
 
-            # Add 85 lines
-            added_content = "\n".join([f"extra_line_{i} = {i}" for i in range(85)])
+            # Add 305 lines
+            added_content = "\n".join([f"extra_line_{i} = {i}" for i in range(305)])
             payload = {
                 "toolCall": {
                     "name": "replace_file_content",
@@ -2192,7 +2179,6 @@ class TestGravityGuardPhase2(unittest.TestCase):
             gv.check_g0_secret_leak(added_text)
             gv.check_g1_silent_exception(added_lines, added_text, line_nums, new_code, True, False)
             gv.check_g3_compiler_bypass(added_text)
-            gv.check_oe_spike(added_text)
             gv.check_arch_file_growth("src/auth.py", old_code, new_code, added_lines, False)
             elapsed_ms = (time.perf_counter() - t0) * 1000
             timings.append(elapsed_ms)
@@ -3653,6 +3639,38 @@ class TestObligationGovernance(unittest.TestCase):
         # No tests suite declared, and doc obligation is resolved -> allow!
         self.assertEqual(stop_res.get("decision"), "allow")
         self.assertEqual(stop_res.get("reason", ""), "")
+
+    def _doc_obligation_stop(self, governance: dict):
+        with open(os.path.join(self.temp_dir, ".gravityguard.json"), "w", encoding="utf-8") as f:
+            json.dump({"governance": governance}, f)
+        changelog = os.path.join(self.temp_dir, "CHANGELOG.md")
+        with open(changelog, "w", encoding="utf-8") as f:
+            f.write("# Changelog\n\n## [Unreleased]\n")
+        engine_file = os.path.join(self.temp_dir, "engine", "auto_mod.py")
+        os.makedirs(os.path.dirname(engine_file), exist_ok=True)
+        run_validator({"toolCall": {"name": "write_to_file", "args": {"TargetFile": engine_file, "CodeContent": "def auto_mod():\n    return 1\n"}}})
+        stop_res, _ = run_validator({"terminationReason": "model_stop", "workspacePaths": [self.temp_dir]})
+        with open(changelog, encoding="utf-8") as f:
+            return stop_res, f.read()
+
+    def test_doc_obligation_auto_mode_closes_without_blocking_stop(self):
+        stop_res, changelog_text = self._doc_obligation_stop({"enforceDocObligations": True})
+        self.assertEqual(stop_res.get("decision"), "allow")
+        self.assertIn("[auto]", changelog_text)
+
+    def test_doc_obligation_strict_mode_still_blocks_first_stop(self):
+        stop_res, changelog_text = self._doc_obligation_stop({"enforceDocObligations": True, "docObligationMode": "strict"})
+        self.assertEqual(stop_res.get("decision"), "continue")
+        self.assertIn("Dokümantasyon Yükümlülüğü", stop_res.get("reason", ""))
+        self.assertNotIn("[auto]", changelog_text)
+
+    def test_tools_and_scripts_dirs_do_not_owe_documentation_by_default(self):
+        from pathlib import Path
+        from gravityguard_engine.doc_policy import is_doc_governed_path
+        root = Path(self.temp_dir)
+        for rel in ("tools/helper.py", "scripts/build.py"):
+            self.assertFalse(is_doc_governed_path(str(root / rel), {}, root), rel)
+        self.assertTrue(is_doc_governed_path(str(root / "engine" / "core.py"), {}, root))
 
     def test_two_phase_commit_unwritten_file_keeps_obligation_open(self):
         """PreTool approves write for CHANGELOG.md, but file is not written to disk; subsequent Stop hook returns continue."""

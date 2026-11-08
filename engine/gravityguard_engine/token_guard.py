@@ -168,7 +168,11 @@ def evaluate_read_guard(
 
 
 _RECURSIVE_LIST = re.compile(r"(dir\s+/s\b)|(Get-ChildItem[^\n|]*-Recurse)|(\bfind\s+/\s)|(grep\s+-r\s+/)", re.IGNORECASE)
-_LIMITED = re.compile(r"(\|\s*Select-Object\s+-First)|(\|\s*Select\s+-First)|(-TotalCount)|(-First\s+\d+)|(\|\s*head\b)", re.IGNORECASE)
+# Output already narrowed: a depth limit, a count flag, or a pipe into a filter/reducer.
+_LIMITED = re.compile(
+    r"(-Depth\b)|(-TotalCount)|(-(First|Last|Take|Tail|Head)\s+\d+)"
+    r"|(\|\s*(Select-Object|Select|Measure-Object|Measure|Where-Object|Where|Select-String|findstr|grep|rg|head|tail|wc|more|less)\b)",
+    re.IGNORECASE)
 _GIT_LOG_UNBOUNDED = re.compile(r"\bgit\s+log\b(?!.*(-n\s*\d+|(?<![\w-])-\d+\b|--max-count|--oneline\s+-n|\|\s*head|\|\s*Select-Object))", re.IGNORECASE)
 _GIT_DIFF_UNBOUNDED = re.compile(r"\bgit\s+diff\s*$", re.IGNORECASE)
 _BIG_CAT = re.compile(r"\b(cat|type|Get-Content)\s+[\"']?([^\"'\s|>]+)", re.IGNORECASE)
@@ -195,9 +199,9 @@ def evaluate_command_guard(
     reason: Optional[str] = None
     if _RECURSIVE_LIST.search(command) and not _LIMITED.search(command):
         reason = "Sinirsiz ozyinelemeli dizin listeleme tespit edildi; cikti binlerce satir olabilir."
-    elif _GIT_LOG_UNBOUNDED.search(command):
+    elif _GIT_LOG_UNBOUNDED.search(command) and not _LIMITED.search(command):
         reason = "Sinirsiz `git log` tespit edildi; `-n 20` veya `--max-count` ekleyin."
-    elif _GIT_DIFF_UNBOUNDED.search(command):
+    elif _GIT_DIFF_UNBOUNDED.search(command) and not _LIMITED.search(command):
         reason = "Sinirsiz `git diff` tespit edildi; `--stat`, dosya yolu veya `HEAD~1` siniri ekleyin."
     else:
         match = _BIG_CAT.search(command)
@@ -230,12 +234,18 @@ def evaluate_token_guard(
     args: Dict[str, Any],
     cwd: str = "",
     project_root: Optional[str] = None,
+    conversation_id: str = "",
 ) -> Optional[TokenGuardResult]:
-    """Returns the strongest finding: a deny beats a warn."""
+    """Returns the strongest finding: a deny beats a warn. A warn is said once per conversation (when an id is given)."""
     if not isinstance(args, dict):
         return None
     read = evaluate_read_guard(tool_name, args, cwd, project_root)
     if read and read.level == "deny":
         return read
-    command = evaluate_command_guard(tool_name, args, cwd, project_root)
-    return read or command
+    finding = read or evaluate_command_guard(tool_name, args, cwd, project_root)
+    if finding and conversation_id:
+        from .hook_output import drop_repeated_warnings
+
+        if not drop_repeated_warnings([(finding.rule_id, "context-bloat warning")], conversation_id, ""):
+            return None
+    return finding

@@ -16,7 +16,7 @@ from typing import Iterable, List, Optional
 
 # Top-level or nested directory names whose code files owe a CHANGELOG entry when changed. Projects add their own
 # directories with `governance.docObligationPatterns` in `.gravityguard.json` (matched against the project-relative path).
-DEFAULT_GOVERNED_DIRS = frozenset({"engine", "src", "plugin", "rules", "scripts", "tools"})
+DEFAULT_GOVERNED_DIRS = frozenset({"engine", "src", "plugin", "rules"})
 
 _TEST_DIR_NAMES = frozenset({"tests", "test", "__tests__"})
 _SKIPPED_PATH_MARKERS = (

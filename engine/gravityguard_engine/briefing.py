@@ -4,7 +4,7 @@ Rejections teach after the mistake; the briefing tells the agent before its firs
 audit journal, per agent, so each agent hears about its own weak spots. Output is short plain text meant for a hook's
 additionalContext; an empty string means there is nothing worth saying.
 
-    python -m gravityguard_engine.briefing --agent "Claude Code" [--days 7] [--top 4]
+    python -m gravityguard_engine.briefing --agent "Claude Code" [--days 1] [--top 4] [--min-count 3]
 """
 import argparse
 import json
@@ -45,8 +45,8 @@ def _records(path: str) -> Iterable[dict]:
         return
 
 
-def build_briefing(agent: str, days: int = 7, top: int = 4, journal: str | None = None,
-                   now: datetime | None = None) -> str:
+def build_briefing(agent: str, days: int = 1, top: int = 4, journal: str | None = None,
+                   now: datetime | None = None, min_count: int = 3) -> str:
     now = now or datetime.now(timezone.utc)
     since = now - timedelta(days=days)
     mistakes: Counter = Counter()
@@ -74,10 +74,12 @@ def build_briefing(agent: str, days: int = 7, top: int = 4, journal: str | None 
         if status in ("BLOCKED", "WARNING") and rule not in _NOT_MISTAKES and rec.get("outcome") != "REPEATED_VIOLATION":
             mistakes[rule] += 1
 
-    tipped = [(r, n) for r, n in mistakes.most_common() if r in TIPS][:top]
+    # Only a rule that keeps tripping is worth injecting; a quiet window means no briefing at all.
+    tipped = [(r, n) for r, n in mistakes.most_common() if r in TIPS and n >= min_count][:top]
     if not tipped:
         return ""
-    lines = [f"GravityGuard: son {days} günde en sık takıldığın kurallar. İlk yazımda bunlara uy:"]
+    window = "24 saatte" if days == 1 else f"{days} günde"
+    lines = [f"GravityGuard: son {window} en sık takıldığın kurallar. İlk yazımda bunlara uy:"]
     for rule, n in tipped:
         lines.append(f"- {rule}, {n} kez: {TIPS[rule][0]}")
     if writes:
@@ -160,11 +162,12 @@ def brief_first_call(out: str, conversation_id: str, log_dir: str | None = None)
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--agent", required=True)
-    ap.add_argument("--days", type=int, default=7)
+    ap.add_argument("--days", type=int, default=1)
     ap.add_argument("--top", type=int, default=4)
+    ap.add_argument("--min-count", type=int, default=3)
     ap.add_argument("--out", help="write the briefing to this file instead of stdout (empty file when nothing to say)")
     args = ap.parse_args(argv)
-    text = build_briefing(args.agent, days=args.days, top=args.top)
+    text = build_briefing(args.agent, days=args.days, top=args.top, min_count=args.min_count)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             f.write(text + "\n" if text else "")

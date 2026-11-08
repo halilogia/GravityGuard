@@ -5,9 +5,11 @@ Implements the Clean-as-You-Code ratchet mechanism:
 - Any line reduction permanently lowers the baseline (ratchet clicks forward).
 - A file's first-seen baseline is taken from git HEAD (not from its current, possibly already bloated, content),
   so new or freshly bloated files cannot be "grandfathered" by simply being evaluated late.
+  Outside git the pre-tool hook seeds the baseline from the on-disk size before the write (ratchet_gate.py).
 """
 
 from __future__ import annotations
+
 import contextlib
 import json
 import os
@@ -16,7 +18,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Dict, Any, Iterator, Tuple, List, Optional, Set
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 from .refactor_hint import build_refactor_hint
 
@@ -76,7 +78,11 @@ def is_test_or_exempt_file(file_path: str) -> bool:
 
 
 def get_ratchet_store_path(project_root: str) -> str:
-    """Returns the absolute path to .gravityguard/debt_ratchet.json."""
+    """Returns the absolute path to .gravityguard/runtime/debt_baselines.json (agent-read-only runtime state)."""
+    return os.path.join(project_root, ".gravityguard", "runtime", "debt_baselines.json")
+
+
+def _legacy_store_path(project_root: str) -> str:
     return os.path.join(project_root, ".gravityguard", "debt_ratchet.json")
 
 
@@ -87,12 +93,14 @@ def _empty_store() -> Dict[str, Any]:
 def load_debt_ratchet(project_root: str) -> Dict[str, Any]:
     """Loads the debt ratchet store safely. Returns a valid dict structure.
 
-    A corrupt store is moved aside to ``debt_ratchet.json.corrupt`` instead of being silently overwritten,
+    A corrupt store is moved aside to ``<store>.corrupt`` instead of being silently overwritten,
     so a broken file cannot quietly re-grandfather every bloated file.
     """
     store_path = get_ratchet_store_path(project_root)
     if not os.path.isfile(store_path):
-        return _empty_store()
+        store_path = _legacy_store_path(project_root)  # pre-runtime location; the next save moves it
+        if not os.path.isfile(store_path):
+            return _empty_store()
 
     try:
         with open(store_path, "r", encoding="utf-8") as f:
@@ -330,7 +338,7 @@ def evaluate_changed_files_ratchet(
     for fp in dict.fromkeys(changed_files):
         full_path = fp if os.path.isabs(fp) else os.path.join(project_root, fp)
         rel = to_project_rel_path(project_root, full_path)
-        if is_test_or_exempt_file(rel):
+        if is_test_or_exempt_file(rel) or not rel.lower().endswith(SCAN_SOURCE_SUFFIXES) or rel.startswith("screenshots/"):
             continue
         loc = _measure_file(full_path)
         if loc is not None:

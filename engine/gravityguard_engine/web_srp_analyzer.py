@@ -3,10 +3,10 @@ Web SRP Analyzer for GravityGuard (HTML & Web Separation of Concerns)
 Enforces deterministic budgets and structural Separation of Concerns on HTML files.
 
 Rules enforced:
-- WEB_INLINE_JS_BUDGET: Executable inline JS >30 LOC or >2048 bytes -> DENY (>10 LOC -> WARN)
-- WEB_INLINE_CSS_BUDGET: Inline CSS >60 LOC or >4096 bytes -> DENY (>20 LOC -> WARN)
+- WEB_INLINE_JS_BUDGET: Executable inline JS >10 LOC (>30 LOC or >2048 bytes: stronger wording) -> WARN
+- WEB_INLINE_CSS_BUDGET: Inline CSS >20 LOC (>60 LOC or >4096 bytes: stronger wording) -> WARN
 - WEB_MIXED_RESPONSIBILITIES: JS (>10 LOC) and CSS (>20 LOC) embedded together -> DENY
-- WEB_DOCUMENT_SIZE: HTML >350 LOC -> WARN, HTML >600 LOC + structural violation -> DENY
+- WEB_DOCUMENT_SIZE: HTML >350 LOC -> WARN (>600 LOC + embedded style/script: monolith wording)
 """
 
 import re
@@ -130,22 +130,18 @@ def analyze_html_srp(
     # RULE 1: WEB_INLINE_JS_BUDGET
     # Executable inline JS > 30 LOC or > 2048 bytes -> DENY
     if total_js_loc > 30:
-        return (
-            True,
+        warnings.append((
             "WEB_INLINE_JS_BUDGET",
-            f"HTML dosyasında {total_js_loc} satır çalıştırılabilir gömülü JavaScript tespit edildi (Azami sınır: 30 LOC). "
-            f"İş mantığı, durum yönetimi ve veri yapılarını bağımsız .js/.ts modüllerine taşıyın.",
-            warnings
-        )
-    if total_js_bytes > 2048:
-        return (
-            True,
+            f"HTML dosyasında {total_js_loc} satır çalıştırılabilir gömülü JavaScript var (önerilen sınır: 30 LOC). "
+            f"İş mantığını bağımsız .js/.ts modüllerine taşıyın."
+        ))
+    elif total_js_bytes > 2048:
+        warnings.append((
             "WEB_INLINE_JS_BUDGET",
-            f"HTML dosyasında {total_js_bytes} bayt (~{(total_js_bytes/1024):.1f} KiB) gömülü JavaScript tespit edildi (Azami sınır: 2 KiB). "
-            f"Komut dosyalarını harici bir .js dosyasına çıkarıp <script src=\"...\"> ile bağlayın.",
-            warnings
-        )
-    if total_js_loc > 10:
+            f"HTML dosyasında {total_js_bytes} bayt (~{(total_js_bytes/1024):.1f} KiB) gömülü JavaScript var (önerilen sınır: 2 KiB). "
+            f"Betikleri harici bir .js dosyasına çıkarıp <script src=\"...\"> ile bağlayın."
+        ))
+    elif total_js_loc > 10:
         warnings.append((
             "WEB_INLINE_JS_BUDGET",
             f"Gömülü JavaScript {total_js_loc} LOC seviyesinde (Önerilen sınır: 10 LOC). Küçük yardımcı işlevler dışında betikleri harici dosyalara ayırın."
@@ -154,22 +150,18 @@ def analyze_html_srp(
     # RULE 2: WEB_INLINE_CSS_BUDGET
     # Inline CSS > 60 LOC or > 4096 bytes -> DENY
     if total_css_loc > 60:
-        return (
-            True,
+        warnings.append((
             "WEB_INLINE_CSS_BUDGET",
-            f"HTML dosyasında {total_css_loc} satır gömülü <style> CSS tespit edildi (Azami sınır: 60 LOC). "
-            f"Stil tanımlarını harici bir .css dosyasına taşıyın ve <link rel=\"stylesheet\"> ile bağlayın.",
-            warnings
-        )
-    if total_css_bytes > 4096:
-        return (
-            True,
+            f"HTML dosyasında {total_css_loc} satır gömülü <style> CSS var (önerilen sınır: 60 LOC). "
+            f"Stilleri harici bir .css dosyasına taşıyıp <link rel=\"stylesheet\"> ile bağlayın."
+        ))
+    elif total_css_bytes > 4096:
+        warnings.append((
             "WEB_INLINE_CSS_BUDGET",
-            f"HTML dosyasında {total_css_bytes} bayt (~{(total_css_bytes/1024):.1f} KiB) gömülü CSS tespit edildi (Azami sınır: 4 KiB). "
-            f"Stil kurallarını bağımsız .css dosyasına ayırın.",
-            warnings
-        )
-    if total_css_loc > 20:
+            f"HTML dosyasında {total_css_bytes} bayt (~{(total_css_bytes/1024):.1f} KiB) gömülü CSS var (önerilen sınır: 4 KiB). "
+            f"Stil kurallarını bağımsız .css dosyasına ayırın."
+        ))
+    elif total_css_loc > 20:
         warnings.append((
             "WEB_INLINE_CSS_BUDGET",
             f"Gömülü CSS {total_css_loc} LOC seviyesinde (Önerilen sınır: 20 LOC). Stilleri harici .css dosyasında toplamayı değerlendirin."
@@ -187,19 +179,17 @@ def analyze_html_srp(
         )
 
     # RULE 4: WEB_DOCUMENT_SIZE
-    # > 350 LOC -> WARN, > 600 LOC + structural violation -> DENY
+    # > 350 LOC -> WARN (monolithic with embedded style/script is flagged as such)
     if total_doc_loc > 600 and (total_js_loc > 10 or total_css_loc > 20 or len(style_blocks) + len(exec_scripts) >= 3):
-        return (
-            True,
+        warnings.append((
             "WEB_DOCUMENT_SIZE",
-            f"Monolitik HTML İhlali: Belge {total_doc_loc} satır uzunluğunda ve gömülü stil/betik sorumluluklarını aynı dosyada biriktiriyor. "
-            f"HTML yalnızca saf DOM iskeletini barındırmalıdır.",
-            warnings
-        )
+            f"Monolitik HTML: Belge {total_doc_loc} satır ve gömülü stil/betik sorumluluklarını aynı dosyada biriktiriyor. "
+            f"HTML yalnızca saf DOM iskeletini barındırmalıdır."
+        ))
     elif total_doc_loc > 350:
         warnings.append((
             "WEB_DOCUMENT_SIZE",
-            f"HTML belgesi {total_doc_loc} satıra ulaştı (Önerilen modüler sınır: 350 LOC). Arayüz bileşenlerini şablonlara veya alt modüllere bölmeyi değerlendirin."
+            f"HTML belgesi {total_doc_loc} satıra ulaştı (önerilen modüler sınır: 350 LOC)."
         ))
 
     return False, "", "HTML SRP Compliant", warnings

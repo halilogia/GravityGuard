@@ -8,8 +8,10 @@ import os
 import subprocess
 import sys
 import time
+import zlib
+from collections import Counter
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Set, Tuple
 
 _CREATE_NO_WINDOW = 0x08000000
 
@@ -55,6 +57,9 @@ def read_recent_diagnostics(target_file: str) -> List[Tuple[str, str]]:
 
     if not diagnostics_path or not diagnostics_path.exists():
         return []
+    if _is_scratch(Path(target_file), diagnostics_path.parents[2]):
+        return []
+    changed = _changed_lines(diagnostics_path, target_file)
 
     try:
         with open(diagnostics_path, "r", encoding="utf-8") as f:
@@ -86,6 +91,8 @@ def read_recent_diagnostics(target_file: str) -> List[Tuple[str, str]]:
 
         tool = matched_entry.get("tool", "linter")
         errors = matched_entry.get("errors", [])
+        if changed is not None:  # only what this edit touched; older findings are not the agent's to clean up now
+            errors = [e for e in errors if not isinstance(e.get("line"), int) or e["line"] in changed]
         if errors:
             first_err = errors[0]
             err_summary = first_err.get("message", "Lint issue")
@@ -105,6 +112,52 @@ def read_recent_diagnostics(target_file: str) -> List[Tuple[str, str]]:
         return []
 
     return []
+
+
+_SCRATCH_DIRS = frozenset(("scratch", "tmp", "temp"))
+_LINE_SNAPSHOT_CAP = 5000
+
+
+def _is_scratch(target: Path, project_root: Path) -> bool:
+    """Scratch/temp files are throwaway: their lint results are noise. Judged relative to the project, not the OS temp dir."""
+    posix = str(target).replace("\\", "/").lower()
+    if "/.gemini/antigravity/scratch/" in posix:
+        return True
+    try:
+        rel_parts = target.resolve().relative_to(project_root.resolve()).parts[:-1]
+    except (OSError, ValueError):
+        return False
+    return any(part.lower() in _SCRATCH_DIRS for part in rel_parts)
+
+
+def _changed_lines(diagnostics_path: Path, target_file: str) -> Optional[Set[int]]:
+    """1-based lines that differ from the file's snapshot at the previous check; None when there is no snapshot."""
+    state_path = diagnostics_path.with_name("diagnostics_lines.json")
+    key = str(Path(target_file).resolve()).replace("\\", "/")
+    try:
+        with open(target_file, "rb") as f:
+            current = [zlib.crc32(line.strip()) for line in f.read().splitlines()][:_LINE_SNAPSHOT_CAP]
+        state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.is_file() else {}
+        state = state if isinstance(state, dict) else {}
+    except (OSError, ValueError):
+        return None
+    previous = state.get(key)
+    state.pop(key, None)
+    state[key] = current
+    try:
+        state_path.write_text(json.dumps(dict(list(state.items())[-100:])), encoding="utf-8")
+    except OSError as err:
+        sys.stderr.write(f"[GravityGuard] could not record line snapshot: {err}\n")
+    if not isinstance(previous, list):
+        return None
+    unused = Counter(previous)
+    changed = set()
+    for number, digest in enumerate(current, 1):
+        if unused[digest] > 0:
+            unused[digest] -= 1
+        else:
+            changed.add(number)
+    return changed
 
 
 def _already_reported(diagnostics_path: Path, norm_target: str, signature: str) -> bool:

@@ -1,4 +1,4 @@
-"""Circuit-breaker gap, new-file hard cap, refactoring blueprint and session knowledge distillation."""
+"""Circuit-breaker forgiveness of ratchet regressions, new-file hard cap, refactoring blueprint."""
 import json
 import os
 import shutil
@@ -8,9 +8,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from gravityguard_engine import stop_gate
 from gravityguard_engine.debt_ratchet import check_new_file_bloat
 from gravityguard_engine.refactor_hint import build_refactor_hint
-from gravityguard_engine.stop_gate import distill_session_knowledge, note_raised_rules
 
 _ENGINE_DIR = str(Path(__file__).resolve().parent.parent)
 VALIDATOR = os.path.join(_ENGINE_DIR, "gravity-validator.py")
@@ -92,22 +92,16 @@ class StopGateEndToEndTests(unittest.TestCase):
         self.assertIn("G5_NEW_FILE_BLOAT_DENY", denied["reason"])
         self.assertEqual(self.write("small_module.py", _class_file(50))["decision"], "allow")
 
-    def test_breaker_never_forgives_a_ratchet_regression_and_success_is_distilled(self):
+    def test_breaker_forgives_a_ratchet_regression_and_never_writes_session_notes(self):
+        notes_before = (self.proj / "brain" / "knowledge.md").read_bytes()
         (self.proj / "big.py").write_text(_class_file(640), encoding="utf-8")
         first = self.stop()
         self.assertEqual(first["decision"], "continue")
         self.assertIn("Öneri", first["reason"])  # blueprint rides along with the regression
         for _ in range(4):
             self.assertEqual(self.stop()["decision"], "continue")
-        sixth = self.stop()  # retries exhausted: the old breaker answered "allow" here
-        self.assertEqual(sixth["decision"], "continue")
-        self.assertIn("manuel müdahale", sixth["reason"])
-
-        (self.proj / "big.py").write_text(_class_file(600), encoding="utf-8")  # the agent refactors back under its ceiling
-        self.assertEqual(self.stop()["decision"], "allow")
-        notes = (self.proj / "brain" / "knowledge.md").read_text(encoding="utf-8")
-        self.assertIn("## Otomatik Oturum Notları", notes)
-        self.assertIn("ARCH_RATCHET_REGRESSION", notes)
+        self.assertEqual(self.stop()["decision"], "allow")  # retries exhausted: a ratchet regression is only a warning
+        self.assertEqual((self.proj / "brain" / "knowledge.md").read_bytes(), notes_before)
 
 
 class KnowledgeDistillationTests(unittest.TestCase):
@@ -117,22 +111,17 @@ class KnowledgeDistillationTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.root, ignore_errors=True)
 
-    def test_writes_one_deduplicated_line_and_keeps_crlf(self):
+    def test_session_note_helpers_are_gone_and_only_a_failed_test_run_is_critical(self):
         (self.root / "brain").mkdir()
         (self.root / "brain" / "knowledge.md").write_bytes(b"# K\r\n\r\ntext\r\n")
-        note_raised_rules(self.root, "c", ["DOC_OBLIGATION_UNRESOLVED", "ARCH_RATCHET_REGRESSION"])
-        line = distill_session_knowledge(self.root, "c")
-        self.assertIn("ARCH_RATCHET_REGRESSION, DOC_OBLIGATION_UNRESOLVED", line)
-        data = (self.root / "brain" / "knowledge.md").read_bytes()
-        self.assertEqual(data.count(b"\r\n"), data.count(b"\n"))
-        note_raised_rules(self.root, "c", ["DOC_OBLIGATION_UNRESOLVED", "ARCH_RATCHET_REGRESSION"])
-        self.assertIsNone(distill_session_knowledge(self.root, "c"))
-        self.assertEqual(data, (self.root / "brain" / "knowledge.md").read_bytes())
+        self.assertFalse(hasattr(stop_gate, "distill_session_knowledge"))
+        self.assertFalse(hasattr(stop_gate, "note_raised_rules"))
+        self.assertEqual(stop_gate.critical_blockers(self.root, None), [])
+        self.assertEqual((self.root / "brain" / "knowledge.md").read_bytes(), b"# K\r\n\r\ntext\r\n")
 
-    def test_nothing_raised_or_no_knowledge_file_writes_nothing(self):
-        self.assertIsNone(distill_session_knowledge(self.root, "c"))
-        note_raised_rules(self.root, "c", ["X_RULE"])
-        self.assertIsNone(distill_session_knowledge(self.root, "c"))
+    def test_oversized_file_is_no_critical_blocker_and_nothing_is_written(self):
+        (self.root / "big.py").write_text(_class_file(700), encoding="utf-8")
+        self.assertEqual(stop_gate.critical_blockers(self.root, None), [])
         self.assertFalse((self.root / "brain").exists())
 
 

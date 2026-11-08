@@ -4,9 +4,7 @@ GravityGuard Engine — Architectural Rules & Modularity Subsystem.
 Implements:
 - G3: Compiler & Linter Bypass Warnings (WARN)
 - G4: Layer Boundaries & Import Matrix (BLOCK)
-- OE_SPIKE: Over-engineering & Premature Abstraction (WARN)
-- Cumulative Growth & Micro-Chunking Prevention (WARN)
-- ARCH_FILE_GROWTH: Large File & Creep Detection (WARN)
+- ARCH_FILE_GROWTH: +singleWriteLoc LOC in one write or within 15 minutes of an existing file (WARN)
 - SRP: Single Responsibility Principle & God Module Analysis (BLOCK)
 - ARCH_PMA_*: Pragmatic Modular Architecture boundary detector (BLOCK)
 Zero external dependencies.
@@ -116,110 +114,37 @@ _MANDATORY_JS_EXACT_NAMES: Set[str] = {
     "sw.js", "service-worker.js", "firebase-messaging-sw.js",
 }
 
-_TS_MANDATORY_FEEDBACK_RE = re.compile(
-    r"(?://|/\*)\s*@(?:ts-mandatory|gravityguard-js-reason)\s*:\s*([^\n\r\*]+)",
-    re.IGNORECASE,
-)
-
-_TRIVIAL_FEEDBACK_REASONS: Set[str] = {
-    "test", "bypass", "none", "zorunlu", "gerekiyor", "js", "javascript", "ok", "allow",
-}
-
-
-def extract_js_mandatory_feedback(content: str) -> Optional[str]:
+def evaluate_g7_ts_first(target_file: str, projected_content: str = "") -> Tuple[bool, str]:
     """
-    Extracts a validated AI mandatory-JS justification from the first 10 lines of a file.
-    Syntax: // @ts-mandatory: <at least 15 chars of concrete technical reason>
-    """
-    if not content:
-        return None
-    head = "\n".join(content.splitlines()[:10])
-    m = _TS_MANDATORY_FEEDBACK_RE.search(head)
-    if not m:
-        return None
-    reason = m.group(1).strip()
-    if len(reason) < 15 or reason.lower() in _TRIVIAL_FEEDBACK_REASONS:
-        return None
-    return reason
-
-
-def record_js_mandatory_feedback(
-    target_file: str,
-    reason: str,
-    conversation_id: str = "default",
-) -> None:
-    """Persists AI feedback for mandatory JS exemptions so GravityGuard can audit and learn new patterns."""
-    from datetime import datetime, timezone
-    entry = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "file": target_file.replace("\\", "/"),
-        "reason": reason,
-        "conversationId": conversation_id,
-    }
-    try:
-        log_dir = _resolve_log_dir()
-        os.makedirs(log_dir, exist_ok=True)
-        feedback_path = os.path.join(log_dir, "gravityguard_js_feedback.jsonl")
-        with open(feedback_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except OSError as exc:
-        sys.stderr.write(f"[GravityGuard JS Feedback Log Warning] {exc}\n")
-
-
-def evaluate_g7_ts_first(
-    target_file: str,
-    projected_content: str = "",
-) -> Tuple[bool, str, Optional[str]]:
-    """
-    Evaluates whether a JavaScript file (.js, .jsx, .cjs, .mjs) violates the G7 TypeScript-First standard.
-    Returns (is_blocked, deny_message, feedback_reason).
-    - Deterministic mandatory JS files (configs, dotfiles, build outputs, workers, test runners, migrations) -> allowed.
-    - Explicit technical justification via `// @ts-mandatory: <reason>` in first 10 lines -> allowed + feedback logged.
-    - All other raw JS application/module files -> BLOCKED (DENY).
+    Advisory G7 check: is a JavaScript file (.js, .jsx, .cjs, .mjs) application code that could be TypeScript?
+    Returns (flagged, one_line_warning). Configs, build output, workers and test runners are exempt. A file is never denied.
     """
     norm = target_file.replace("\\", "/").lower()
     norm_rel = re.sub(r"^.*?/\.gemini/antigravity/scratch/[^/]+", "", norm)
     parts = [p for p in norm_rel.split("/") if p]
     if not parts:
-        return False, "", None
+        return False, ""
     name = parts[-1]
 
     if not name.endswith((".js", ".jsx", ".cjs", ".mjs")):
-        return False, "", None
+        return False, ""
 
-    # 1. Deterministic directory exemptions (build output, vendor, docs, test runners, migrations)
+    # Deterministic exemptions: build output, vendor, docs, test runners, migrations; configs, rc files, bundles, workers.
     if any(part in _MANDATORY_JS_DIRS for part in parts[:-1]):
-        return False, "", None
-
-    # 2. Deterministic filename & suffix exemptions (configs, rc files, minified/bundled, workers, tests)
+        return False, ""
     if name in _MANDATORY_JS_EXACT_NAMES or name.startswith("workbox-") or name.endswith(_MANDATORY_JS_SUFFIXES):
-        return False, "", None
-
-    # 3. Check for AI Mandatory-JS Feedback Header in the first 10 lines
-    feedback = extract_js_mandatory_feedback(projected_content)
-    if feedback:
-        return False, "", feedback
+        return False, ""
 
     ext = name.rsplit(".", 1)[-1]
     stem = name.rsplit(".", 1)[0]
     suggested_ext = ".tsx" if ext == "jsx" else ".ts"
-    return (
-        True,
-        (
-            f"G7 TypeScript-First İhlali: '{name}' dosyası saf JavaScript (.{ext}) olarak yazılamaz! "
-            f"Ekosistem standardı gereği uygulama ve modül kodları tip güvenli TypeScript ('{stem}{suggested_ext}') olarak yazılmalıdır. "
-            f"EĞER bu dosyanın teknik bir zorunluluk nedeniyle kesinlikle .{ext} kalması gerekiyorsa, "
-            f"dosyanın ilk 5 satırı içine şu geri bildirim bildirimini ekleyerek GravityGuard'a bildirin: "
-            f"// @ts-mandatory: <en az 15 karakterlik somut teknik gerekçe>"
-        ),
-        None,
-    )
+    return True, f"G7 TypeScript-First Uyarısı: '{name}' saf JavaScript; yeni uygulama kodu için '{stem}{suggested_ext}' tercih edilir."
 
 
 def check_g7_ts_first(target_file: str, projected_content: str = "") -> Optional[str]:
-    """Backwards-compatible wrapper around evaluate_g7_ts_first returning Optional[str]."""
-    is_blocked, msg, _ = evaluate_g7_ts_first(target_file, projected_content)
-    return msg if is_blocked else None
+    """Wrapper around evaluate_g7_ts_first returning the warning text or None."""
+    is_flagged, msg = evaluate_g7_ts_first(target_file, projected_content)
+    return msg if is_flagged else None
 
 
 # --- Scrollbar, responsive-viewport and raw-control design rules live in design_rules.py; re-exported ---
@@ -347,32 +272,6 @@ from .pma_rules import (  # noqa: E402,F401
 )
 
 
-# --- OE_SPIKE: OVER-ENGINEERING DETECTION (WARN ONLY) ---
-def check_oe_spike(added_text: str, thresholds: Optional[Dict[str, int]] = None) -> Tuple[bool, str]:
-    """
-    Lightweight heuristic for premature abstraction spikes in small changes.
-    Never blocks; only produces an informative warning.
-    """
-    if thresholds is None:
-        thresholds = DEFAULT_COMPLEXITY_THRESHOLDS
-    max_loc = thresholds["overEngineeringMaxLoc"]
-    min_abstractions = thresholds["overEngineerAbstractions"]
-
-    lines = [line.strip() for line in added_text.splitlines() if line.strip() and not line.strip().startswith(("#", "//", "/*"))]
-    loc_count = len(lines)
-
-    if 0 < loc_count <= max_loc:
-        abstractions = re.findall(r"\b(?:class|interface|abstract\s+class)\s+([A-Za-z0-9_]+)", added_text)
-        if len(abstractions) >= min_abstractions:
-            return True, (
-                f"Aşırı Soyutlama Uyarısı: Küçük bir kod değişikliğinde ({loc_count} LOC) "
-                f"{len(abstractions)} yeni soyutlama ({', '.join(abstractions)}) eklendi. "
-                f"YAGNI kuralını gözetin; tekil kullanım için erken soyutlamadan kaçının."
-            )
-
-    return False, ""
-
-
 def _has_declared_cohesion_marker(content: str) -> bool:
     """True when the file declares itself a deliberate monolith."""
     if re.search(
@@ -458,58 +357,14 @@ def check_arch_file_growth(
 
     if thresholds is None:
         thresholds = DEFAULT_COMPLEXITY_THRESHOLDS
-    monolith_loc = thresholds["monolithLoc"]
     single_write_loc = thresholds["singleWriteLoc"]
-    creep_base_loc = thresholds["creepBaseLoc"]
-    creep_added_loc = thresholds["creepAddedLoc"]
+    added_count = len([line for line in added_lines if line.strip() and not line.strip().startswith(("#", "//", "/*", "*"))])
+    grown = max(added_count, cumulative_loc)  # new files are G5_NEW_FILE_BLOAT_DENY's business
+    if not old_full_content.strip() or grown < single_write_loc or _has_declared_cohesion_marker(projected_content):
+        return False, ""
 
-    old_lines = [line for line in old_full_content.splitlines() if line.strip()]
-    proj_lines = [line for line in projected_content.splitlines() if line.strip()]
-    added_clean = [line for line in added_lines if line.strip() and not line.strip().startswith(("#", "//", "/*", "*"))]
-
-    old_loc = len(old_lines)
-    projected_loc = len(proj_lines)
-    added_count = len(added_clean)
-
-    reasons = []
-    if old_loc < monolith_loc <= projected_loc:
-        reasons.append(
-            f"toplam satır sayısı {monolith_loc} sınırını aşıyor ({projected_loc} LOC)"
-        )
-    elif not old_full_content.strip():
-        # New file creation: do not bypass if initial size exceeds monolith threshold
-        if projected_loc >= monolith_loc:
-            reasons.append(
-                f"yeni oluşturulan dosya başlangıç monolit sınırını ({monolith_loc} LOC) aşıyor ({projected_loc} LOC)"
-            )
-    else:
-        if old_loc >= creep_base_loc and added_count >= creep_added_loc:
-            reasons.append(
-                f"{creep_base_loc}+ satırlık mevcut dosyaya belirgin ekleme yapıldı "
-                f"({old_loc} -> {projected_loc} LOC, +{added_count} LOC)"
-            )
-        elif added_count >= single_write_loc:
-            reasons.append(
-                f"tek seferde büyük kod bloğu eklendi (+{added_count} LOC)"
-            )
-        elif cumulative_loc >= single_write_loc:
-            reasons.append(
-                f"kümülatif oturum büyümesi eşiği aşıldı (son 15 dakikada peş peşe toplam +{cumulative_loc} LOC)"
-            )
-
-        if reasons and _has_declared_cohesion_marker(projected_content):
-            reasons = []
-
-    if reasons:
-        reason_str = "; ".join(reasons)
-        basename = os.path.basename(target_file) if target_file else "dosya"
-        return True, (
-            f"Modülerlik Uyarısı: '{basename}' için {reason_str}. "
-            f"Yeni sorumlulukları aynı büyük dosyada biriktirmek yerine ilgili sorumlulukları "
-            f"bağımsız ve cohesive modüllere ayırmayı değerlendirin."
-        )
-
-    return False, ""
+    basename = os.path.basename(target_file) if target_file else "dosya"
+    return True, f"Modülerlik Uyarısı: '{basename}' dosyasına kısa sürede +{grown} LOC eklendi (sınır {single_write_loc})."
 
 
 # --- EXISTING SRP VALIDATION ENGINE (Cohesive Module & AST) ---

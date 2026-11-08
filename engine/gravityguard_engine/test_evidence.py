@@ -23,8 +23,8 @@ DEFAULT_EXEMPT_PATTERNS: List[str] = [
     "scratch", "tmp_", "temp_",
     "/ui/", "/views/", "/components/", "/web/",
     "tui.ts", "tree.ts", "transcript.ts", "office_view.ts", "sessions.js", "app.js",
-    "cli.ts", "cli.py", "main.py", "main.ts", "run_", "_launcher.", "_opener."
-]
+    "cli.ts", "cli.py", "main.py", "main.ts", "run_", "_launcher.", "_opener.",
+    ".md", ".json", ".yml", ".yaml", ".toml", ".css", ".html", "/docs/", "adapter", "glue", "shim", "wrapper"]
 
 _TEST_FILE_PATTERNS = ("test_*.py", "*_test.py", "*.test.*", "*.spec.*", "conftest.py")
 

@@ -1,18 +1,20 @@
 """Shared command-text checks; intentionally not a shell interpreter or sandbox."""
 import fnmatch
 import re
-from .session_quarantine import denied_targets
+
 from .security_rules import check_g0_secret_leak, is_protected_env_file
+from .session_quarantine import denied_targets
 from .shell_control_guard import writes_control_file, writes_denied_target
 from .shell_danger import dangerous_command_reason, parse_command
+from .shell_patch_guard import patch_script_reason
 
 _SEGMENTS = re.compile(r"[;&|\n(`]+")
-_ENV = re.compile(r"(?<![\w.-])(?:[^\s\"';&|]*[/\\])?\.env(?:\.[\w-]+)?(?![\w.-])", re.I)
+_ENV = re.compile(r"(?<![\w.-])(?:[^\s\"';&|]*[/\\])?\.env(?:\.[\w-]+)?(?![\w.-])", re.IGNORECASE)
 # Private credential stores (SSH keys, cloud/CLI tokens). `.pub` files are public and stay readable.
 _CREDENTIAL = re.compile(
     r"(?<![\w.-])(?:[^\s\"';&|]*[/\\])?(?:\.ssh[/\\]id_(?:rsa|dsa|ecdsa|ed25519)|\.aws[/\\]credentials"
     r"|\.gnupg[/\\]private-keys[^\s\"';&|]*|\.docker[/\\]config\.json|\.kube[/\\]config|\.config[/\\]gh[/\\]hosts\.yml)(?![\w.-])",
-    re.I,
+    re.IGNORECASE,
 )
 
 # Destructive / remote-code detection lives in shell_danger.py (token based, linear time). Only high-confidence
@@ -93,6 +95,11 @@ def check_shell_command(args: dict, cwd: str | None = None, conversation_id: str
     if writes_control_file(command, cwd):
         return ("[POLICY_INTEGRITY]: Installed guard hooks, receipts and runtime state require a trusted host action; "
                 "shell writes, moves, deletes and interpreter scripts targeting them are denied")
+    patcher = patch_script_reason(command, cwd)
+    if patcher:
+        return (f"[SCRATCH_PATCH_DENY]: '{patcher}' rewrites project source files behind the edit-tool guards. "
+                "If an edit failed (CRLF, quoting) fix the edit with the file tool or shrink the file first; "
+                "a script cannot be used to escape it. Scratch scripts that only analyse data stay allowed")
     for segment in _SEGMENTS.split(command):
         reason = _protected_read_reason(segment)
         if reason:
