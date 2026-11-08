@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `[DESIGN_ICON_RULE]` no longer fires inside `scratch`/`scratchpad` folders or on lines that use an emoji as a regex or raw-string pattern (`re.compile(r"...✦...")`). A rendered emoji in UI code is still denied.
   - The `PROJECTION_UNSUPPORTED` tip now says what to do (re-read, shorten the block, give a line range) and not to fall back to shell editing.
   - Tests: `engine/tests/test_security_hardening.py`, `engine/tests/test_architecture_rules.py`.
+- **`architecture_rules.py` split by responsibility (884 -> 529 lines):** the PMA boundary checks moved to `pma_rules.py` and the scrollbar, responsive-viewport and raw-control design checks to `design_rules.py`. `architecture_rules.py` re-exports every moved name, so existing imports keep working. Behaviour is unchanged.
+- **Edit loop on CRLF docs and scratch scripts fixed (`diffing.py`, `architecture_rules.py`, `icon_exemptions.py`, `rule_tips.py`):** an Antigravity session spent ~40 minutes failing to edit `.md` files and fell back to `python -c`.
+  - `[PROJECTION_UNSUPPORTED]`: the file is read with CRLF folded to LF, but a search block copied from a CRLF file kept `\r\n` and never matched. Search and replacement text are now compared in LF form. The message also names the searched range and the first 120 characters, so the next miss is diagnosable from the audit log.
+  - `[DESIGN_ICON_RULE]` no longer fires inside `scratch`/`scratchpad` folders or on lines that use an emoji as a regex or raw-string pattern (`re.compile(r"...✦...")`). A rendered emoji in UI code is still denied.
+  - The `PROJECTION_UNSUPPORTED` tip now says what to do (re-read, shorten the block, give a line range) and not to fall back to shell editing.
+  - Tests: `engine/tests/test_security_hardening.py`, `engine/tests/test_architecture_rules.py`.
 
 - **Smart refactor hints (`refactor_cluster.py`, `refactor_hint.py`):** the `Öneri:` tip on `ARCH_RATCHET_GROWTH_DENY` and the other bloat messages no longer only names the longest unit.
   - Clusters functions that share a name prefix (`parse_*`, `_helper_*`) or a public function with the private helpers only it calls, and proposes one sibling module for the whole group.
