@@ -12,6 +12,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from .runtime_paths import runtime_dir as runtime_dir_for
+
 UI_EXTENSIONS: Set[str] = {
     ".css", ".scss", ".sass", ".less",
     ".html", ".htm",
@@ -107,7 +109,7 @@ def write_delivery_receipt(
     evidence_details: Dict[str, Any]
 ) -> Optional[Path]:
     """Writes a machine-readable delivery receipt to .gravityguard/runtime/delivery_receipt.json."""
-    runtime_dir = project_root / ".gravityguard" / "runtime"
+    runtime_dir = runtime_dir_for(project_root)
     try:
         runtime_dir.mkdir(parents=True, exist_ok=True)
         receipt_file = runtime_dir / "delivery_receipt.json"

@@ -27,6 +27,7 @@ TIPS: Dict[str, Tuple[str, str]] = {
     "SHELL_SECURITY": ("İndirileni doğrudan yorumlayıcıya verme; dosyaya indir, içeriğini kontrol et, sonra çalıştır.", ""),
     "ARCH_FILE_GROWTH": ("Büyük kodu tek dosyaya yığma; sorumluluğa göre ayrı modüllere böl.", ""),
     "G5_NEW_FILE_BLOAT_DENY": ("Yeni dosyayı tek hamlede yazma; sorumluluğa göre alt modüllere böl, her birini ayrı oluştur.", ""),
+    "ARCH_RATCHET_GROWTH_DENY": ("Sınırı aşan dosyaya satır ekleme; yeni kodu ayrı modüle yaz ya da dosyayı önce küçült.", ""),
     "STOP_CIRCUIT_BREAKER_BLOCKED": ("Kritik mimari/test regresyonunu gider; devre kesici bunu affetmez.", ""),
     "SRP_RESPONSIBILITY_MIX": ("Veri erişimi, dosya/ağ işleri ve iş mantığını ayrı modüllere/işlevlere böl.", ""),
     "ARCH_RATCHET_REGRESSION": ("Eşiği aşmış dosyaya satır ekleme; yeni mantığı ayrı modüle çıkar.", ""),

@@ -63,7 +63,7 @@ from .governance import (
 
 from .write_signals import collect_write_signals
 from .stop_gate import critical_blockers, distill_session_knowledge, note_raised_rules, ratchet_findings
-from .debt_ratchet import check_new_file_bloat
+from .ratchet_growth import pre_write_ratchet_denies
 from .project_context import (
     harden_streams_to_utf8,
     is_doc_governed_target,
@@ -882,14 +882,14 @@ def validate_gravityguard() -> None:
                 else:
                     _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {si_msg}", rule_id="OE_SINGLE_IMPL")
 
-    # GUARD 5C: G5_NEW_FILE_BLOAT_DENY — a brand-new source file above newFileMaxLoc never reaches the disk
-    bloat_msg = check_new_file_bloat(str(p_root), target_file, old_full_content, projected_content, complexity_thresholds["newFileMaxLoc"])
-    if bloat_msg:
-        if is_rule_shadow("G5_NEW_FILE_BLOAT_DENY", cfg):
-            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {bloat_msg}", rule_id="G5_NEW_FILE_BLOAT_DENY")
+    # GUARD 5C: G5_NEW_FILE_BLOAT_DENY (a new source file above newFileMaxLoc) and ARCH_RATCHET_GROWTH_DENY
+    # (net growth of a file already at ratchetLoc) never reach the disk; see ratchet_growth.py
+    for deny_rule, deny_msg in pre_write_ratchet_denies(str(p_root), target_file, old_full_content, projected_content, complexity_thresholds, c_id):
+        if is_rule_shadow(deny_rule, cfg):
+            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {deny_msg}", rule_id=deny_rule)
         else:
-            _log("BLOCKED", target_file, bloat_msg, rule_id="G5_NEW_FILE_BLOAT_DENY")
-            print(json.dumps({"decision": "deny", "reason": f"🛑 [G5_NEW_FILE_BLOAT_DENY]: '{target_file}' - {bloat_msg}"}))
+            _log("BLOCKED", target_file, deny_msg, rule_id=deny_rule)
+            print(json.dumps({"decision": "deny", "reason": f"[{deny_rule}]: '{target_file}' - {deny_msg}"}))
             sys.exit(0)
 
     # ========================================================================

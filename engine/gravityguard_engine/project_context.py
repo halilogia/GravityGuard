@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from .doc_policy import is_doc_governed_path
+from .runtime_paths import is_system_or_user_root
 
 DEFAULT_COMPLEXITY_THRESHOLDS: Dict[str, int] = {
     "monolithLoc": 1000,              # projected LOC that makes a file a monolith
@@ -100,6 +101,8 @@ def resolve_project_root(payload: Optional[dict] = None, target_file: str = "") 
     2. If target_file is provided, walk up to find .gravityguard.json or .git marker.
     3. If workspacePaths provided without matching target_file, use first workspacePath.
     4. Fallback to Path.cwd().
+    System/user folders (home, Desktop, Documents, Downloads, drive root, .obsidian) are never project roots in step 2;
+    if one is still the answer (steps 3-4), its runtime data lives under ~/.gravityguard/ephemeral (runtime_paths.py).
     GRAVITYGUARD_LOG_DIR only relocates the audit log and the state files; it never changes the project root or which
     .gravityguard.json is read.
     """
@@ -125,7 +128,7 @@ def resolve_project_root(payload: Optional[dict] = None, target_file: str = "") 
             p = Path(os.path.abspath(target_file))
             curr = p.parent
             for _ in range(8):
-                if _is_project_config_dir(curr) or (curr / ".git").exists():
+                if (_is_project_config_dir(curr) or (curr / ".git").exists()) and not is_system_or_user_root(curr):
                     return curr
                 if curr.parent == curr:
                     break

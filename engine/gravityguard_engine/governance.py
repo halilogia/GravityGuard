@@ -11,60 +11,42 @@ Zero external dependencies.
 import hashlib
 import json
 import os
+import sys
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from .runtime_paths import runtime_dir as runtime_dir_for
 from .state_lock import StateLock, StateLockTimeout
 from .test_evidence import is_exempt_from_test_evidence, resolve_candidate_test_file
 from .audit import detect_agent_name
 
 
-def get_governance_file_path(project_root: Optional[Path] = None) -> Path:
+def _runtime_file(name: str, project_root: Optional[Path]) -> Path:
+    """GRAVITYGUARD_LOG_DIR wins; otherwise the project's runtime dir (central ephemeral dir for system/user folders)."""
     override_dir = os.environ.get("GRAVITYGUARD_LOG_DIR")
     if override_dir:
-        return Path(override_dir) / "governance.json"
-    if project_root is None:
-        project_root = Path.cwd()
-    runtime_dir = project_root / ".gravityguard" / "runtime"
+        return Path(override_dir) / name
+    runtime_dir = runtime_dir_for(project_root or Path.cwd())
     try:
         runtime_dir.mkdir(parents=True, exist_ok=True)
-    except (IOError, OSError) as err:
-        _err = err
-        return runtime_dir / "governance.json"
-    return runtime_dir / "governance.json"
+    except OSError as err:
+        sys.stderr.write(f"[GravityGuard Governance] Cannot create {runtime_dir}: {err}\n")
+    return runtime_dir / name
+
+
+def get_governance_file_path(project_root: Optional[Path] = None) -> Path:
+    return _runtime_file("governance.json", project_root)
 
 
 def get_governance_lock_path(project_root: Optional[Path] = None) -> Path:
-    override_dir = os.environ.get("GRAVITYGUARD_LOG_DIR")
-    if override_dir:
-        return Path(override_dir) / "governance.lock"
-    if project_root is None:
-        project_root = Path.cwd()
-    runtime_dir = project_root / ".gravityguard" / "runtime"
-    try:
-        runtime_dir.mkdir(parents=True, exist_ok=True)
-    except (IOError, OSError) as err:
-        _err = err
-        return runtime_dir / "governance.lock"
-    return runtime_dir / "governance.lock"
+    return _runtime_file("governance.lock", project_root)
 
 
 def get_test_evidence_file_path(project_root: Optional[Path] = None) -> Path:
-    override_dir = os.environ.get("GRAVITYGUARD_LOG_DIR")
-    if override_dir:
-        return Path(override_dir) / "test_evidence_state.json"
-    if project_root is None:
-        project_root = Path.cwd()
-    runtime_dir = project_root / ".gravityguard" / "runtime"
-    try:
-        runtime_dir.mkdir(parents=True, exist_ok=True)
-    except (IOError, OSError) as err:
-        _err = err
-        return runtime_dir / "test_evidence_state.json"
-    return runtime_dir / "test_evidence_state.json"
+    return _runtime_file("test_evidence_state.json", project_root)
 
 
 _txn_context: ContextVar[Optional[Dict[str, Any]]] = ContextVar("_txn_context", default=None)

@@ -18,7 +18,9 @@ import tempfile
 import time
 from typing import Dict, Any, Iterator, Tuple, List, Optional, Set
 
+from .debt_baselines import recorded_baseline
 from .refactor_hint import build_refactor_hint
+from .runtime_paths import gravityguard_dir
 
 DEFAULT_RATCHET_THRESHOLD: int = 500
 MAX_RATCHET_FILE_BYTES: int = 2_000_000
@@ -77,7 +79,7 @@ def is_test_or_exempt_file(file_path: str) -> bool:
 
 def get_ratchet_store_path(project_root: str) -> str:
     """Returns the absolute path to .gravityguard/debt_ratchet.json."""
-    return os.path.join(project_root, ".gravityguard", "debt_ratchet.json")
+    return str(gravityguard_dir(project_root) / "debt_ratchet.json")
 
 
 def _empty_store() -> Dict[str, Any]:
@@ -226,8 +228,11 @@ def _entry_baseline(entry: Dict[str, Any], default: int) -> int:
 
 
 def _first_seen_baseline(project_root: str, rel_path: str, current_loc: int, threshold: int) -> int:
-    """Baseline for a file the store has never seen: its HEAD size (floored at the threshold), else its current size."""
+    """Baseline for a file the store has never seen: its HEAD size (floored at the threshold), else the size recorded
+    before the agent's first write (debt_baselines.json), else its current size."""
     head_loc = _head_loc(project_root, rel_path)
+    if head_loc is None:
+        head_loc = recorded_baseline(project_root, rel_path)
     if head_loc is None:
         return current_loc
     return min(current_loc, max(head_loc, threshold))

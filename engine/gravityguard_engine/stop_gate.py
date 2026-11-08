@@ -17,6 +17,7 @@ from .audit import log_event
 from .debt_ratchet import evaluate_changed_files_ratchet, get_session_changed_files
 from .governance import governance_transaction
 from .project_context import resolve_complexity_thresholds
+from .ratchet_growth import session_touched_files
 from .refactor_hint import build_refactor_hint
 from .test_evidence import evaluate_t0_gate
 
@@ -32,7 +33,8 @@ def ratchet_findings(
     """Regressions as (relative path, message); logged here. In shadow mode they are only observed, never returned."""
     try:
         candidates = get_session_changed_files(str(project_root))
-        candidates += [p for p in extra_files if p not in candidates]
+        # touched files outlive a commit: the agent may have committed the bloat before stopping
+        candidates += [p for p in (*extra_files, *session_touched_files(project_root, conversation_id)) if p not in candidates]
         found = evaluate_changed_files_ratchet(
             str(project_root), candidates, threshold=resolve_complexity_thresholds(cfg)["ratchetLoc"])
     except Exception as err:  # an advisory scan must never take the Stop hook down
@@ -78,6 +80,7 @@ def distill_session_knowledge(project_root: Path, conversation_id: str, forgiven
     with governance_transaction(project_root) as state:
         session = state.get("sessions", {}).get(conversation_id or "default", {})
         raised = session.pop("raised_rules", [])
+        session.pop("touched_files", None)  # the session is over: its ratchet scope ends with it
     knowledge = Path(project_root).joinpath(*KNOWLEDGE_PATH)
     if not raised or not knowledge.is_file():
         return None

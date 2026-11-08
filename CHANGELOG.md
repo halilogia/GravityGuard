@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Ratchet growth lock and `.gravityguard` sprawl control (`ratchet_growth.py`, `debt_baselines.py`, `runtime_paths.py`):**
+  - `ARCH_RATCHET_GROWTH_DENY`: a PreToolUse write that adds net lines to a source file already at `complexity.ratchetLoc` (default 500) is denied before it reaches the disk, with advice to move the new code into a separate module or shrink the file first. Shrinking and refactors (net lines <= 0) are always allowed; tests, data/doc files and new files are out of scope; shadow mode is honoured.
+  - Git-independent baseline: every governed write records the file's pre-write size in `<runtime>/debt_baselines.json` (it only ever goes down), and the ratchet uses it when git HEAD is unavailable instead of grandfathering the current size.
+  - Session scope: touched files are kept in `governance.json` (`sessions.<id>.touched_files`) until the session ends clean, so the Stop hook still evaluates a file the agent already committed.
+  - Sprawl: `resolve_project_root` never takes a system/user folder (home, `C:\Users`, Desktop, Documents, Downloads, drive root, `GitHub` and `GitHub\Public|Private` containers, anything under `.obsidian`) as a project root, and runtime data of such a folder (governance state, delivery receipt, ratchet store, baselines) goes to `~/.gravityguard/ephemeral/<name>-<hash>/` instead of a local `.gravityguard`.
+  - The G5 new-file deny and the growth deny share one PreToolUse loop; their deny text no longer carries the emoji prefix.
+  - Tests: `engine/tests/test_ratchet_growth.py`.
+
 - **Shell evasion of the file-tool guard closed (`shell_control_guard.py`, `session_quarantine.py`, `shell_rules.py`):** an agent denied a `write_file` (`[POLICY_INTEGRITY]`) used to finish the same write through the shell (`python scratch/temp.py` doing `open(<protected file>, "w")`).
   - `check_shell_command` now denies with `[POLICY_INTEGRITY]` any command that writes, moves or deletes a runtime control file (hooks, `.claude/settings*.json`, `.gravityguard/runtime|reviews`, the installed plugin): `>` / `>>`, `tee`, `Set-Content`, `Add-Content`, `Out-File`, `New-Item`, `rm` / `del` / `Remove-Item`, `mv` / `Move-Item`, `cp` / `Copy-Item` onto it, `sed -i`, an interpreter given the path as an argument, and an interpreter script (or inline / heredoc code) whose body names the path and uses a write API. `.sh` / `.ps1` / `.bat` script bodies are checked as commands too.
   - Session quarantine: every file target a tool call was `BLOCKED` on is remembered per conversation (`denied_targets.json` in the guard state dir). Any later shell write to that target, directly or through a script, is denied with `[HOOK_EVASION_DETECTED]`, which wins over the control-file rule. Reads, `git diff` and running the denied file itself stay allowed.

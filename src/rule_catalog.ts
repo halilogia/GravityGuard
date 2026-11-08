@@ -62,6 +62,7 @@ const ROWS: Row[] = [
   ['WEB_DOCUMENT_SIZE', 'architecture', 'block', 'write', 'shadow'],
   ['ARCH_FILE_GROWTH', 'architecture', 'warn', 'write', 'shadow'],
   ['G5_NEW_FILE_BLOAT_DENY', 'architecture', 'block', 'write', 'shadow'],
+  ['ARCH_RATCHET_GROWTH_DENY', 'architecture', 'block', 'write', 'shadow'],
   ['STOP_CIRCUIT_BREAKER_BLOCKED', 'architecture', 'block', 'stop', 'none'],
   ['SRP_RESPONSIBILITY_MIX', 'architecture', 'warn', 'write', 'shadow'],
   ['ARCH_RATCHET_REGRESSION_WARN', 'architecture', 'warn', 'write', 'shadow'],
