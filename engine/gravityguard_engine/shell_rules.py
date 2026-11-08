@@ -33,8 +33,9 @@ _EXTRA_READERS = frozenset({
 _TRUSTED_HOOK_ACTION = re.compile(
     r"python[\w.]*(?:\s+-\S+)*\s+[\"']?[^\s\"']*hook_proposal_control"
     r"|gravityguard(?:_cli\.py|\.cmd)?[\"']?\s+hooks\s+(?:approve|revert)\b"
-    r"|hook_proposals\b[^\n]*\b(?:approve|revert)\s*\(",
-    re.I,
+    r"|hook_proposals\b[^\n]*\b(?:approve|revert)\s*\("
+    r"|gravityguard(?:_cli\.py|\.cmd)?[\"']?\s+pause\s+(?:on|off|status)\b|pause_switch\b[^\n]*\b(?:pause|resume)\s*\(|\.gravityguard[/\\]+pause\.json",
+    re.IGNORECASE,
 )
 _REDIRECT_IN = re.compile(r"<\s*([^\s<>|;&]+)")
 _GLOB_CHARS = frozenset("*?[")

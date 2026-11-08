@@ -27,6 +27,16 @@ class TestDocOverwriteGuard(unittest.TestCase):
         import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
+    def test_rewrite_keeping_most_lines_is_allowed_but_truncation_is_not(self):
+        target = str(self.existing_doc)
+        self.existing_doc.write_text("\n".join(f"line {i}" for i in range(10)) + "\n", encoding="utf-8")
+        keep = "\n".join(f"line {i}" for i in range(10)) + "\nnew tail\n"
+        blocked, _ = check_blind_doc_overwrite(target, "Write", {"content": keep}, self.temp_dir)
+        self.assertFalse(blocked)
+        blocked, reason = check_blind_doc_overwrite(target, "Write", {"content": "line 0\n"}, self.temp_dir)
+        self.assertTrue(blocked)
+        self.assertIn("%80", reason)
+
     def test_is_doc_or_rule_file(self):
         self.assertTrue(is_doc_or_rule_file("README.md"))
         self.assertTrue(is_doc_or_rule_file("docs/ARCHITECTURE.md"))

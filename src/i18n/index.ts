@@ -20,10 +20,10 @@ export const resources = {
       },
       gate: {
         title: 'DOĞRULAMA KAPISI',
-        stages: { compile: 'Derleyici ve tip', shield: 'GravityGuard kalkanı', tests: 'Mantık testleri', preview: 'Canlı önizleme' },
+        stages: { shield: 'GravityGuard kalkanı', tests: 'Mantık testleri' },
         status: { pass: 'Geçti', fail: 'Kaldı', warn: 'Uyarı', pending: 'Bekliyor' },
         stale: 'Sonra dosya değişti, yeniden çalıştır',
-        hint: 'Kaydetmek için: gravityguard gate run compile -- npx tsc --noEmit'
+        hint: 'Kalkan ve test sonuçları olay kaydından türetilir; elle kayıt gerekmez.'
       },
       current: {
         title: 'SON İŞLEM',
@@ -454,10 +454,10 @@ export const resources = {
       },
       gate: {
         title: 'VERIFICATION GATE',
-        stages: { compile: 'Compiler and types', shield: 'GravityGuard shield', tests: 'Logic tests', preview: 'Live preview' },
+        stages: { shield: 'GravityGuard shield', tests: 'Logic tests' },
         status: { pass: 'Passed', fail: 'Failed', warn: 'Warning', pending: 'Pending' },
         stale: 'A file changed since, run it again',
-        hint: 'To record: gravityguard gate run compile -- npx tsc --noEmit'
+        hint: 'Shield and test results come from the event log; nothing to record by hand.'
       },
       current: {
         title: 'CURRENT ACTION',

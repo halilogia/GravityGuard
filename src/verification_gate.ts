@@ -3,14 +3,13 @@ import * as path from 'path';
 import { NON_VIOLATION_RULES } from './audit_stats';
 
 /**
- * Four-stage verification gate shown on the Live tab: compile, GravityGuard shield, logic tests, live preview.
- * Compile, tests and preview come from .gravityguard/runtime/verification.json, written only by
- * `gravityguard gate run|preview` from an exit code or a screenshot on disk; the shield and failure signals
- * come from the event log. A recorded pass goes back to pending when a file was written after it.
+ * Two-stage verification gate shown on the Live tab: GravityGuard shield and logic tests, both derived from the
+ * event log (compiler diagnostics count as shield warnings). A test result recorded with `gravityguard gate run tests`
+ * is optional and goes back to pending when a file was written after it.
  */
 
 export type GateStatus = 'pass' | 'fail' | 'warn' | 'pending';
-export type GateStageId = 'compile' | 'shield' | 'tests' | 'preview';
+export type GateStageId = 'shield' | 'tests';
 
 export interface GateReportEntry {
   status?: string;
@@ -20,12 +19,6 @@ export interface GateReportEntry {
 }
 
 export type GateReport = Partial<Record<GateStageId, GateReportEntry>>;
-
-export interface DeliveryReceipt {
-  timestamp?: string;
-  deliveryStatus?: string;
-  evidence?: { screenshot?: string };
-}
 
 export interface GateEvent {
   status?: string;
@@ -43,9 +36,8 @@ export interface GateStage {
   stale?: boolean;
 }
 
-export const GATE_STAGE_ORDER: GateStageId[] = ['compile', 'shield', 'tests', 'preview'];
+export const GATE_STAGE_ORDER: GateStageId[] = ['shield', 'tests'];
 
-const COMPILE_RULES = new Set(['STATIC_LINTER_DIAGNOSTIC']);
 const TEST_FAIL_RULES = new Set(['T0_TEST_RUN_FAILED']);
 const TEST_WARN_RULES = new Set(['T0_NO_TESTS_EXECUTED', 'T0_COVERAGE_BELOW_THRESHOLD']);
 /** Records that do not change a file, so they neither age a recorded pass nor count for the shield. */
@@ -96,14 +88,6 @@ function newer(report: GateStage | undefined, signal: GateStage | undefined): Ga
   return report;
 }
 
-function compileSignal(events: GateEvent[]): GateStage | undefined {
-  const open = latestPerTarget(events, () => true).filter(e => COMPILE_RULES.has(e.ruleId || ''));
-  if (open.length === 0) {
-    return undefined;
-  }
-  return { id: 'compile', status: 'fail', detail: path.basename(open[0].target || ''), at: open[0].timestamp };
-}
-
 function testSignal(events: GateEvent[]): GateStage | undefined {
   const last = events.find(e => TEST_FAIL_RULES.has(e.ruleId || '') || TEST_WARN_RULES.has(e.ruleId || ''));
   if (!last) {
@@ -115,7 +99,7 @@ function testSignal(events: GateEvent[]): GateStage | undefined {
 function shieldStage(events: GateEvent[]): GateStage {
   const isGuardEvent = (e: GateEvent) => {
     const rule = e.ruleId || '';
-    return !COMPILE_RULES.has(rule) && !TEST_FAIL_RULES.has(rule) && !TEST_WARN_RULES.has(rule) && !NON_WRITE_RULES.has(rule);
+    return !TEST_FAIL_RULES.has(rule) && !TEST_WARN_RULES.has(rule) && !NON_WRITE_RULES.has(rule);
   };
   const latest = latestPerTarget(events, isGuardEvent);
   if (latest.length === 0) {
@@ -132,33 +116,14 @@ function shieldStage(events: GateEvent[]): GateStage {
   return { id: 'shield', status: 'pass', at: latest[0].timestamp };
 }
 
-function previewFromReceipt(receipt: DeliveryReceipt | undefined): GateStage | undefined {
-  if (!receipt?.deliveryStatus) {
-    return undefined;
-  }
-  if (receipt.deliveryStatus === 'VERIFIED') {
-    const shot = receipt.evidence?.screenshot ? path.basename(receipt.evidence.screenshot) : undefined;
-    // A screenshot alone does not prove a clean console.
-    return { id: 'preview', status: 'warn', detail: shot, at: receipt.timestamp };
-  }
-  return { id: 'preview', status: 'fail', detail: receipt.deliveryStatus, at: receipt.timestamp };
-}
-
-/** Builds the four stages from newest-first events, the gate report and the delivery receipt. */
-export function computeVerificationGate(events: GateEvent[], report: GateReport = {}, receipt?: DeliveryReceipt): GateStage[] {
+/** Builds the two stages from newest-first events and the optional gate report. */
+export function computeVerificationGate(events: GateEvent[], report: GateReport = {}): GateStage[] {
   const lastWriteMs = events.reduce((max, e) => {
     const ms = toMs(e.timestamp);
     return e.target && !NON_WRITE_RULES.has(e.ruleId || '') && Number.isFinite(ms) && ms > max ? ms : max;
   }, -Infinity);
-  const compile = newer(fromReport(report.compile, 'compile', lastWriteMs), compileSignal(events));
   const tests = newer(fromReport(report.tests, 'tests', lastWriteMs), testSignal(events));
-  const preview = fromReport(report.preview, 'preview', lastWriteMs) || previewFromReceipt(receipt);
-  return [
-    compile || { id: 'compile', status: 'pending' },
-    shieldStage(events),
-    tests || { id: 'tests', status: 'pending' },
-    preview || { id: 'preview', status: 'pending' }
-  ];
+  return [shieldStage(events), tests || { id: 'tests', status: 'pending' }];
 }
 
 /** Worst status wins: fail > warn > pending > pass. */
@@ -194,6 +159,5 @@ export function loadVerificationGate(workspaceRoot: string, allEvents: GateEvent
   const events = eventsForProject(allEvents, workspaceRoot);
   const runtime = workspaceRoot ? path.join(workspaceRoot, '.gravityguard', 'runtime') : '';
   const report = runtime ? readJson<GateReport>(path.join(runtime, 'verification.json')) : undefined;
-  const receipt = runtime ? readJson<DeliveryReceipt>(path.join(runtime, 'delivery_receipt.json')) : undefined;
-  return computeVerificationGate(events, report || {}, receipt);
+  return computeVerificationGate(events, report || {});
 }

@@ -50,6 +50,20 @@ def is_doc_or_rule_file(file_path: str) -> bool:
     return clean.endswith(".md") or base_name in ("license", "gemini.md", "agents.md")
 
 
+def _keeps_most_of_file(path: Path, args: dict) -> bool:
+    new_text = next((args[k] for k in ("content", "CodeContent", "file_text", "text") if isinstance(args.get(k), str)), None)
+    if not new_text:
+        return False
+    try:
+        old_lines = [ln.strip() for ln in path.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()]
+    except OSError:
+        return False
+    if not old_lines:
+        return True
+    new_lines = {ln.strip() for ln in new_text.splitlines()}
+    return sum(1 for ln in old_lines if ln in new_lines) / len(old_lines) >= 0.8
+
+
 def check_blind_doc_overwrite(
     target_file: str,
     tool_name: str,
@@ -79,11 +93,14 @@ def check_blind_doc_overwrite(
         target_p = Path(project_root) / target_p
 
     if target_p.is_file():
+        if _keeps_most_of_file(target_p, args):
+            return False, ""  # exit path: a rewrite keeping at least 80% of the existing lines destroys nothing
         return True, (
             f"🛑 [G4_NO_BLIND_OVERWRITE]: Mevcut dokümantasyon, mimari veya kural dosyasının "
             f"('{target_file}') tümünü yazma aracıyla ('Write' / 'write_to_file') ezmek (Overwrite) yasaklanmıştır! "
             f"Otonom protokollerin, kural maddelerinin ve kalıcı hafızanın silinmesini önlemek için "
-            f"lütfen yalnızca cerrahi düzenleme aracını kullanın (Claude Code: Edit; Antigravity: 'replace_file_content')."
+            f"lütfen cerrahi düzenleme aracını kullanın (Claude Code: Edit; Antigravity: 'replace_file_content'); "
+            f"ya da yeni içerik mevcut satırların en az %80'ini koruyorsa Write izinlidir."
         )
 
     return False, ""

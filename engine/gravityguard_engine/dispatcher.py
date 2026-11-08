@@ -644,12 +644,8 @@ def validate_gravityguard() -> None:
             if is_rule_shadow("G7_TS_FIRST", cfg):
                 _log('SHADOW_TRIGGER', target_file, f"[SHADOW] {g7_msg}", rule_id='G7_TS_FIRST')
             else:
-                _log('BLOCKED', target_file, g7_msg, rule_id='G7_TS_FIRST')
-                print(json.dumps({
-                    "decision": "deny",
-                    "reason": f"🛑 [G7_TS_FIRST]: '{target_file}' - {g7_msg}"
-                }))
-                sys.exit(0)
+                _log('WARNING', target_file, g7_msg, rule_id='G7_TS_FIRST')  # advisory: a .js file is a style call, not a dead end
+                all_warnings.append(("G7_TS_FIRST", g7_msg))
 
     design_violations = find_design_icon_violations(target_file, projected_content, added_line_numbers)
     if design_violations:
@@ -662,12 +658,8 @@ def validate_gravityguard() -> None:
             f"Hatalı satır: '{first['snippet']}'\n"
             f"Zero-Bloat ve Minimalist UI standardı gereği kaynak kodda emoji/ikon kullanılamaz; sadece temiz tipografi veya SVG kullanın."
         )
-        _log('BLOCKED', target_file, deny_msg, rule_id='DESIGN_ICON_RULE')
-        print(json.dumps({
-            "decision": "deny",
-            "reason": f"\U0001f6d1 [DESIGN_ICON_RULE]: '{target_file}:{first['line']}' - {deny_msg}"
-        }))
-        sys.exit(0)
+        _log('WARNING', target_file, deny_msg, rule_id='DESIGN_ICON_RULE')  # advisory: never a dead end
+        all_warnings.append(("DESIGN_ICON_RULE", deny_msg))
 
     # DESIGN_RESPONSIVE_RULE: Mobile / Phone Viewport (DENY) & Fluid Layout (WARN)
     responsive_violations = find_design_responsive_violations(target_file, projected_content, added_line_numbers)

@@ -19,6 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `[DESIGN_ICON_RULE]` no longer fires inside `scratch`/`scratchpad` folders or on lines that use an emoji as a regex or raw-string pattern (`re.compile(r"...✦...")`). A rendered emoji in UI code is still denied.
   - The `PROJECTION_UNSUPPORTED` tip now says what to do (re-read, shorten the block, give a line range) and not to fall back to shell editing.
   - Tests: `engine/tests/test_security_hardening.py`, `engine/tests/test_architecture_rules.py`.
+- **Pause switch, fewer dead ends, faster reads, two-stage gate (`pause_switch.py`, `hook_output.py`, `security_rules.py`, `dispatcher.py`, `gravity-validator.py`, `verification_gate.ts`):**
+  - `gravityguard pause off [--minutes N]` / `pause on` / `pause status`: a user-owned flag in `~/.gravityguard/pause.json` (default 2 h, max 8 h, always expires). While paused every rejection except the mandatory floor (`G0_SECRET_LEAK`, `G0_ENV_PROTECTION`, `POLICY_INTEGRITY`, `FINAL_SECURITY_SCAN`) becomes an allow that still prints the rule text. The agent cannot flip it (shell and file tools deny the command and the file).
+  - Dead ends removed: `G7_TS_FIRST` and `DESIGN_ICON_RULE` are warnings; `G4_NO_BLIND_OVERWRITE` lets a `Write` through when the new content keeps at least 80% of the existing lines.
+  - `HOOK_EVASION_DETECTED` quarantine is lifted once the file tool later accepts a write to the same target, so `git add`/commit of a fixed file is no longer refused (`session_quarantine.py`).
+  - Plain reads of non-sensitive paths skip the engine import in `gravity-validator.py` (about 0.12 s less per read).
+  - Verification gate shrunk to shield and tests, both derived from the event log; compile diagnostics count as shield warnings, the screenshot preview stage is gone.
+- **`architecture_rules.py` split by responsibility (884 -> 529 lines):** the PMA boundary checks moved to `pma_rules.py` and the scrollbar, responsive-viewport and raw-control design checks to `design_rules.py`. `architecture_rules.py` re-exports every moved name, so existing imports keep working. Behaviour is unchanged.
+- **Edit loop on CRLF docs and scratch scripts fixed (`diffing.py`, `architecture_rules.py`, `icon_exemptions.py`, `rule_tips.py`):** an Antigravity session spent ~40 minutes failing to edit `.md` files and fell back to `python -c`.
+  - `[PROJECTION_UNSUPPORTED]`: the file is read with CRLF folded to LF, but a search block copied from a CRLF file kept `\r\n` and never matched. Search and replacement text are now compared in LF form. The message also names the searched range and the first 120 characters, so the next miss is diagnosable from the audit log.
+  - `[DESIGN_ICON_RULE]` no longer fires inside `scratch`/`scratchpad` folders or on lines that use an emoji as a regex or raw-string pattern (`re.compile(r"...✦...")`). A rendered emoji in UI code is still denied.
+  - The `PROJECTION_UNSUPPORTED` tip now says what to do (re-read, shorten the block, give a line range) and not to fall back to shell editing.
+  - Tests: `engine/tests/test_security_hardening.py`, `engine/tests/test_architecture_rules.py`.
 
 - **Smart refactor hints (`refactor_cluster.py`, `refactor_hint.py`):** the `Öneri:` tip on `ARCH_RATCHET_GROWTH_DENY` and the other bloat messages no longer only names the longest unit.
   - Clusters functions that share a name prefix (`parse_*`, `_helper_*`) or a public function with the private helpers only it calls, and proposes one sibling module for the whole group.

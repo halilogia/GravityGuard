@@ -22,6 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from gravityguard_engine import hook_proposals as hp
+from gravityguard_engine import pause_switch as ps
 from gravityguard_engine import verification_gate as vg
 
 
@@ -87,6 +88,18 @@ def _gate(args) -> int:
     return 0
 
 
+def _pause(args) -> int:
+    if args.action == "off":
+        state = ps.pause(args.minutes, args.reason)
+        print(f"GravityGuard {state['minutes']} dk duraklatıldı (sır/.env koruması açık). Geri açmak: gravityguard pause on")
+    elif args.action == "on":
+        print("GravityGuard yeniden açıldı." if ps.resume() else "Zaten açıktı.")
+    else:
+        state = ps.status()
+        print(f"DURAKLATILDI, {state['remaining'] // 60} dk kaldı." if state else "AÇIK.")
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="gravityguard")
     sub = parser.add_subparsers(dest="group", required=True)
@@ -102,6 +115,10 @@ def main(argv=None) -> int:
     gate.add_argument("--root", default=os.getcwd(), help="project root (default: current folder)")
     gate.add_argument("--screenshot", default="")
     gate.add_argument("--console-errors", type=int, default=None)
+    pz = sub.add_parser("pause", help="switch GravityGuard off for a while (secrets/.env stay protected)")
+    pz.add_argument("action", choices=("on", "off", "status"), help="off = pause, on = resume")
+    pz.add_argument("--minutes", type=int, default=ps.DEFAULT_MINUTES, help=f"pause length (max {ps.MAX_MINUTES})")
+    pz.add_argument("-r", "--reason", default="")
     debt = sub.add_parser("debt", help="technical debt ratchet report")
     debt.add_argument("--root", default=os.getcwd(), help="project root (default: current folder)")
     debt.add_argument("--threshold", type=int, default=500, help="monolith line threshold (default: 500)")
@@ -109,6 +126,8 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding="utf-8", errors="replace")
+    if args.group == "pause":
+        return _pause(args)
     if args.group == "gate":
         return _gate(args)
     if args.group == "debt":

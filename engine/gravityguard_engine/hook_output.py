@@ -69,6 +69,14 @@ def drop_repeated_warnings(warnings: list[tuple[str, str]], conversation_id: str
 def finalize(out: str, stop: bool, conversation_id: str) -> str:
     """Rejections get their lesson; the first allowed call of a conversation gets the briefing."""
     try:
+        from . import pause_switch
+        from .policy_integrity import MANDATORY_RULES
+
+        if pause_switch.status():
+            return pause_switch.relax_output(out, MANDATORY_RULES)
+    except Exception as pause_err:
+        sys.stderr.write(f"[GravityGuard] pause check failed: {pause_err}\n")
+    try:
         from .rule_tips import enrich_hook_output
 
         out = enrich_hook_output(out)

@@ -34,6 +34,32 @@ def _log_fatal(exc_text: str) -> None:
             pass
 
 
+_FAST_READ_NAMES = frozenset(("view_file", "read_file", "read_file_content", "view", "read"))
+_SENSITIVE_HINTS = ("env", "secret", "token", "credential", "passw", "key", "pem", ".ssh", ".aws", "id_rsa", "gravityguard", "hooks", "settings")
+
+
+def _fast_read_allow() -> None:
+    """A plain read of a non-sensitive path is allowed without importing the engine (about 0.12 s of the hook's cost)."""
+    if __name__ != "__main__" or "--stop" in sys.argv or sys.stdin.isatty():
+        return
+    import io
+    data = sys.stdin.buffer.read()
+    raw = data.decode("utf-8", errors="replace")
+    # The full engine re-reads the same bytes when this path declines (UTF-8 intact, no console code page).
+    sys.stdin = io.TextIOWrapper(io.BytesIO(data), encoding="utf-8")
+    try:
+        import json
+        call = json.loads(raw).get("toolCall")
+        name = str(call.get("name", "")).lower() if isinstance(call, dict) else ""
+    except (ValueError, AttributeError, RecursionError):
+        return
+    if name in _FAST_READ_NAMES and not any(hint in raw.lower() for hint in _SENSITIVE_HINTS):
+        print('{"decision": "allow"}')
+        sys.exit(0)
+
+
+_fast_read_allow()
+
 try:
 
     # Re-export public API symbols for backwards compatibility

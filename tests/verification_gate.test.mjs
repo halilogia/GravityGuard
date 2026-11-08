@@ -7,46 +7,43 @@ import { computeVerificationGate, overallGateStatus, eventsForProject, loadVerif
 import { renderVerificationGateCard } from '../dist/webview/tabs/verification.js';
 import { initI18n } from '../dist/i18n/index.js';
 
-const statusOf = (stages, id) => stages.find(s => s.id === id).status;
+// Two-stage gate: shield and tests, both derived from events (compile and preview stages were removed).
+const statusOf =(stages, id) => stages.find(s => s.id === id).status;
 const write = (target, timestamp, extra = {}) => ({ target, timestamp, status: 'APPROVED', ruleId: 'PASS', ...extra });
 
 test('no evidence leaves every stage pending', () => {
   const stages = computeVerificationGate([], {});
-  assert.deepEqual(stages.map(s => s.id), ['compile', 'shield', 'tests', 'preview']);
+  assert.deepEqual(stages.map(s => s.id), ['shield', 'tests']);
   assert.ok(stages.every(s => s.status === 'pending'));
   assert.equal(overallGateStatus(stages), 'pending');
 });
 
 test('recorded passes and a clean shield make the gate pass', () => {
   const events = [write('/p/a.ts', '2026-11-06 10:00:00')];
-  const report = {
-    compile: { status: 'pass', at: '2026-11-06T10:05:00' },
-    tests: { status: 'pass', at: '2026-11-06T10:05:00' },
-    preview: { status: 'pass', at: '2026-11-06T10:05:00' }
-  };
+  const report = { tests: { status: 'pass', at: '2026-11-06T10:05:00' } };
   const stages = computeVerificationGate(events, report);
   assert.equal(overallGateStatus(stages), 'pass');
 });
 
 test('a write after a recorded pass makes it stale and pending', () => {
   const events = [write('/p/a.ts', '2026-11-06 10:10:00')];
-  const stages = computeVerificationGate(events, { compile: { status: 'pass', at: '2026-11-06T10:05:00' } });
-  const compile = stages.find(s => s.id === 'compile');
-  assert.equal(compile.status, 'pending');
-  assert.equal(compile.stale, true);
+  const stages = computeVerificationGate(events, { tests: { status: 'pass', at: '2026-11-06T10:05:00' } });
+  const tests = stages.find(s => s.id === 'tests');
+  assert.equal(tests.status, 'pending');
+  assert.equal(tests.stale, true);
 });
 
 test('reads and briefings do not age a recorded pass', () => {
   const events = [write('/p/a.ts', '2026-11-06 10:10:00', { ruleId: 'READ_ALLOW' })];
-  const stages = computeVerificationGate(events, { compile: { status: 'pass', at: '2026-11-06T10:05:00' } });
-  assert.equal(statusOf(stages, 'compile'), 'pass');
+  const stages = computeVerificationGate(events, { tests: { status: 'pass', at: '2026-11-06T10:05:00' } });
+  assert.equal(statusOf(stages, 'tests'), 'pass');
 });
 
-test('an open linter diagnostic fails compile until the file has a later clean event', () => {
+test('an open linter diagnostic is a shield warning until the file has a later clean event', () => {
   const diag = write('/p/a.ts', '2026-11-06 10:00:00', { status: 'WARNING', ruleId: 'STATIC_LINTER_DIAGNOSTIC' });
-  assert.equal(statusOf(computeVerificationGate([diag]), 'compile'), 'fail');
+  assert.equal(statusOf(computeVerificationGate([diag]), 'shield'), 'warn');
   const cleaned = [write('/p/a.ts', '2026-11-06 10:01:00'), diag];
-  assert.equal(statusOf(computeVerificationGate(cleaned), 'compile'), 'pending');
+  assert.equal(statusOf(computeVerificationGate(cleaned), 'shield'), 'pass');
 });
 
 test('shield fails on an unrecovered block and passes once the file is written cleanly', () => {
@@ -66,10 +63,9 @@ test('a test-run failure newer than the recorded pass wins', () => {
   assert.equal(overallGateStatus(stages), 'fail');
 });
 
-test('a delivery receipt screenshot alone is only a warning for preview', () => {
-  const stages = computeVerificationGate([], {}, { deliveryStatus: 'VERIFIED', evidence: { screenshot: '/p/shot.png' } });
-  assert.equal(statusOf(stages, 'preview'), 'warn');
-  assert.equal(stages.find(s => s.id === 'preview').detail, 'shot.png');
+test('the gate has no compile or preview stage any more', () => {
+  const ids = computeVerificationGate([], { compile: { status: 'fail' }, preview: { status: 'fail' } }).map(s => s.id);
+  assert.deepEqual(ids, ['shield', 'tests']);
 });
 
 test('events of other projects are ignored', () => {
@@ -90,12 +86,12 @@ test('loadVerificationGate reads the runtime report and survives a corrupt file'
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('the card shows four rows, the worst status and the hint only when nothing is recorded', () => {
+test('the card shows two rows, the worst status and the hint only when nothing is recorded', () => {
   initI18n('en');
   const pending = renderVerificationGateCard(computeVerificationGate([]));
-  assert.equal((pending.match(/class="gate-row"/g) || []).length, 4);
+  assert.equal((pending.match(/class="gate-row"/g) || []).length, 2);
   assert.match(pending, /gate-hint/);
-  const failed = renderVerificationGateCard(computeVerificationGate([], { compile: { status: 'fail', detail: '<b>3 errors</b>' } }));
+  const failed = renderVerificationGateCard(computeVerificationGate([], { tests: { status: 'fail', detail: '<b>3 errors</b>' } }));
   assert.match(failed, /gate-hdr">\s*<span class="gate-tag">VERIFICATION GATE<\/span>\s*<span class="gate-state gate-text-fail">Failed/);
   assert.match(failed, /&lt;b&gt;3 errors&lt;\/b&gt;/);
   assert.doesNotMatch(failed, /gate-hint/);

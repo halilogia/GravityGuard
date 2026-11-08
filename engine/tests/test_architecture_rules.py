@@ -105,7 +105,7 @@ class TestDesignIconRule(unittest.TestCase):
                         dispatcher.validate_gravityguard()
                     self.assertEqual(result.exception.code, 0)
                     response = json.loads(output.getvalue())
-                    self.assertEqual(response['decision'], 'deny')
+                    self.assertEqual(response['decision'], 'allow')  # advisory since the pause/exit-path rework
                     self.assertIn('[DESIGN_ICON_RULE]', response['reason'])
                     self.assertIn('Satır 1', response['reason'])
                     self.assertIn('✅', response['reason'])

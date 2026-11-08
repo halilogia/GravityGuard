@@ -32,7 +32,7 @@ _get_base_name = srp_python._get_base_name
 _is_exempt_class_ast = srp_python._is_exempt_class_ast
 
 
-# --- DESIGN_ICON_RULE: STANDARD EMOJI / ICON USAGE (STRICT DENY) ---
+# --- DESIGN_ICON_RULE: STANDARD EMOJI / ICON USAGE (ADVISORY WARNING) ---
 def find_design_icon_violations(
     target_file: str,
     projected_content: str,
