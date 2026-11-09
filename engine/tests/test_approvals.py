@@ -38,7 +38,8 @@ class ApprovalTicketTest(unittest.TestCase):
         out = decide()
         self.assertEqual(out["decision"], "deny")
         key = apr.action_key(RULE, ACTION)
-        self.assertIn(f"gravityguard approvals allow {key}", out["reason"])
+        self.assertIn(f"id {key}", out["reason"])
+        self.assertIn("Bir kez izin ver", out["reason"])
         self.assertEqual([t["id"] for t in apr.list_pending()], [key])
 
     def test_approval_lifts_exactly_one_call(self):

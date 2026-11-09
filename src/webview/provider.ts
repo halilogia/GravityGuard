@@ -440,6 +440,11 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
     return this._approvalCache;
   }
 
+  /** Called on a timer by the extension: the ticket cache otherwise refreshes only while the panel renders. */
+  watchApprovals(): void {
+    this.approvalCache().current();
+  }
+
   /** A new blocked action: a notification with the two buttons, so the user need not open the panel. */
   private announceApproval(ticket: ApprovalView): void {
     const allow = t('hooks.allowOnce');

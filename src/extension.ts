@@ -42,6 +42,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     })
   );
 
+  // Approval notifications must not depend on the panel being open.
+  const approvalTimer = setInterval(() => provider.watchApprovals(), 2000);
+  context.subscriptions.push({ dispose: () => clearInterval(approvalTimer) });
+
   // 3. Register Commands
   context.subscriptions.push(
     vscode.commands.registerCommand('antigravityBridge.ping', async () => {

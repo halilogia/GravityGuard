@@ -111,8 +111,9 @@ def _apply_approvals(out: str, action: dict | None) -> str:
         sys.stderr.write(f"[GravityGuard] user approval honoured: {key} ({rule}), uses left {left}\n")
         return json.dumps({"decision": "allow", "reason": f"[GG_APPROVED] {rule}: user approved this action ({key}). {reason}"})
     approvals.record_block(rule, reason, action)
-    hint = (f"\nOnay: kullanıcı yalnızca bu işlemi `gravityguard approvals allow {key}` ile açabilir "
-            f"(tek kullanımlık, {approvals.DEFAULT_TTL_MINUTES} dk). Onay verilmezse kural yürürlükte kalır.")
+    hint = (f"\nOnay: kullanıcı bu işlemi IDE bildirimindeki veya GravityGuard panelindeki 'Bir kez izin ver' "
+            f"düğmesiyle açabilir (id {key}, tek kullanımlık, {approvals.DEFAULT_TTL_MINUTES} dk). "
+            "Onay verilmezse kural yürürlükte kalır.")
     return json.dumps({**data, "reason": reason + hint})
 
 
