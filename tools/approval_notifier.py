@@ -1,100 +1,82 @@
-"""Windows popup for GravityGuard approval tickets: one click allows or denies, no terminal.
+"""Native Windows notification for GravityGuard approval tickets: Allow / Deny buttons right in the toast.
 
-Run `pythonw tools/approval_notifier.py` (or `--install` once to start it at login). A new pending ticket opens a
-small always-on-top window with the rule, the blocked action and two buttons. The click goes through the same trusted
-entry point the panel uses (`engine/approval_control.py`); agents cannot reach it, so a click still means the user said yes.
+Needs the `windows-toasts` package. `--install` creates a private venv at ~/.gravityguard/notifier-venv, installs it
+there and adds a login launcher to the Startup folder; `--uninstall` removes the launcher.
+
+The toast buttons call back into this running process (no URL scheme, no extra command), and the decision goes through
+`engine/approval_control.py`, the same trusted path as the panel. Another program cannot answer for the user because
+nothing outside this process listens for the click.
 """
 import os
+import re
+import subprocess
 import sys
-import tkinter as tk
+import time
 from pathlib import Path
-
-if sys.platform == "win32":
-    import winsound
 
 ENGINE = Path(__file__).resolve().parent.parent / "engine"
 sys.path.insert(0, str(ENGINE))
 
-import approval_control as control
 from gravityguard_engine import approvals as apr
+import approval_control as control
 
-POLL_MS = 1500
+POLL_SECONDS = 1.5
+VENV = Path.home() / ".gravityguard" / "notifier-venv"
 STARTUP = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
 LAUNCHER = STARTUP / "GravityGuardApprovals.vbs"
+CHOICE = re.compile(r"^(allow|deny):([0-9a-f]{16})$")
 
 
-def describe(ticket: dict) -> str:
+def build_toast(ticket: dict, on_click):
+    from windows_toasts import Toast, ToastButton, ToastScenario
     action = ticket.get("action") or {}
-    what = action.get("command") or action.get("target") or "?"
-    return f"{ticket.get('rule', '?')}  ·  {action.get('tool', '?')}\n{what[:220]}\n\n{str(ticket.get('reason', ''))[:260]}"
+    what = (action.get("command") or action.get("target") or "?")[:160]
+    toast = Toast(
+        [f"GravityGuard: {ticket.get('rule', '?')} ({action.get('tool', '?')})", what, str(ticket.get("reason", ""))[:200]],
+        scenario=ToastScenario.Reminder,  # stays on screen until the user answers
+        group="gravityguard-approvals",
+    )
+    toast.AddAction(ToastButton("İzin ver (30 dk, 1 kez)", f"allow:{ticket['id']}"))
+    toast.AddAction(ToastButton("Reddet", f"deny:{ticket['id']}"))
+    toast.on_activated = on_click
+    return toast
 
 
-class Popup:
-    def __init__(self, root: tk.Tk, ticket: dict, on_close) -> None:
-        self.id = ticket["id"]
-        self.on_close = on_close
-        self.win = tk.Toplevel(root)
-        self.win.title("GravityGuard onayı")
-        self.win.attributes("-topmost", True)
-        self.win.configure(bg="#1f1f24")
-        self.win.protocol("WM_DELETE_WINDOW", self.close)
-        tk.Label(self.win, text=describe(ticket), justify="left", anchor="w", wraplength=420, bg="#1f1f24",
-                 fg="#e8e8ec", font=("Segoe UI", 10), padx=14, pady=12).pack(fill="x")
-        self.note = tk.Label(self.win, text="", anchor="w", bg="#1f1f24", fg="#e0a050", padx=14)
-        self.note.pack(fill="x")
-        bar = tk.Frame(self.win, bg="#1f1f24")
-        bar.pack(fill="x", padx=14, pady=(0, 12))
-        for text, color, action in (("İzin ver (30 dk, 1 kez)", "#2f7d4f", "allow"), ("Reddet", "#8a3a3a", "deny")):
-            tk.Button(bar, text=text, bg=color, fg="white", relief="flat", padx=10, pady=4,
-                      command=lambda a=action: self.decide(a)).pack(side="left", padx=(0, 8))
-        tk.Button(bar, text="Sonra", bg="#3a3a42", fg="white", relief="flat", padx=10, pady=4,
-                  command=self.close).pack(side="right")
-        self.win.update_idletasks()
-        x = self.win.winfo_screenwidth() - self.win.winfo_width() - 24
-        y = self.win.winfo_screenheight() - self.win.winfo_height() - 72
-        self.win.geometry(f"+{x}+{y}")
-
-    def decide(self, action: str) -> None:
-        answer = control.handle({"action": action, "id": self.id}) if action == "deny" or self._ticket_open() else None
-        if answer is None:
-            self.note.config(text="Bu kayıt artık onaya açık değil.")
-            return
-        self.close()
-
-    def _ticket_open(self) -> bool:
-        return any(t["id"] == self.id for t in apr.list_pending())
-
-    def close(self) -> None:
-        self.win.destroy()
-        self.on_close(self.id)
+def answer(arguments: str) -> str:
+    """Apply a button press. Returns a short result for the log line; only well-formed button arguments count."""
+    match = CHOICE.match(arguments or "")
+    if not match:
+        return "ignored"
+    action, ticket_id = match.groups()
+    try:
+        control.handle({"action": action, "id": ticket_id})
+    except apr.ApprovalError as exc:
+        return f"not applied: {exc}"
+    return action
 
 
 def run() -> None:
-    root = tk.Tk()
-    root.withdraw()
-    shown: dict[str, Popup | None] = {}
-
-    def forget(ticket_id: str) -> None:
-        shown[ticket_id] = None
-
-    def poll() -> None:
+    from windows_toasts import InteractableWindowsToaster
+    toaster = InteractableWindowsToaster("GravityGuard")
+    shown = {}
+    while True:
         pending = {t["id"]: t for t in apr.list_pending()}
         for ticket_id, ticket in pending.items():
             if ticket_id not in shown:
-                shown[ticket_id] = Popup(root, ticket, forget)
-                if sys.platform == "win32":
-                    winsound.MessageBeep(winsound.MB_ICONASTERISK)
-        for ticket_id, popup in list(shown.items()):
-            if popup and ticket_id not in pending:  # decided in the panel or terminal meanwhile
-                popup.close()
-        root.after(POLL_MS, poll)
-
-    poll()
-    root.mainloop()
+                shown[ticket_id] = build_toast(ticket, lambda args: answer(args.arguments))
+                toaster.show_toast(shown[ticket_id])
+        for ticket_id, toast in list(shown.items()):
+            if toast is not None and ticket_id not in pending:  # decided in the panel, a toast or the terminal
+                toaster.remove_toast(toast)
+                shown[ticket_id] = None
+        time.sleep(POLL_SECONDS)
 
 
 def install() -> None:
-    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    if not (VENV / "Scripts" / "pythonw.exe").exists():
+        subprocess.run([sys.executable, "-m", "venv", str(VENV)], check=True)
+        subprocess.run([str(VENV / "Scripts" / "python.exe"), "-m", "pip", "install", "-q", "windows-toasts"], check=True)
+    pythonw = VENV / "Scripts" / "pythonw.exe"
     script = Path(__file__).resolve()
     LAUNCHER.write_text(f'CreateObject("WScript.Shell").Run """{pythonw}"" ""{script}""", 0, False\n', encoding="utf-8")
     print(f"Girişte otomatik başlar: {LAUNCHER}")
