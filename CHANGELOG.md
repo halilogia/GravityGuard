@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `[DESIGN_ICON_RULE]` no longer fires inside `scratch`/`scratchpad` folders or on lines that use an emoji as a regex or raw-string pattern (`re.compile(r"...✦...")`). A rendered emoji in UI code is still denied.
   - The `PROJECTION_UNSUPPORTED` tip now says what to do (re-read, shorten the block, give a line range) and not to fall back to shell editing.
   - Tests: `engine/tests/test_security_hardening.py`, `engine/tests/test_architecture_rules.py`.
+- **Perf:** `log_event` writes the live-state JSON with compact `json.dumps` instead of `indent=2` (about 32 -> 21 ms per call).
 - **Cleanup round 2: dead rules, pause button, faster hook, smaller files.**
   - Removed 7 rules that never fired in 9 days of audit logs: `G4_IMPORT_MATRIX`, `ARCH_PMA_CORE_PURITY`, `ARCH_PMA_SHARED_PURITY`, `SRP_RESPONSIBILITY_MIX` (`srp_signals.py` deleted), `G5_NEW_FILE_BLOAT_DENY`, `OE_SINGLE_IMPL`, `DESIGN_RAW_CONTROLS_RULE`; `ARCH_PMA_HORIZONTAL_DENY` and `ARCH_PMA_DEEP_IMPORT` stay. Config keys `newFileMaxLoc`, `srpMixMinLoc`, `srpMaxFunctionLoc` and the `monolithLoc` alias are gone (old `.gravityguard.json` files still load). OE_SPIKE leftovers removed from the catalog, i18n, KNOWLEDGE.md and the srp-modularizer skill.
   - Extension: status-bar pause/resume item and `gravityguard.pause` / `gravityguard.resume` commands (`src/pause_control.ts`, `src/pause_ui.ts`); they read and write `pause.json` directly and honour `GRAVITYGUARD_PAUSE_FILE`.

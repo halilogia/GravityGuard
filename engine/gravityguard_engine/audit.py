@@ -530,7 +530,7 @@ def log_event(
             # ---------------------------------------------------------
             tmp_log_path = Path(log_path).with_suffix(".tmp")
             with open(tmp_log_path, "w", encoding="utf-8") as f:
-                json.dump(current_data, f, indent=2, ensure_ascii=False)
+                f.write(json.dumps(current_data, ensure_ascii=False, separators=(",", ":")))
                 f.flush()
                 if is_durable:
                     try:
