@@ -631,11 +631,8 @@ def validate_gravityguard() -> None:
             _log('WARNING', target_file, warn_msg, rule_id='DESIGN_RESPONSIVE_RULE')
             all_warnings.append(('DESIGN_RESPONSIVE_RULE', warn_msg))
 
-    design_scrollbars = check_design_scrollbar_rule(target_file, added_text)
-    if design_scrollbars:
-        warn_msg = "Tasarım kuralına uymuyor hemen düzelt: webin varsayılan yukarı aşağı kaydırma barları kullanılamaz. Evrensel minimalist / görünmez scrollbar standardı uygulanmalıdır."
-        _log('WARNING', target_file, warn_msg, rule_id='DESIGN_SCROLLBAR_RULE')
-        all_warnings.append(('DESIGN_SCROLLBAR_RULE', warn_msg))
+    from .plugin_rules import apply_plugin_rules  # drop-in rules: engine/gravityguard_engine/rules/*.py
+    apply_plugin_rules(target_file, projected_content, added_line_numbers, cfg, _log, all_warnings)
 
     # Fast-pass for vendor, cache, and non-code text assets (ONLY AFTER G0 IS CLEAN)
     knowledge_governed = is_knowledge_governed_path(target_file, p_root)
