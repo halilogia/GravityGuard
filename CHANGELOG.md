@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **G4 allows whole rewrites of prose docs (`security_rules.py`):** README, CHANGELOG, INDEX, CONTRIBUTING, LICENSE and `docs/**` may be rewritten with Write when the file is tracked by git with no uncommitted change and the new text has at least 5 non-empty lines and 15% of the old size; otherwise G4 still denies. Rule and memory files (`AGENTS.md`, `SKILL.md`, `KNOWLEDGE.md`, ...) keep the old protection. Fixes a README rewrite (434 -> ~100 lines) that took two hours of sliced edits. Test: `engine/tests/test_doc_overwrite_guard.py`.
 - **Shell guard CI performance:** replace character-by-character `shlex` tokenization with a linear scanner in `shell_tokens.py`, preserving non-POSIX quoting, Windows paths and malformed-quote fallback. Exhaustive short-input equivalence tests and the existing adversarial command timing gate cover the change; the two-second limit is unchanged.
 - **Edit loop on CRLF docs and scratch scripts fixed (`diffing.py`, `architecture_rules.py`, `icon_exemptions.py`, `rule_tips.py`):** an Antigravity session spent ~40 minutes failing to edit `.md` files and fell back to `python -c`.
   - `[PROJECTION_UNSUPPORTED]`: the file is read with CRLF folded to LF, but a search block copied from a CRLF file kept `\r\n` and never matched. Search and replacement text are now compared in LF form. The message also names the searched range and the first 120 characters, so the next miss is diagnosable from the audit log.

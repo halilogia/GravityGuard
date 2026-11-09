@@ -20,7 +20,7 @@ class TestDocOverwriteGuard(unittest.TestCase):
         self._env_patch = patch.dict(os.environ, {"GRAVITYGUARD_LOG_DIR": os.path.join(self.temp_dir, "logs")})
         self._env_patch.start()
         self.addCleanup(self._env_patch.stop)
-        self.existing_doc = Path(self.temp_dir) / "README.md"
+        self.existing_doc = Path(self.temp_dir) / "AGENTS.md"
         self.existing_doc.write_text("# My Project\nOriginal Content\n", encoding="utf-8")
 
     def tearDown(self):
@@ -36,6 +36,27 @@ class TestDocOverwriteGuard(unittest.TestCase):
         blocked, reason = check_blind_doc_overwrite(target, "Write", {"content": "line 0\n"}, self.temp_dir)
         self.assertTrue(blocked)
         self.assertIn("%80", reason)
+
+    def test_free_doc_rewrite_needs_clean_git_and_substance(self):
+        import subprocess
+        readme = Path(self.temp_dir) / "README.md"
+        old = "\n".join(f"line {i}" for i in range(50)) + "\n"
+        readme.write_text(old, encoding="utf-8")
+        new = "\n".join(f"new {i}" for i in range(12)) + "\n"
+        args = {"content": new}
+        blocked, _ = check_blind_doc_overwrite(str(readme), "Write", args, self.temp_dir)
+        self.assertTrue(blocked, "untracked file is not recoverable")
+        git = lambda *a: subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=self.temp_dir, capture_output=True)
+        git("init"); git("add", "README.md"); git("commit", "-m", "x")
+        blocked, _ = check_blind_doc_overwrite(str(readme), "Write", args, self.temp_dir)
+        self.assertFalse(blocked, "tracked + clean + substantial rewrite is allowed")
+        blocked, _ = check_blind_doc_overwrite(str(readme), "Write", {"content": "# x\n"}, self.temp_dir)
+        self.assertTrue(blocked, "a wipe is still blocked")
+        readme.write_text(old + "uncommitted\n", encoding="utf-8")
+        blocked, _ = check_blind_doc_overwrite(str(readme), "Write", args, self.temp_dir)
+        self.assertTrue(blocked, "uncommitted work would be lost")
+        blocked, _ = check_blind_doc_overwrite(str(self.existing_doc), "Write", args, self.temp_dir)
+        self.assertTrue(blocked, "rule files stay protected")
 
     def test_is_doc_or_rule_file(self):
         self.assertTrue(is_doc_or_rule_file("README.md"))

@@ -50,6 +50,37 @@ def is_doc_or_rule_file(file_path: str) -> bool:
     return clean.endswith(".md") or base_name in ("license", "gemini.md", "agents.md")
 
 
+_FREE_DOC_NAMES = ("readme", "changelog", "index.md", "contributing", "license")
+
+
+def is_free_doc(file_path: str) -> bool:
+    """Plain prose docs (README, CHANGELOG, INDEX, docs/**): rewriting them whole is normal and git-recoverable."""
+    clean = str(file_path).replace("\\", "/").lower()
+    base = os.path.basename(clean)
+    return base.startswith(_FREE_DOC_NAMES) or "/docs/" in clean
+
+
+def _git_clean_tracked(path: Path) -> bool:
+    """True when the file is tracked by git with no uncommitted change, so HEAD still holds every byte."""
+    import subprocess
+    try:
+        run = lambda *a: subprocess.run(["git", *a], cwd=path.parent, capture_output=True, timeout=5).returncode
+        return run("ls-files", "--error-unmatch", path.name) == 0 and run("diff", "--quiet", "HEAD", "--", path.name) == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _is_safe_free_rewrite(path: Path, args: dict) -> bool:
+    """Whole rewrite of a prose doc is fine when it is git-recoverable and the new text is not a wipe."""
+    new_text = next((args[k] for k in ("content", "CodeContent", "file_text", "text") if isinstance(args.get(k), str)), "")
+    try:
+        old_len = len(path.read_text(encoding="utf-8", errors="replace").strip())
+    except OSError:
+        return False
+    substantial = sum(1 for ln in new_text.splitlines() if ln.strip()) >= 5 and len(new_text.strip()) >= 0.15 * old_len
+    return substantial and _git_clean_tracked(path)
+
+
 def _keeps_most_of_file(path: Path, args: dict) -> bool:
     new_text = next((args[k] for k in ("content", "CodeContent", "file_text", "text") if isinstance(args.get(k), str)), None)
     if not new_text:
@@ -95,6 +126,13 @@ def check_blind_doc_overwrite(
     if target_p.is_file():
         if _keeps_most_of_file(target_p, args):
             return False, ""  # exit path: a rewrite keeping at least 80% of the existing lines destroys nothing
+        if is_free_doc(target_file):
+            if _is_safe_free_rewrite(target_p, args):
+                return False, ""  # exit path: prose doc, committed and unchanged, new text is substantial
+            return True, (
+                f"[G4_NO_BLIND_OVERWRITE]: '{target_file}' tümden yeniden yazılabilir, ama yalnızca git'te kayıtlı ve "
+                f"değişmemişse (önce commit/stash edin) ve yeni içerik boş/çok kısa değilse (en az 5 dolu satır, eski boyutun %15'i)."
+            )
         return True, (
             f"🛑 [G4_NO_BLIND_OVERWRITE]: Mevcut dokümantasyon, mimari veya kural dosyasının "
             f"('{target_file}') tümünü yazma aracıyla ('Write' / 'write_to_file') ezmek (Overwrite) yasaklanmıştır! "
