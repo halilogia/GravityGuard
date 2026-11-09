@@ -458,11 +458,8 @@ def validate_gravityguard() -> None:
         ".spec." in file_name_lower
     )
     is_test_file = is_in_test_dir or is_test_name
-    _vendor_check_path = re.sub(r"^.*?/\.gemini/antigravity/scratch/[^/]+", "", file_lower)
-    is_vendor_or_cache = any(m in _vendor_check_path for m in [
-        "/node_modules/", "/venv/", "/.venv/", "/env/", "/.env/", "/dist/", "/build/",
-        "/.git/", "/__pycache__/", "/runs/", "/scratch/", "/brain/", "/.gemini/"
-    ])
+    from .path_exemptions import is_vendor_or_cache_path
+    is_vendor_or_cache = is_vendor_or_cache_path(file_lower)
     is_data_or_doc = file_lower.endswith((
         ".json", ".css", ".scss", ".md", ".txt", ".yaml", ".yml", ".toml", ".ini",
         ".lock", ".svg", ".gitignore"
