@@ -8,7 +8,7 @@ import { MANDATORY_RULES } from '../dist/rule_modes.js';
 import { initI18n, setLanguage, resources } from '../dist/i18n/index.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const engineDirs = [path.join(root, 'engine'), path.join(root, 'engine', 'gravityguard_engine')];
+const engineDirs = [path.join(root, 'engine'), path.join(root, 'engine', 'gravityguard_engine'), path.join(root, 'engine', 'gravityguard_engine', 'rules')];
 
 /** Not rule ids: environment variables, audit statuses and similar constants that look like ids. */
 const NOT_RULES = new Set([
@@ -32,6 +32,7 @@ function emittedIds() {
   const found = new Map();
   const add = (id, file) => { if (!found.has(id)) found.set(id, path.basename(file)); };
   const patterns = [
+    new RegExp(`\\bid\\s*=\\s*["'](${ID})["']`, 'g'),               // drop-in rules: Rule(id="X")
     new RegExp(`rule_id\\s*=\\s*["'](${ID})["']`, 'g'),            // log_event(..., rule_id="X")
     new RegExp(`\\bRULE_ID\\s*=\\s*["'](${ID})["']`, 'g'),          // token_guard constant
     new RegExp(`\\(\\s*["'](${ID})["']\\s*,`, 'g'),                 // warning tuples ("X", msg) and (rule, msg)

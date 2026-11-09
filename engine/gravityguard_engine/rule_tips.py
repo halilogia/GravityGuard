@@ -15,7 +15,6 @@ TIPS: Dict[str, Tuple[str, str]] = {
                             "except ValueError as e:\n    log.warning('parse failed: %s', e)\n    raise"),
     "G2_TEST_INTEGRITY": ("Testi silme veya assert True ile geçirme; kodu düzelt ya da testi gerçek davranışa göre güncelle.", ""),
     "G3_COMPILER_BYPASS": ("Susturma yorumu ekleme; uyarının kök nedenini düzelt.", ""),
-    "G4_NO_BLIND_OVERWRITE": ("Var olan doküman veya kural dosyasını baştan yazma; önce oku, sonra yalnızca değişen bölümü düzenle.", ""),
     "G7_TS_FIRST": ("Yeni uygulama kodunu .ts olarak yaz; .js gerekiyorsa devam et; bu yalnızca bir uyarıdır.", ""),
     "DESIGN_ICON_RULE": ("Standart emoji veya simge karakteri kullanma; projenin ikon bileşenini ya da düz metni kullan.", ""),
     "DESIGN_SCROLLBAR_RULE": ("Varsayılan kaydırma çubuğunu bırakma; ince, temaya uygun scrollbar stili tanımla.", ""),

@@ -40,6 +40,7 @@ class Rule:
     extensions: Tuple[str, ...] = ()  # empty = every file
     example: str = ""
     sample_ext: str = ""  # extension used for the bad/good samples; defaults to the first of `extensions`
+    good_ext: str = ""  # extension for the good sample when the rule decides by file name (e.g. ".min.js")
     skip_tests: bool = True  # test files are exempt unless the rule says otherwise
 
 

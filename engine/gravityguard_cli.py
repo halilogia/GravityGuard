@@ -8,17 +8,24 @@
     gravityguard gate run tests -- <command>
                                             run the command, record pass/fail from its exit code
     gravityguard gate show                  print the recorded verification stages
+    gravityguard approvals list             operations a rule blocked, waiting for the user's decision
+    gravityguard approvals show <id>        what was blocked, which rule, how long the ticket lives
+    gravityguard approvals allow <id>       lift the block for that one exact action (type the id)
+    gravityguard approvals deny <id>        keep the block, keeping a receipt
+    gravityguard approvals revoke <id>      withdraw a live approval before it is spent
 
-`approve` and `revert` ask for confirmation on an interactive terminal; an agent's shell has none, and GravityGuard's
-shell rule denies agents these two commands as well (POLICY_INTEGRITY).
+`approve`, `revert`, `allow`, `deny` and `revoke` ask for confirmation on an interactive terminal; an agent's shell
+has none, and GravityGuard's shell rule denies agents these commands as well (POLICY_INTEGRITY).
 """
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from gravityguard_engine import approvals as apr
 from gravityguard_engine import hook_proposals as hp
 from gravityguard_engine import pause_switch as ps
 from gravityguard_engine import verification_gate as vg
@@ -91,6 +98,56 @@ def _pause(args) -> int:
     return 0
 
 
+def _approvals(args) -> int:
+    if args.action == "list":
+        pending = apr.list_pending()
+        print(f"Onay bekleyen işlemler: {len(pending) or 'yok'}")
+        for ticket in pending[:25]:
+            action = ticket.get("action") or {}
+            what = action.get("target") or action.get("command") or ""
+            left = int(float(ticket.get("expires_at") or 0) - time.time()) // 60
+            print(f"  {ticket['id']:18} [{ticket.get('rule')}] {action.get('tool', '')} {what}"[:160])
+            print(f"  {'':18} {max(left, 0)} dk kaldı, {ticket.get('seen', 1)} kez denendi")
+        if len(pending) > 25:
+            print(f"  ... {len(pending) - 25} tane daha (hepsi: gravityguard approvals show <id>)")
+        live = [r for r in apr.list_receipts() if r.get("status") == "approved"]
+        if live:
+            print("Aktif onaylar:")
+            for receipt in live:
+                print(f"  {receipt['id']:18} [{receipt.get('rule')}] kalan kullanım {receipt.get('remaining')}")
+        return 0
+    if not args.id:
+        print(f"'{args.action}' bir onay kimliği ister", file=sys.stderr)
+        return 2
+    view = apr.preview(args.id)
+    ticket = view.get("ticket") or {}
+    action = ticket.get("action") or {}
+    status = (view.get("receipt") or {}).get("status") or ticket.get("status")
+    print(f"\n== {args.id}  ({status})")
+    for label, value in (("Kural", ticket.get("rule")), ("Araç", action.get("tool")), ("Hedef", action.get("target")),
+                         ("Komut", action.get("command")), ("Neden", ticket.get("reason"))):
+        if value:
+            print(f"  {label:8}: {value}")
+    if args.action == "show":
+        return 0
+    if args.action == "deny":
+        apr.reject(args.id, args.reason, actor="user-terminal")
+        print(f"Reddedildi: {args.id}. Kural yürürlükte kalır.")
+        return 0
+    if not _confirm(f"{'Onaylamak' if args.action == 'allow' else 'Geri almak'} için kimliği yazın ({args.id}):",
+                    args.id):
+        print("Onaylanmadı; hiçbir şey değişmedi.")
+        return 1
+    if args.action == "allow":
+        receipt = apr.approve(args.id, actor="user-terminal", minutes=args.minutes, uses=args.uses)
+        print(f"Onaylandı: {receipt['remaining']} kullanım, {args.minutes} dk. "
+              f"Geri almak için: gravityguard approvals revoke {args.id}")
+        return 0
+    apr.revoke(args.id, actor="user-terminal")
+    print(f"Geri alındı: {args.id}")
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="gravityguard")
     sub = parser.add_subparsers(dest="group", required=True)
@@ -108,6 +165,14 @@ def main(argv=None) -> int:
     pz.add_argument("action", choices=("on", "off", "status"), help="off = pause, on = resume")
     pz.add_argument("--minutes", type=int, default=ps.DEFAULT_MINUTES, help=f"pause length (max {ps.MAX_MINUTES})")
     pz.add_argument("-r", "--reason", default="")
+    av = sub.add_parser("approvals", help="review the operations a rule blocked (the user decides)")
+    av.add_argument("action", choices=("list", "show", "allow", "deny", "revoke"))
+    av.add_argument("id", nargs="?")
+    av.add_argument("--minutes", type=int, default=apr.DEFAULT_TTL_MINUTES,
+                    help=f"how long the approval stays valid (max {apr.MAX_TTL_MINUTES})")
+    av.add_argument("--uses", type=int, default=apr.DEFAULT_USES,
+                    help=f"how many identical calls it covers (max {apr.MAX_USES})")
+    av.add_argument("-r", "--reason", default="", help="reason for a denial")
     debt = sub.add_parser("debt", help="technical debt ratchet report")
     debt.add_argument("--root", default=os.getcwd(), help="project root (default: current folder)")
     debt.add_argument("--threshold", type=int, default=500, help="monolith line threshold (default: 500)")
@@ -117,6 +182,8 @@ def main(argv=None) -> int:
         stream.reconfigure(encoding="utf-8", errors="replace")
     if args.group == "pause":
         return _pause(args)
+    if args.group == "approvals":
+        return _approvals(args)
     if args.group == "gate":
         return _gate(args)
     if args.group == "debt":

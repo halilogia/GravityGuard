@@ -57,7 +57,7 @@ def _control_text(norm: str) -> bool:
         return True
     if (".claude" in norm) and ("settings.json" in norm or "settings.local.json" in norm):
         return True
-    return ".gravityguard" in norm and ("runtime" in norm or "reviews" in norm)
+    return ".gravityguard" in norm and ("runtime" in norm or "reviews" in norm or "approvals" in norm)
 
 
 def _control_target(cwd: str) -> _Target:

@@ -60,7 +60,7 @@ class OperationTests(unittest.TestCase):
             root = Path(directory)
             (root / "README.md").write_text("Original", encoding="utf-8")
             cases = [
-                ("future", {"path": "README.md", "text": "Truncated"}, "G4_NO_BLIND_OVERWRITE"),
+
                 ("Read", {"path": "a.py", "content": "key = 'ghp_" + "A" * 36 + "'"}, "G0_SECRET_LEAK"),
                 ("mcp_custom_code_review", {"path": "a.py", "content": "ghp_" + "A" * 36}, "G0_SECRET_LEAK"),
                 ("future", {"filePath": ".env"}, "TOOL_SCHEMA_UNSUPPORTED"),

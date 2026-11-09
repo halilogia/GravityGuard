@@ -19,18 +19,16 @@ from .architecture_rules import (
     analyze_python_srp,
     check_arch_file_growth,
     check_design_icon_rule,
-    check_design_scrollbar_rule,
     check_g3_compiler_bypass,
     check_g7_ts_first,
     check_pma_horizontal,
     check_pma_imports,
-    evaluate_g7_ts_first,
-    find_design_icon_violations,
     find_design_responsive_violations,
     is_ts_cohesive_monolith,
     record_and_check_cumulative_growth,
 )
 from .audit import log_event
+from .plugin_rules import apply_plugin_rules  # drop-in rules: engine/gravityguard_engine/rules/*.py
 from .doc_automation import doc_obligation_auto, is_knowledge_governed_path, resolve_knowledge_doc
 from .state_lock import StateLockTimeout
 from .diagnostics import read_recent_diagnostics, trigger_background_validation
@@ -587,29 +585,6 @@ def validate_gravityguard() -> None:
         print(json.dumps({"decision": "allow"}))
         sys.exit(0)
 
-    # G7: TypeScript-first, advisory only (one-line warning for application .js)
-    if not is_vendor_or_cache and not is_test_file:
-        g7_blocked, g7_msg = evaluate_g7_ts_first(target_file, projected_content)
-        if g7_blocked:
-            if is_rule_shadow("G7_TS_FIRST", cfg):
-                _log('SHADOW_TRIGGER', target_file, f"[SHADOW] {g7_msg}", rule_id='G7_TS_FIRST')
-            else:
-                _log('WARNING', target_file, g7_msg, rule_id='G7_TS_FIRST')  # advisory: a .js file is a style call, not a dead end
-                all_warnings.append(("G7_TS_FIRST", g7_msg))
-
-    design_violations = find_design_icon_violations(target_file, projected_content, added_line_numbers)
-    if design_violations:
-        first = design_violations[0]
-        icons_str = ", ".join(first["icons"])
-        total_violations = len(design_violations)
-        extra_note = f" (+{total_violations - 1} diğer satır)" if total_violations > 1 else ""
-        deny_msg = (
-            f"Tasarım kuralı ihlali (Satır {first['line']}): Kodda standart emoji/ikon kullanımı tespit edildi ({icons_str}){extra_note}!\n"
-            f"Hatalı satır: '{first['snippet']}'\n"
-            f"Zero-Bloat ve Minimalist UI standardı gereği kaynak kodda emoji/ikon kullanılamaz; sadece temiz tipografi veya SVG kullanın."
-        )
-        _log('WARNING', target_file, deny_msg, rule_id='DESIGN_ICON_RULE')  # advisory: never a dead end
-        all_warnings.append(("DESIGN_ICON_RULE", deny_msg))
 
     # DESIGN_RESPONSIVE_RULE: Mobile / Phone Viewport (DENY) & Fluid Layout (WARN)
     responsive_violations = find_design_responsive_violations(target_file, projected_content, added_line_numbers)
@@ -631,7 +606,6 @@ def validate_gravityguard() -> None:
             _log('WARNING', target_file, warn_msg, rule_id='DESIGN_RESPONSIVE_RULE')
             all_warnings.append(('DESIGN_RESPONSIVE_RULE', warn_msg))
 
-    from .plugin_rules import apply_plugin_rules  # drop-in rules: engine/gravityguard_engine/rules/*.py
     apply_plugin_rules(target_file, projected_content, added_line_numbers, cfg, _log, all_warnings)
 
     # Fast-pass for vendor, cache, and non-code text assets (ONLY AFTER G0 IS CLEAN)
@@ -1047,7 +1021,7 @@ def run_cli() -> None:
         print(json.dumps({"decision": "continue" if "--stop" in sys.argv else "deny",
                           "reason": "[GUARD_UNAVAILABLE]: Validation could not complete"}))
         return
-    out = finalize(buf.getvalue(), bool(_CRASH_CONTEXT.get("stop")), str(_CRASH_CONTEXT.get("conversation_id") or ""))
+    out = finalize(buf.getvalue(), bool(_CRASH_CONTEXT.get("stop")), str(_CRASH_CONTEXT.get("conversation_id") or ""), _CRASH_CONTEXT)
     real_stdout.write(out)
     real_stdout.flush()
     if exit_code is not None:  # callers and tests rely on the engine's own sys.exit, code 0 included

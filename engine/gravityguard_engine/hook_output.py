@@ -66,8 +66,63 @@ def drop_repeated_warnings(warnings: list[tuple[str, str]], conversation_id: str
     return kept
 
 
-def finalize(out: str, stop: bool, conversation_id: str) -> str:
-    """Rejections get their lesson; the first allowed call of a conversation gets the briefing."""
+def _action_from(value: dict | None) -> dict | None:
+    """Accept the dispatcher's call context and return {tool, target, command, args}."""
+    if not isinstance(value, dict):
+        return None
+    if "raw" not in value:
+        return value
+    try:
+        payload = json.loads(value.get("raw") or "")
+    except (ValueError, TypeError):
+        payload = {}
+    payload = payload if isinstance(payload, dict) else {}
+    call = payload.get("toolCall") if isinstance(payload.get("toolCall"), dict) else {}
+    args = call.get("args") if isinstance(call.get("args"), dict) else {}
+    target = args.get("TargetFile") or args.get("target_file") or args.get("path") or args.get("file_path") or ""
+    command = args.get("command") or args.get("CommandLine") or ""
+    return {"tool": str(value.get("tool") or call.get("name") or ""), "target": str(target),
+            "command": str(command), "args": args}
+
+
+def _apply_approvals(out: str, action: dict | None) -> str:
+    """Honour a user approval for this exact action, otherwise offer one. Never changes an allow."""
+    try:
+        from . import approvals
+    except Exception as import_err:  # an unreadable ticket store must never decide an operation
+        sys.stderr.write(f"[GravityGuard] approval store unavailable: {import_err}\n")
+        return out
+    action = _action_from(action)
+    try:
+        data = json.loads(out)
+    except ValueError:
+        return out
+    if not isinstance(data, dict) or data.get("decision") not in ("deny", "block"):
+        return out
+    reason = str(data.get("reason", ""))
+    rule = approvals.rule_of(reason)
+    if not rule or rule == "GUARD_UNAVAILABLE":
+        return out  # an engine failure is not a policy decision; approving it would approve nothing
+    key = approvals.action_key(rule, action)
+    live = approvals.approved(key)
+    if live:
+        approvals.consume(key)
+        left = max(0, int(live.get("remaining") or 1) - 1)
+        sys.stderr.write(f"[GravityGuard] user approval honoured: {key} ({rule}), uses left {left}\n")
+        return json.dumps({"decision": "allow", "reason": f"[GG_APPROVED] {rule}: user approved this action ({key}). {reason}"})
+    approvals.record_block(rule, reason, action)
+    hint = (f"\nOnay: kullanıcı yalnızca bu işlemi `gravityguard approvals allow {key}` ile açabilir "
+            f"(tek kullanımlık, {approvals.DEFAULT_TTL_MINUTES} dk). Onay verilmezse kural yürürlükte kalır.")
+    return json.dumps({**data, "reason": reason + hint})
+
+
+def finalize(out: str, stop: bool, conversation_id: str, action: dict | None = None) -> str:
+    """Rejections get their lesson; the first allowed call of a conversation gets the briefing.
+
+    `action` identifies the call that produced `out` (tool, target, command) so a rejection can be
+    matched to a user approval for that one action.
+    """
+    out = _apply_approvals(out, action)
     try:
         from . import pause_switch
         from .policy_integrity import MANDATORY_RULES

@@ -42,7 +42,8 @@ class ShippedRuleTests(unittest.TestCase):
         for r in load_rules():
             with self.subTest(rule=r.id):
                 self.assertTrue(_fire(r, r.bad), "bad sample must trigger")
-                self.assertFalse(_fire(r, r.good), "good sample must not trigger")
+                good_path = "src/sample" + r.good_ext if r.good_ext else None
+                self.assertFalse(_fire(r, r.good, path=good_path), "good sample must not trigger")
 
 
 class EngineBehaviourTests(unittest.TestCase):

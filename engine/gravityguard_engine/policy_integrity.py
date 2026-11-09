@@ -39,7 +39,7 @@ def is_runtime_control_file(target: str) -> bool:
         return True
     if ".claude" in parts and path.name.lower() in ("settings.json", "settings.local.json"):
         return True
-    if ".gravityguard" in parts and (path.name.lower() == "pause.json" or any(p in parts for p in ("runtime", "reviews"))):
+    if ".gravityguard" in parts and (path.name.lower() == "pause.json" or any(p in parts for p in ("runtime", "reviews", "approvals"))):
         return True
     home = Path.home()
     for folder in (".antigravity-ide", ".vscode"):

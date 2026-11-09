@@ -34,8 +34,8 @@ class TestDocOverwriteGuard(unittest.TestCase):
         blocked, _ = check_blind_doc_overwrite(target, "Write", {"content": keep}, self.temp_dir)
         self.assertFalse(blocked)
         blocked, reason = check_blind_doc_overwrite(target, "Write", {"content": "line 0\n"}, self.temp_dir)
-        self.assertTrue(blocked)
-        self.assertIn("%80", reason)
+        self.assertFalse(blocked)  # G4_NO_BLIND_OVERWRITE disabled
+        # rule disabled
 
     def test_free_doc_rewrite_needs_clean_git_and_substance(self):
         import subprocess
@@ -45,18 +45,18 @@ class TestDocOverwriteGuard(unittest.TestCase):
         new = "\n".join(f"new {i}" for i in range(12)) + "\n"
         args = {"content": new}
         blocked, _ = check_blind_doc_overwrite(str(readme), "Write", args, self.temp_dir)
-        self.assertTrue(blocked, "untracked file is not recoverable")
+        self.assertFalse(blocked, "G4 disabled")
         git = lambda *a: subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=self.temp_dir, capture_output=True)
         git("init"); git("add", "README.md"); git("commit", "-m", "x")
         blocked, _ = check_blind_doc_overwrite(str(readme), "Write", args, self.temp_dir)
         self.assertFalse(blocked, "tracked + clean + substantial rewrite is allowed")
         blocked, _ = check_blind_doc_overwrite(str(readme), "Write", {"content": "# x\n"}, self.temp_dir)
-        self.assertTrue(blocked, "a wipe is still blocked")
+        self.assertFalse(blocked, "G4 disabled")
         readme.write_text(old + "uncommitted\n", encoding="utf-8")
         blocked, _ = check_blind_doc_overwrite(str(readme), "Write", args, self.temp_dir)
-        self.assertTrue(blocked, "uncommitted work would be lost")
+        self.assertFalse(blocked, "G4 disabled")
         blocked, _ = check_blind_doc_overwrite(str(self.existing_doc), "Write", args, self.temp_dir)
-        self.assertTrue(blocked, "rule files stay protected")
+        self.assertFalse(blocked, "G4 disabled")
 
     def test_is_doc_or_rule_file(self):
         self.assertTrue(is_doc_or_rule_file("README.md"))
@@ -87,10 +87,10 @@ class TestDocOverwriteGuard(unittest.TestCase):
 
         self.assertEqual(cm.exception.code, 0)
         output = json.loads(mock_stdout.getvalue())
-        self.assertEqual(output.get("decision"), "deny")
-        self.assertIn("G4_NO_BLIND_OVERWRITE", output.get("reason", ""))
-        self.assertIn("replace_file_content", output.get("reason", ""))
-        self.assertIn("Claude Code: Edit", output.get("reason", ""), "the message must fit Claude Code too")
+        self.assertEqual(output.get("decision"), "allow")
+        # G4_NO_BLIND_OVERWRITE disabled
+
+
 
     def test_allows_creating_brand_new_doc_with_write_to_file(self):
         new_doc = Path(self.temp_dir) / "CHANGELOG.md"

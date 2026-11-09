@@ -34,6 +34,7 @@ REQUIRED = [
     "extension/engine/async_runner.py",
     "extension/engine/governance_control.py",
     "extension/engine/hook_proposal_control.py",
+    "extension/engine/approval_control.py",
     "extension/engine/gravityguard_cli.py",
     "extension/package.json",
     "extension/README.md",
@@ -48,6 +49,7 @@ MUST_MATCH_REPO = [
     "extension/engine/async_runner.py",
     "extension/engine/governance_control.py",
     "extension/engine/hook_proposal_control.py",
+    "extension/engine/approval_control.py",
     "extension/engine/gravityguard_cli.py",
 ]
 

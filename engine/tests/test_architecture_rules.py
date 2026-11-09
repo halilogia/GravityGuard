@@ -103,7 +103,7 @@ class TestDesignIconRule(unittest.TestCase):
                     response = json.loads(output.getvalue())
                     self.assertEqual(response['decision'], 'allow')  # advisory since the pause/exit-path rework
                     self.assertIn('[DESIGN_ICON_RULE]', response['reason'])
-                    self.assertIn('Satır 1', response['reason'])
+                    self.assertIn('line 1:', response['reason'])  # drop-in rule format since rules/design_icon.py
                     self.assertIn('✅', response['reason'])
 
 
@@ -320,7 +320,9 @@ class TestPmaBoundaryDetector(unittest.TestCase):
         self.assertIn("check_pma_horizontal(target_file)", src)
         self.assertIn("check_pma_imports(target_file, added_text)", src)
         self.assertIn("ARCH_PMA_HORIZONTAL_DENY", src)
-        self.assertIn("evaluate_g7_ts_first(target_file, projected_content)", src)
+        self.assertIn("apply_plugin_rules(", src)  # G7_TS_FIRST runs as a drop-in rule (rules/g7_ts_first.py)
+        from gravityguard_engine.plugin_rules import load_rules
+        self.assertIn("G7_TS_FIRST", [rule.id for rule in load_rules()])
 
 
 class TestDesignResponsiveAndRawControls(unittest.TestCase):

@@ -229,3 +229,5 @@ Bu depo, standart mühendislik prensiplerine tam uyumlu dokümantasyon seti içe
 ## Lisans
 
 Bu proje [GNU General Public License v3.0](LICENSE) kapsamında lisanslanmıştır.
+
+- [DESIGN.md](DESIGN.md) — Görsel tasarım sistemi ve bileşen spesifikasyonu

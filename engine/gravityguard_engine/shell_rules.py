@@ -32,7 +32,9 @@ _TRUSTED_HOOK_ACTION = re.compile(
     r"python[\w.]*(?:\s+-\S+)*\s+[\"']?[^\s\"']*hook_proposal_control"
     r"|gravityguard(?:_cli\.py|\.cmd)?[\"']?\s+hooks\s+(?:approve|revert)\b"
     r"|hook_proposals\b[^\n]*\b(?:approve|revert)\s*\("
-    r"|gravityguard(?:_cli\.py|\.cmd)?[\"']?\s+pause\s+(?:on|off|status)\b|pause_switch\b[^\n]*\b(?:pause|resume)\s*\(|\.gravityguard[/\\]+pause\.json",
+    r"|gravityguard(?:_cli\.py|\.cmd)?[\"']?\s+pause\s+(?:on|off|status)\b|pause_switch\b[^\n]*\b(?:pause|resume)\s*\(|\.gravityguard[/\\]+pause\.json"
+    r"|gravityguard(?:_cli\.py|\.cmd)?[\"']?\s+approvals\s+(?:allow|deny|revoke)\b"
+    r"|approval_control\b|approvals\b[^\n]*\b(?:approve|reject|revoke|consume)\s*\(",
     re.IGNORECASE,
 )
 _REDIRECT_IN = re.compile(r"<\s*([^\s<>|;&]+)")
