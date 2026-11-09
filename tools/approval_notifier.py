@@ -17,8 +17,8 @@ from pathlib import Path
 ENGINE = Path(__file__).resolve().parent.parent / "engine"
 sys.path.insert(0, str(ENGINE))
 
-from gravityguard_engine import approvals as apr
 import approval_control as control
+from gravityguard_engine import approvals as apr
 
 POLL_SECONDS = 1.5
 VENV = Path.home() / ".gravityguard" / "notifier-venv"
