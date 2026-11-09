@@ -82,19 +82,16 @@ class TestProjectContextAndMultiRoot(unittest.TestCase):
                 os.environ["GRAVITYGUARD_LOG_DIR"] = orig_override
 
     def test_resolve_complexity_thresholds_clamps_below_floors(self):
-        cfg = {"complexity": {"monolithLoc": 5, "singleWriteLoc": 1}}
+        cfg = {"complexity": {"ratchetLoc": 5, "singleWriteLoc": 1}}
         resolved = resolve_complexity_thresholds(cfg)
         # 5 is below floor (100), 1 is below floor (10); must retain defaults
-        self.assertEqual(resolved["newFileMaxLoc"], DEFAULT_COMPLEXITY_THRESHOLDS["newFileMaxLoc"])
+        self.assertEqual(resolved["ratchetLoc"], DEFAULT_COMPLEXITY_THRESHOLDS["ratchetLoc"])
         self.assertEqual(resolved["singleWriteLoc"], DEFAULT_COMPLEXITY_THRESHOLDS["singleWriteLoc"])
 
-    def test_relaxing_monolith_line_relaxes_new_file_cap_unless_set_explicitly(self):
-        self.assertEqual(resolve_complexity_thresholds({})["newFileMaxLoc"], 600)
-        self.assertEqual(resolve_complexity_thresholds({"complexity": {"monolithLoc": 2000}})["newFileMaxLoc"], 2000)
-        self.assertEqual(resolve_complexity_thresholds({"complexity": {"monolithLoc": 300}})["newFileMaxLoc"], 300)  # alias: any valid value wins
-        self.assertEqual(resolve_complexity_thresholds({"complexity": {"monolithLoc": 5}})["newFileMaxLoc"], 600)  # below floor
-        explicit = {"complexity": {"monolithLoc": 2000, "newFileMaxLoc": 700}}
-        self.assertEqual(resolve_complexity_thresholds(explicit)["newFileMaxLoc"], 700)
+    def test_removed_new_file_cap_keys_are_ignored(self):
+        resolved = resolve_complexity_thresholds({"complexity": {"monolithLoc": 2000, "newFileMaxLoc": 700}})
+        self.assertEqual(resolved, DEFAULT_COMPLEXITY_THRESHOLDS)
+        self.assertNotIn("newFileMaxLoc", resolved)
 
     def test_ratchet_threshold_is_configurable_and_floored(self):
         self.assertEqual(resolve_complexity_thresholds({})["ratchetLoc"], 500)

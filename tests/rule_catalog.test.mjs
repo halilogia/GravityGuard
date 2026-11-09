@@ -58,7 +58,7 @@ test('every rule id the engine emits has a catalog entry', () => {
 test('the scan finds the ids it should (guards the scanner itself)', () => {
   const ids = emittedIds();
   for (const id of ['G7_TS_FIRST', 'SHELL_SECURITY', 'ARCH_PMA_DEEP_IMPORT', 'WEB_DOCUMENT_SIZE', 'T2_NO_OBSERVABLE_ASSERTION',
-    'T0_COVERAGE_BELOW_THRESHOLD', 'STATIC_LINTER_DIAGNOSTIC', 'TOOL_OUTPUT_BLOAT', 'OE_SINGLE_IMPL', 'HOOK_PROPOSAL_APPROVED']) {
+    'T0_COVERAGE_BELOW_THRESHOLD', 'STATIC_LINTER_DIAGNOSTIC', 'TOOL_OUTPUT_BLOAT', 'SEC_UNSAFE_PATTERN', 'HOOK_PROPOSAL_APPROVED']) {
     assert.ok(ids.has(id), `scanner no longer finds ${id}`);
   }
   assert.ok(ids.size > 40);
@@ -100,9 +100,7 @@ test('effective mode follows the config only where the engine reads it', () => {
   assert.equal(effectiveMode(getRule('G1_SILENT_EXCEPTION'), shadowCfg), 'shadow');
   assert.equal(effectiveMode(getRule('G0_SECRET_LEAK'), shadowCfg), 'block', 'mandatory rules ignore shadow');
   assert.equal(effectiveMode(getRule('DESIGN_ICON_RULE'), shadowCfg), 'block', 'engine never reads a mode for this rule');
-  assert.equal(effectiveMode(getRule('OE_SINGLE_IMPL'), {}), 'shadow');
-  assert.equal(effectiveMode(getRule('OE_SINGLE_IMPL'), { rules: { OE_SINGLE_IMPL: { mode: 'warn' } } }), 'warn');
-  assert.equal(effectiveMode(getRule('OE_SINGLE_IMPL'), { rules: { OE_SINGLE_IMPL: { mode: 'off' } } }), 'off');
+  for (const gone of ['OE_SINGLE_IMPL', 'OE_SPIKE', 'G4_IMPORT_MATRIX', 'SRP_RESPONSIBILITY_MIX', 'G5_NEW_FILE_BLOAT_DENY', 'ARCH_PMA_CORE_PURITY', 'ARCH_PMA_SHARED_PURITY', 'DESIGN_RAW_CONTROLS_RULE']) assert.equal(getRule(gone), undefined, gone);
   assert.equal(effectiveMode(getRule('T0_TEST_RUN_FAILED'), {}), 'off', 'dynamic tests are opt-in');
   assert.equal(effectiveMode(getRule('T0_TEST_RUN_FAILED'), { testEvidence: { dynamicExecution: true } }), 'warn');
   assert.equal(effectiveMode(getRule('DOC_OBLIGATION_UNRESOLVED'), { governance: { enforceDocObligations: false } }), 'off');

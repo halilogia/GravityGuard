@@ -13,7 +13,6 @@ This document serves as the persistent engineering knowledge repository for **Gr
 >    - `G0_SECRET_LEAK`: Zero exposed API keys, tokens, or private credentials.
 >    - `G1_SILENT_EXCEPTION`: Zero empty catch/except blocks (`except: pass`, `catch {}`).
 >    - `G2_TEST_INTEGRITY`: Zero test deletions, skipping, or bypass escape-hatch injection.
->    - `G4_IMPORT_MATRIX`: Strict architectural layer boundaries (no reverse/cross-layer imports).
    - G7_TS_FIRST: Application code must be authored in TypeScript (.ts/.tsx); raw .js/.cjs/.mjs files are blocked unless deterministically recognized as mandatory JS (dist/, uild/, *.config.js, sw.js, *.worker.js) or justified via // @ts-mandatory: <reason> in the top 10 lines (logging feedback to gravityguard_js_feedback.jsonl). Workspace paths under ~/.gemini/antigravity/scratch/<project> strip their host prefix before is_vendor_or_cache evaluation.
 > 3. **Obligations Before Session Stop (L3 Lifecycle Gate)**:
 >    - **Test Obligation (T1)**: Modifying core production code requires matching test evidence before session stop. Translation dictionaries (`lang-*`, `i18n`), scratch files (`scratch*`), pure UI/DOM/TUI view files (`/ui/`, `/views/`, `/components/`, `/web/`, `tui.ts`, `tree.ts`), and CLI/launcher entrypoints (`cli.ts`, `main.py`, `*_launcher.*`) are exempt by default, and `T3_SYMBOL_TO_TEST_LINK` checks only exported/public API symbols rather than internal unexported helpers.
@@ -101,10 +100,8 @@ The Python engine enforces checks through an ordered, high-to-low priority pipel
 2. **`G1_SILENT_EXCEPTION` (P0 - BLOCK)**: Diff-safe exception integrity guard. Rejects newly added empty catch/except blocks (`except: pass`, `catch {}`).
 3. **`G2_TEST_INTEGRITY` (P0 - BLOCK / WARN)**: Test suite preservation. Rejects test case deletion across full files (`Counter`) and test disablers (`.skip()`, `xit()`). Allows `pytest.mark.xfail` and treats `.only()` as WARN.
 4. **`G3_COMPILER_BYPASS` (P1 - WARN ONLY)**: Flags newly introduced linter/compiler suppression pragmas (`# noqa`, `# type: ignore`, `@ts-ignore`).
-5. **`G4_IMPORT_MATRIX` (P0 - BLOCK)**: Enforces architecture boundaries (`.gravityguard.json`). Supports relative Python imports and TS side-effects with exact path-segment matching (no false substring collisions).
-6. **`OE_SPIKE` (P2 - WARN ONLY)**: Lightweight heuristic for premature abstraction spikes — a change inside `overEngineeringMaxLoc` (default 50 LOC) introducing `overEngineerAbstractions`+ (default 2) classes/interfaces. **Calibrated and deliberately left alone**: measured fire rate 1.27% (59 of 4,639 eligible writes), of which only 2 are attributable to conventional scaffolding (exceptions, dataclasses, Protocols, Enums). Both numbers are tunable per project (§2.4).
-7. **`SRP_BOUNDARY` (P0 - BLOCK)**: Flags multi-responsibility anti-patterns (e.g., mixing raw UI widgets with HTTP/Network requests in a single file).
-8. **`ARCH_FILE_GROWTH` (P2 - WARN ONLY)**:
+5. **`SRP_BOUNDARY` (P0 - BLOCK)**: Flags multi-responsibility anti-patterns (e.g., mixing raw UI widgets with HTTP/Network requests in a single file).
+6. **`ARCH_FILE_GROWTH` (P2 - WARN ONLY)**:
    - **Philosophy**: Prevents the "creeping monolith" anti-pattern without blocking. AI agents tend to append small chunks (+40 LOC, +40 LOC) into a single 900+ LOC file, gradually turning it into an unmaintainable god-file.
    - **It measures growth, not file state.** Criteria, first match wins:
      1. The write **crosses** the monolith line (`old_loc < monolithLoc <= projected_loc`, default 1000).
@@ -114,13 +111,13 @@ The Python engine enforces checks through an ordered, high-to-low priority pipel
    - **Escape hatch**: `srp: allow-monolith` (or the rest of the marker vocabulary the SRP rule already honours) silences rules 2 and 3. It deliberately does **not** silence rule 1.
    - **Exemptions**: Test files (`test_*.py`, `*.test.ts`) and configured cohesive modules are exempt.
    - **Measured justification** (6,404 real production file-writes, 11 repositories): 60 writes land on files already past 1,000 lines and only 30 of them carry a material addition, so the previous `projected_loc >= 1000` state check repeated itself on half its fires; 359 of 1,636 real file creations added 180+ lines, so warning on creation penalised modularisation. Method and full numbers in the CHANGELOG.
-9. **`TEST_EVIDENCE` (Phase 2 - WARN ONLY)**:
+7. **`TEST_EVIDENCE` (Phase 2 - WARN ONLY)**:
    - **Philosophy**: Not a test coverage or mutation testing tool. Acts as a lightweight pre-tool "evidence airbag" to catch AI agents changing production behavior without test updates or writing empty assertionless stubs.
    - **Zero BLOCK Invariant**: Under no circumstance does T1, T2, or T3 block a tool call. All decisions return `decision: allow` with informative warnings.
    - **`T1_MISSING_RELATED_TEST`**: Triggers when production code changes without a candidate test file on disk or when candidate test file was untouched in the active session window. Exemption allowlist (`types`, `constants`, `index`, `*.d.ts`, `migrations`, `config`, `schemas`) prevents false alarms.
    - **`T2_NO_OBSERVABLE_ASSERTION`**: Triggers when newly added test cases (`def test_...`, `it(...)`, `test(...)`) contain no observable assertion pattern (`assert`, `self.assert*`, `pytest.raises`, `expect()`, `.toBe()`, `.toEqual()`, `.toThrow()`, etc.). Fixtures (`beforeEach`, `describe`, `setUp`) are exempt. Regex specifically avoids false matching on test titles starting with "should".
    - **`T3_SYMBOL_TO_TEST_LINK`**: Triggers when top-level/exported functions or classes added to production code do not appear by name in the candidate test file. Only runs when candidate test file exists (avoids warning spam when T1 already triggered).
-10. **`STATIC_LINTER_DIAGNOSTIC` (Tier 2/3 Bridge - WARN ONLY)**:
+8. **`STATIC_LINTER_DIAGNOSTIC` (Tier 2/3 Bridge - WARN ONLY)**:
    - **Philosophy**: The pre-tool fast path must stay `< 10ms`. Running `eslint`, `ruff`, or `tsc` synchronously inside pre-tool interceptors paralyzes the AI agent with 1–3s latency spikes.
    - **Asynchronous Runner (`engine/async_runner.py`)**: Runs post-tool in the background on changed files only (Ruff for Python, ESLint for TS/JS, Godot for GDScript, and debounced `tsc --noEmit` across TS projects).
    - **State Bridge (`.gravityguard/runtime/diagnostics.json`)**: Background tools output findings into this JSON file with timestamps.
@@ -158,10 +155,9 @@ The Python engine enforces checks through an ordered, high-to-low priority pipel
 
 | Block | Consumed by | Notes |
 |---|---|---|
-| `layers` | `G4_IMPORT_MATRIX` (BLOCK) | Forbidden import targets per layer. Exact path-segment matching. |
 | `testEvidence` | `T1` / `T2` / `T3` (WARN) | `sourceRoots`, `testRoots`, `subsystemMappings` (glob → test globs; default `src/webview/**`), `exemptPatterns` (fnmatch globs), `deferredMode`. `sessionWindowSeconds` kaldırıldı (mtime cezası yok). |
 | `review` | `R1` (Stop gate) | `enabled` (opt-in, default `false`); `exemptPatterns` (project-relative globs; defaults exclude `tests/**`, `test_*`, `*.test.ts`, …). Only production code suffixes are ever reviewed. |
-| `complexity` | `OE_SPIKE`, `ARCH_FILE_GROWTH` (WARN only) | `monolithLoc` (1000), `singleWriteLoc` (180), `creepBaseLoc` (800), `creepAddedLoc` (80), `overEngineeringMaxLoc` (50), `overEngineerAbstractions` (2). |
+| `complexity` | `ARCH_FILE_GROWTH` (WARN only) | `monolithLoc` (1000), `singleWriteLoc` (180), `creepBaseLoc` (800), `creepAddedLoc` (80). |
 | *(none)* | `hooks.json` in the live plugin | The plugin invokes `python scripts/srp-validator.py`, which is why the repo's `engine/gravity-validator.py` is renamed there. Both entry points state this in their header; `tools/sync_plugin.py` keeps them equal. |
 
 **Configuration is a convenience, never a security boundary.** Every numeric key has a floor (`monolithLoc: 3` would flag every file), non-numeric values, booleans and malformed blocks are ignored, and a bad config degrades to the defaults instead of raising — this code runs inside the pre-tool hook, where an exception means the write proceeds unguarded.
@@ -193,7 +189,7 @@ The Python engine enforces checks through an ordered, high-to-low priority pipel
 
 ## 4. How A New Heuristic Gets Shipped (lessons that are already paid for)
 
-1. **Measure before you tune.** A heuristic ships with its measured fire rate on the real corpus (11 repositories, last 400 commits, 6,404 production file-writes) and at least one true-positive and one false-positive example from that history. A number nobody measured is a guess. OE_SPIKE shipped *unchanged* because 1.27% measured as already correct.
+1. **Measure before you tune.** A heuristic ships with its measured fire rate on the real corpus (11 repositories, last 400 commits, 6,404 production file-writes) and at least one true-positive and one false-positive example from that history. A number nobody measured is a guess.
 2. **Test behaviour, not the predicate.** The first cut of the `srp: allow-monolith` exemption reused `is_ts_cohesive_monolith()` — which answers a different question and is true for nearly every TypeScript file — and the mistake was caught by an *existing* behaviour test going silent, not by a unit test of the predicate. Assertions must exercise the rule through the hook.
 3. **Claim parity with an A/B, not an absolute.** Latency comparisons run interleaved against `git HEAD` in the same time slice. An absolute "0.11 ms" is host- and load-dependent; the ratio is the claim that survives. A first implementation regressed 1.35x purely by copying a dict per call — invisible without the A/B.
 4. **One escape-hatch vocabulary.** A new marker or config key must reuse an existing one (`srp: allow-monolith`) or justify why it cannot.

@@ -113,14 +113,14 @@ def _is_public_api(rest: str) -> bool:
 
 def check_pma_imports(target_file: str, added_text: str) -> Tuple[bool, str, str]:
     """
-    ARCH_PMA_DEEP_IMPORT / ARCH_PMA_CORE_PURITY / ARCH_PMA_SHARED_PURITY.
+    ARCH_PMA_DEEP_IMPORT only (core/shared purity rules were removed).
     Returns (violated, rule_id, message). Composition roots (main/App/index) and tests are exempt.
     """
     if not added_text.strip() or is_pma_exempt(target_file, composition_root_exempt=True):
         return False, "", ""
     importer = _pma_norm(target_file)
     layer, feature = _pma_target_layer(importer)
-    if layer not in ("core", "shared", "features"):
+    if layer != "features":
         return False, "", ""
 
     for spec, is_py in _pma_import_specifiers(added_text):
@@ -137,18 +137,6 @@ def check_pma_imports(target_file: str, added_text: str) -> Tuple[bool, str, str
                     f"'features/{dest_feature}' diliminin iç dosyasını import ediyor ('{spec}'). "
                     f"Diğer dilimlere yalnızca public API (features/{dest_feature} veya features/{dest_feature}/index) üzerinden erişilir."
                 )
-        elif layer == "core":
-            if dest_layer in ("features", "pipelines") or (dest_layer == "shared" and re.match(r"ui(?:/|$)", rest)):
-                target_name = "shared/ui" if dest_layer == "shared" else dest_layer
-                return True, "ARCH_PMA_CORE_PURITY", (
-                    f"PMA Core Saflık İhlali: src/core/ altındaki dosya '{target_name}' "
-                    f"import edemez ('{spec}'). Core 0 dış bağımlılıkla saf kalmalıdır."
-                )
-        elif dest_layer == "features":
-            return True, "ARCH_PMA_SHARED_PURITY", (
-                f"PMA Shared Saflık İhlali: src/shared/ altındaki dosya "
-                f"'features/' import edemez ('{spec}'). Shared bileşenler özelliklerden bağımsız (agnostic) olmalıdır."
-            )
     return False, "", ""
 
 

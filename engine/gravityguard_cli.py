@@ -5,10 +5,8 @@
     gravityguard hooks approve <id>         review the diff, type the id to install it
     gravityguard hooks reject <id> [-r ..]  drop a proposal, keeping a receipt
     gravityguard hooks revert <id>          remove a hook an approval installed
-    gravityguard gate run <compile|tests> -- <command>
+    gravityguard gate run tests -- <command>
                                             run the command, record pass/fail from its exit code
-    gravityguard gate preview --screenshot <png> --console-errors <n>
-                                            record the live preview stage
     gravityguard gate show                  print the recorded verification stages
 
 `approve` and `revert` ask for confirmation on an interactive terminal; an agent's shell has none, and GravityGuard's
@@ -71,17 +69,10 @@ def _gate(args) -> int:
     if args.action == "run":
         command = [part for part in args.command if part != "--"]
         if args.stage not in vg.RUN_STAGES or not command:
-            print("Kullanım: gravityguard gate run <compile|tests> -- <komut>", file=sys.stderr)
+            print("Kullanım: gravityguard gate run tests -- <komut>", file=sys.stderr)
             return 2
         entry = vg.run_stage(root, args.stage, command)
         print(f"{args.stage}: {entry['status']} ({entry['detail']})")
-        return 0 if entry["status"] == "pass" else 1
-    if args.action == "preview":
-        if not args.screenshot or args.console_errors is None:
-            print("Kullanım: gravityguard gate preview --screenshot <png> --console-errors <n>", file=sys.stderr)
-            return 2
-        entry = vg.record_preview(root, args.screenshot, args.console_errors)
-        print(f"preview: {entry['status']} ({entry['detail']})")
         return 0 if entry["status"] == "pass" else 1
     for line in vg.stage_summary(vg.load_report(root)):
         print(line)
@@ -109,12 +100,10 @@ def main(argv=None) -> int:
     hooks.add_argument("--root", default=os.getcwd(), help="project root (default: current folder)")
     hooks.add_argument("-r", "--reason", default="", help="reason for a rejection")
     gate = sub.add_parser("gate", help="verification stages shown in the webview")
-    gate.add_argument("action", choices=("run", "preview", "show"))
+    gate.add_argument("action", choices=("run", "show"))
     gate.add_argument("stage", nargs="?", default="")
     gate.add_argument("command", nargs=argparse.REMAINDER)
     gate.add_argument("--root", default=os.getcwd(), help="project root (default: current folder)")
-    gate.add_argument("--screenshot", default="")
-    gate.add_argument("--console-errors", type=int, default=None)
     pz = sub.add_parser("pause", help="switch GravityGuard off for a while (secrets/.env stay protected)")
     pz.add_argument("action", choices=("on", "off", "status"), help="off = pause, on = resume")
     pz.add_argument("--minutes", type=int, default=ps.DEFAULT_MINUTES, help=f"pause length (max {ps.MAX_MINUTES})")

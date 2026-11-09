@@ -1,10 +1,10 @@
 """
-GravityGuard Engine — Verification gate report (compile, tests, preview).
+GravityGuard Engine — Verification gate report (tests).
 
-The webview shows four stages: compile, GravityGuard shield, logic tests, live preview. The shield is read from the
-event log; the other three come from `.gravityguard/runtime/verification.json`, which only this module writes.
-A stage result is never declared: `run` takes it from the command's exit code, `preview` from a screenshot on disk
-and the console error count, so an agent cannot mark a stage green without running it.
+The webview shows two stages: GravityGuard shield and logic tests. The shield is read from the event log; the test
+result comes from `.gravityguard/runtime/verification.json`, which only this module writes.
+A stage result is never declared: `run` takes it from the command's exit code, so an agent cannot mark a stage green
+without running it.
 """
 import json
 import os
@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-RUN_STAGES = ("compile", "tests")
+RUN_STAGES = ("tests",)
 REPORT_NAME = "verification.json"
 DETAIL_MAX = 160
 RUN_TIMEOUT_S = 900
@@ -58,7 +58,7 @@ def _last_line(text: str) -> str:
 
 
 def run_stage(root: Path, stage: str, argv: list[str], timeout: int = RUN_TIMEOUT_S) -> dict[str, Any]:
-    """Runs a compile or test command and records pass/fail from its exit code."""
+    """Runs a test command and records pass/fail from its exit code."""
     if stage not in RUN_STAGES:
         raise ValueError(f"unknown stage: {stage}")
     if not argv:
@@ -83,30 +83,9 @@ def run_stage(root: Path, stage: str, argv: list[str], timeout: int = RUN_TIMEOU
     })
 
 
-def record_preview(root: Path, screenshot: str, console_errors: int) -> dict[str, Any]:
-    """Records the live preview stage: pass only with a non-empty screenshot and zero console errors."""
-    shot = Path(screenshot)
-    if not shot.is_absolute():
-        shot = Path(root) / shot
-    has_shot = shot.is_file() and shot.stat().st_size > 0
-    if not has_shot:
-        status, detail = "fail", f"screenshot not found: {screenshot}"
-    elif console_errors > 0:
-        status, detail = "fail", f"console.error: {console_errors}"
-    else:
-        status, detail = "pass", f"{shot.name}, console.error: 0"
-    return _write_stage(root, "preview", {
-        "status": status,
-        "detail": detail,
-        "screenshot": str(shot),
-        "consoleErrors": console_errors,
-        "at": _now_iso(),
-    })
-
-
 def stage_summary(report: dict[str, Any]) -> list[str]:
     lines = []
-    for stage in ("compile", "tests", "preview"):
+    for stage in RUN_STAGES:
         entry: dict[str, Any] | None = report.get(stage)
         if isinstance(entry, dict):
             lines.append(f"{stage:8} {entry.get('status', '?'):7} {entry.get('at', '')}  {entry.get('detail', '')}")

@@ -14,21 +14,19 @@ from pathlib import Path
 from typing import List, Tuple, Optional, Dict
 
 
-from .quality_signals import check_single_implementation, find_evasion_markers, oe_single_impl_mode
+from .quality_signals import find_evasion_markers
 from .architecture_rules import (
     analyze_python_srp,
     check_arch_file_growth,
     check_design_icon_rule,
     check_design_scrollbar_rule,
     check_g3_compiler_bypass,
-    check_g4_import_matrix,
     check_g7_ts_first,
     check_pma_horizontal,
     check_pma_imports,
     evaluate_g7_ts_first,
     find_design_icon_violations,
     find_design_responsive_violations,
-    find_design_raw_controls_violations,
     is_ts_cohesive_monolith,
     record_and_check_cumulative_growth,
 )
@@ -61,7 +59,6 @@ from .governance import (
 
 from .write_signals import collect_write_signals
 from .stop_gate import critical_blockers, note_touched_file, other_stop_roots, ratchet_findings
-from .debt_ratchet import check_new_file_bloat
 from .ratchet_gate import RULE_ID as RATCHET_GROWTH_RULE_ID, check_ratchet_growth
 from .project_context import (
     harden_streams_to_utf8,
@@ -268,7 +265,7 @@ def validate_gravityguard() -> None:
                 )
                 reset_session_stop_retries(project_root, conversation_id)
                 _perform_task_archiving(project_root, conversation_id)
-                print(json.dumps({"decision": "allow"}))
+                print(json.dumps({"decision": "allow", "reason": f"Devre kesici: {session_retries} deneme sonrası Stop serbest bırakıldı; açık yükümlülükler için insana bildir."}))
                 sys.exit(0)
 
             # Defect B fix: Reconcile obligations with physical filesystem verification
@@ -637,23 +634,6 @@ def validate_gravityguard() -> None:
             _log('WARNING', target_file, warn_msg, rule_id='DESIGN_RESPONSIVE_RULE')
             all_warnings.append(('DESIGN_RESPONSIVE_RULE', warn_msg))
 
-    # DESIGN_RAW_CONTROLS_RULE: Raw browser controls (file input, scrollbars, spinners)
-    raw_controls_violations = find_design_raw_controls_violations(target_file, projected_content, added_line_numbers)
-    if raw_controls_violations:
-        first_raw = raw_controls_violations[0]
-        total_raw = len(raw_controls_violations)
-        extra_raw = f" (+{total_raw - 1} di\u011fer sat\u0131r)" if total_raw > 1 else ""
-        raw_deny_msg = (
-            f"Tasar\u0131m kural\u0131 ihlali (Sat\u0131r {first_raw['line']}): {first_raw['message']}{extra_raw}\n"
-            f"Hatal\u0131 sat\u0131r: '{first_raw['snippet']}'"
-        )
-        _log('BLOCKED', target_file, raw_deny_msg, rule_id='DESIGN_RAW_CONTROLS_RULE')
-        print(json.dumps({
-            "decision": "deny",
-            "reason": f"\U0001f6d1 [DESIGN_RAW_CONTROLS_RULE]: '{target_file}:{first_raw['line']}' - {raw_deny_msg}"
-        }))
-        sys.exit(0)
-
     design_scrollbars = check_design_scrollbar_rule(target_file, added_text)
     if design_scrollbars:
         warn_msg = "Tasarım kuralına uymuyor hemen düzelt: webin varsayılan yukarı aşağı kaydırma barları kullanılamaz. Evrensel minimalist / görünmez scrollbar standardı uygulanmalıdır."
@@ -772,21 +752,6 @@ def validate_gravityguard() -> None:
                 all_warnings.append(("SEC_UNSAFE_PATTERN", unsafe_msg))
 
     # ========================================================================
-    # GUARD 4: G4 — IMPORT MATRIX (BLOCK)
-    # ========================================================================
-    g4_violated, g4_reason = check_g4_import_matrix(target_file, added_text)
-    if g4_violated:
-        if is_rule_shadow("G4_IMPORT_MATRIX", cfg):
-            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {g4_reason}", rule_id="G4_IMPORT_MATRIX")
-        else:
-            _log("BLOCKED", target_file, g4_reason, rule_id="G4_IMPORT_MATRIX")
-            print(json.dumps({
-                "decision": "deny",
-                "reason": f"🛑 [G4_IMPORT_MATRIX]: '{target_file}' - {g4_reason}"
-            }))
-            sys.exit(0)
-
-    # ========================================================================
     # GUARD 4B: ARCH_PMA_* — PRAGMATIC MODULAR ARCHITECTURE BOUNDARIES (BLOCK)
     # ========================================================================
     pma_hits = []
@@ -805,28 +770,6 @@ def validate_gravityguard() -> None:
                 "decision": "deny",
                 "reason": f"🛑 [{pma_rule}]: '{target_file}' - {pma_reason}"
             }))
-            sys.exit(0)
-
-    # GUARD 5B: OE_SINGLE_IMPL — abstraction with one implementer (SHADOW by default)
-    if not is_test_file:
-        si_mode = oe_single_impl_mode(cfg)
-        if si_mode != "off":
-            si_triggered, si_msg = check_single_implementation(added_text, file_lower.endswith(".py"))
-            if si_triggered:
-                if si_mode == "warn":
-                    _log("WARNING", target_file, si_msg, rule_id="OE_SINGLE_IMPL")
-                    all_warnings.append(("OE_SINGLE_IMPL", si_msg))
-                else:
-                    _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {si_msg}", rule_id="OE_SINGLE_IMPL")
-
-    # GUARD 5C: G5_NEW_FILE_BLOAT_DENY — a brand-new source file above newFileMaxLoc never reaches the disk
-    bloat_msg = check_new_file_bloat(str(p_root), target_file, old_full_content, projected_content, complexity_thresholds["newFileMaxLoc"])
-    if bloat_msg:
-        if is_rule_shadow("G5_NEW_FILE_BLOAT_DENY", cfg):
-            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {bloat_msg}", rule_id="G5_NEW_FILE_BLOAT_DENY")
-        else:
-            _log("BLOCKED", target_file, bloat_msg, rule_id="G5_NEW_FILE_BLOAT_DENY")
-            print(json.dumps({"decision": "deny", "reason": f"🛑 [G5_NEW_FILE_BLOAT_DENY]: '{target_file}' - {bloat_msg}"}))
             sys.exit(0)
 
     # GUARD 5D: ARCH_RATCHET_GROWTH_DENY — a file over ratchetLoc takes no net new lines (shrinking is always allowed)

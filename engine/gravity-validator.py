@@ -104,7 +104,6 @@ try:
         analyze_python_srp_regex_fallback,
         check_arch_file_growth,
         check_g3_compiler_bypass,
-        check_g4_import_matrix,
         is_cohesive_module_by_filename,
         is_py_cohesive_monolith,
         is_ts_cohesive_monolith,

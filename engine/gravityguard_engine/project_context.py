@@ -13,22 +13,15 @@ from .doc_policy import is_doc_governed_path
 
 DEFAULT_COMPLEXITY_THRESHOLDS: Dict[str, int] = {
     "ratchetLoc": 500,                # debt ratchet: an over-this file may not grow past a small edit (debt_ratchet.py)
-    "newFileMaxLoc": 600,             # G5_NEW_FILE_BLOAT_DENY: a brand-new source file above this is denied at write time
-                                      # (legacy key `monolithLoc` is an alias of this one)
     "srpMixedImportsMinLoc": 150,     # UI + network imports only block once the file is this big
     "srpMinClassLoc": 25,             # a class shorter than this is a helper, not a "major" class (God module count)
-    "srpMixMinLoc": 400,              # SRP_RESPONSIBILITY_MIX: file size where mixed concerns are reported
-    "srpMaxFunctionLoc": 120,         # SRP_RESPONSIBILITY_MIX: one function this long mixing concerns is reported
     "singleWriteLoc": 300,            # ARCH_FILE_GROWTH: LOC added to an EXISTING file in one call or within 15 minutes
 }
 
 _COMPLEXITY_THRESHOLD_FLOORS: Dict[str, int] = {
     "ratchetLoc": 100,
-    "newFileMaxLoc": 100,
     "srpMixedImportsMinLoc": 20,
     "srpMinClassLoc": 5,
-    "srpMixMinLoc": 100,
-    "srpMaxFunctionLoc": 40,
     "singleWriteLoc": 10,
 }
 
@@ -190,7 +183,6 @@ def resolve_complexity_thresholds(cfg: Optional[dict]) -> Dict[str, int]:
         return DEFAULT_COMPLEXITY_THRESHOLDS
 
     resolved = dict(DEFAULT_COMPLEXITY_THRESHOLDS)
-    block = {"newFileMaxLoc": block.get("monolithLoc"), **{k: v for k, v in block.items() if v is not None}}  # legacy alias
     for key, floor in _COMPLEXITY_THRESHOLD_FLOORS.items():
         value = block.get(key)
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value < floor:

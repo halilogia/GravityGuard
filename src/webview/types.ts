@@ -48,5 +48,5 @@ export interface GuardianViewModel {
   memory?: MemoryHubData; // Knowledge & ADR & Changelog memory hub data
   hookProposals?: HookProposalData; // agent hook proposals awaiting the user, and installed ones
   auditStats?: AuditStats; // permanent audit journal aggregated per time window, rule, agent and session
-  verificationGate?: GateStage[]; // compile, shield, tests, preview stages for this project
+  verificationGate?: GateStage[]; // shield and tests stages for this project
 }

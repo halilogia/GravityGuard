@@ -3,10 +3,6 @@ import fnmatch
 import re
 
 from .security_rules import check_g0_secret_leak, is_protected_env_file
-from .session_quarantine import denied_targets
-from .shell_control_guard import writes_control_file, writes_denied_target
-from .shell_danger import dangerous_command_reason, parse_command
-from .shell_patch_guard import patch_script_reason
 
 _SEGMENTS = re.compile(r"[;&|\n(`]+")
 _ENV = re.compile(r"(?<![\w.-])(?:[^\s\"';&|]*[/\\])?\.env(?:\.[\w-]+)?(?![\w.-])", re.IGNORECASE)
@@ -56,6 +52,7 @@ def _names_protected_file(token: str) -> str:
 def _protected_read_reason(segment: str) -> str:
     """Denial for one command segment that reads a live .env / private credential file, '' otherwise."""
     kinds = [_names_protected_file(m.group(1)) for m in _REDIRECT_IN.finditer(segment)]
+    from .shell_danger import parse_command
     parsed = parse_command(segment)  # skips wrappers such as `sudo -u root`
     if parsed and parsed[0] in _BASE_READERS | _EXTRA_READERS:
         kinds += [_names_protected_file(token) for token in parsed[1]]
@@ -80,6 +77,10 @@ def check_shell_command(args: dict, cwd: str | None = None, conversation_id: str
     command = command_text(args)
     if command is None:
         return ""
+    from .session_quarantine import denied_targets  # lazy: only command tools pay for the shell rule modules
+    from .shell_control_guard import writes_control_file, writes_denied_target
+    from .shell_danger import dangerous_command_reason
+    from .shell_patch_guard import patch_script_reason
     blocked, reason, _ = check_g0_secret_leak(command)
     if blocked:
         return f"[G0_SECRET_LEAK]: {reason}"

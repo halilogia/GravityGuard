@@ -37,11 +37,9 @@ export async function handleOpenConfig(): Promise<void> {
       fs.writeFileSync(cfgFile, JSON.stringify({
         "governance": { "enforceDocObligations": true },
         "complexity": { "singleWriteLoc": 200, "totalLoc": 500 },
-        // The key the engine reads (dispatcher.is_rule_shadow). This entry equals the engine default and only
-        // shows the shape; set "shadow" on a rule to observe it without blocking.
-        "rules": {
-          "OE_SINGLE_IMPL": { "mode": "shadow" }
-        }
+        // The key the engine reads (dispatcher.is_rule_shadow): add { "RULE_ID": { "mode": "shadow" } }
+        // to observe a rule without blocking.
+        "rules": {}
       }, null, 2) + '\n', 'utf8');
     }
     const doc = await vscode.workspace.openTextDocument(cfgFile);

@@ -28,7 +28,6 @@ from gravityguard_engine.architecture_rules import (
     evaluate_g7_ts_first,
     find_design_icon_violations,
     find_design_responsive_violations,
-    find_design_raw_controls_violations,
     is_cohesive_module_by_filename,
     is_pma_exempt,
     is_py_cohesive_monolith,
@@ -288,29 +287,11 @@ class TestPmaBoundaryDetector(unittest.TestCase):
             self.assertFalse(self._imp("features/cart/cart.ts", text)[0], text)
         self.assertFalse(self._imp("features/cart/a.py", "from features.auth import login\n")[0])
 
-    # --- C) ARCH_PMA_CORE_PURITY ---
-    def test_core_purity(self):
-        for text in (
-            "import { x } from '@/features/auth';\n",
-            "import { x } from '../features/auth/index';\n",
-            "import { x } from '@/pipelines/logging';\n",
-            "import { Button } from '@/shared/ui/Button';\n",
-            "from features.auth import login\n",
-        ):
-            violated, rule, _ = self._imp("core/engine.ts", text)
-            self.assertTrue(violated, text)
-            self.assertEqual(rule, "ARCH_PMA_CORE_PURITY")
-        self.assertFalse(self._imp("core/engine.ts", "import { u } from '@/shared/utils/format';\n")[0])
-        self.assertFalse(self._imp("core/engine.ts", "import { h } from './helpers';\nimport fs from 'fs';\n")[0])
-
-    # --- D) ARCH_PMA_SHARED_PURITY ---
-    def test_shared_purity(self):
-        violated, rule, _ = self._imp("shared/ui/Button.tsx", "import { u } from '@/features/auth';\n")
-        self.assertTrue(violated)
-        self.assertEqual(rule, "ARCH_PMA_SHARED_PURITY")
-        self.assertTrue(self._imp("shared/util.ts", "import { u } from '../features/auth/index';\n")[0])
-        self.assertFalse(self._imp("shared/ui/Button.tsx", "import { c } from '@/core/engine';\n")[0])
-        self.assertFalse(self._imp("shared/ui/Button.tsx", "import { c } from './Icon';\n")[0])
+    # --- core / shared purity rules were removed: these imports are allowed ---
+    def test_core_and_shared_purity_rules_are_gone(self):
+        self.assertFalse(self._imp("core/engine.ts", "import { x } from '@/features/auth';\n")[0])
+        self.assertFalse(self._imp("core/engine.ts", "import { Button } from '@/shared/ui/Button';\n")[0])
+        self.assertFalse(self._imp("shared/ui/Button.tsx", "import { u } from '@/features/auth';\n")[0])
 
     # --- exemptions ---
     def test_composition_roots_are_exempt(self):
@@ -361,23 +342,6 @@ class TestDesignResponsiveAndRawControls(unittest.TestCase):
         self.assertEqual(len(violations), 1)
         self.assertEqual(violations[0]["rule"], "LARGE_FIXED_WIDTH")
         self.assertEqual(violations[0]["severity"], "WARN")
-
-    def test_raw_controls_rule_denies_unstyled_file_input(self):
-        html = '<input type="file" id="upload">'
-        violations = find_design_raw_controls_violations("index.html", html)
-        self.assertEqual(len(violations), 1)
-        self.assertEqual(violations[0]["type"], "RAW_FILE_INPUT")
-
-    def test_raw_controls_rule_allows_styled_file_input(self):
-        html = '<input type="file" id="upload" class="custom-file hidden">'
-        violations = find_design_raw_controls_violations("index.html", html)
-        self.assertEqual(len(violations), 0)
-
-    def test_raw_controls_rule_denies_raw_number_spinner(self):
-        html = '<input type="number" id="qty">'
-        violations = find_design_raw_controls_violations("index.html", html)
-        self.assertEqual(len(violations), 1)
-        self.assertEqual(violations[0]["type"], "RAW_NUMBER_SPINNER")
 
 
 if __name__ == "__main__":

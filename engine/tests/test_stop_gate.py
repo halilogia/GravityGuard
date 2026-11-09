@@ -9,7 +9,6 @@ import unittest
 from pathlib import Path
 
 from gravityguard_engine import stop_gate
-from gravityguard_engine.debt_ratchet import check_new_file_bloat
 from gravityguard_engine.refactor_hint import build_refactor_hint
 
 _ENGINE_DIR = str(Path(__file__).resolve().parent.parent)
@@ -39,21 +38,6 @@ class RefactorHintTests(unittest.TestCase):
         self.assertEqual(build_refactor_hint("def f():\n    pass\n", "a.py"), "")
         self.assertEqual(build_refactor_hint("def broken(:\n", "a.py"), "")
         self.assertEqual(build_refactor_hint("anything", "notes.md"), "")
-
-
-class NewFileBloatTests(unittest.TestCase):
-    def test_big_new_source_file_is_denied_with_blueprint(self):
-        msg = check_new_file_bloat("/proj", "/proj/src/mono.py", "", "class Big:\n" + _lines(700, "    v"), 600)
-        self.assertIn("701", msg)
-        self.assertIn("Öneri", msg)
-
-    def test_allowed_cases_return_empty(self):
-        big = _lines(700)
-        self.assertEqual(check_new_file_bloat("/proj", "/proj/src/ok.py", "", _lines(600), 600), "")   # exactly at the cap
-        self.assertEqual(check_new_file_bloat("/proj", "/proj/src/old.py", "x = 1\n", big, 600), "")      # existing file
-        self.assertEqual(check_new_file_bloat("/proj", "/proj/tests/test_big.py", "", big, 600), "")      # tests
-        self.assertEqual(check_new_file_bloat("/proj", "/proj/data.json", "", big, 600), "")              # data
-        self.assertEqual(check_new_file_bloat("/proj", "/proj/src/gen.py", "", "# srp: allow-monolith\n" + big, 600), "")
 
 
 class StopGateEndToEndTests(unittest.TestCase):
@@ -86,10 +70,10 @@ class StopGateEndToEndTests(unittest.TestCase):
                               encoding="utf-8", cwd=str(self.proj), env=env, timeout=90)
         return json.loads(proc.stdout.strip().splitlines()[-1])
 
-    def test_new_monolith_is_denied_before_it_is_written_but_a_small_file_is_not(self):
-        denied = self.write("fresh_monolith.py", _class_file(700))
-        self.assertEqual(denied["decision"], "deny")
-        self.assertIn("G5_NEW_FILE_BLOAT_DENY", denied["reason"])
+    def test_new_big_file_is_no_longer_denied_by_a_bloat_rule(self):
+        allowed = self.write("fresh_monolith.py", _class_file(700))
+        self.assertEqual(allowed["decision"], "allow")
+        self.assertNotIn("G5_NEW_FILE_BLOAT_DENY", allowed.get("reason", ""))
         self.assertEqual(self.write("small_module.py", _class_file(50))["decision"], "allow")
 
     def test_breaker_forgives_a_ratchet_regression_and_never_writes_session_notes(self):
@@ -102,6 +86,16 @@ class StopGateEndToEndTests(unittest.TestCase):
             self.assertEqual(self.stop()["decision"], "continue")
         self.assertEqual(self.stop()["decision"], "allow")  # retries exhausted: a ratchet regression is only a warning
         self.assertEqual((self.proj / "brain" / "knowledge.md").read_bytes(), notes_before)
+
+
+    def test_released_stop_carries_one_line_human_notice(self):
+        (self.proj / "big.py").write_text(_class_file(640), encoding="utf-8")
+        for _ in range(5):
+            self.stop()
+        released = self.stop()
+        self.assertEqual(released["decision"], "allow")
+        self.assertIn("insana bildir", released["reason"])
+        self.assertNotIn("\n", released["reason"])
 
 
 class KnowledgeDistillationTests(unittest.TestCase):

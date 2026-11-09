@@ -149,7 +149,7 @@ def check_g7_ts_first(target_file: str, projected_content: str = "") -> Optional
 
 # --- Scrollbar, responsive-viewport and raw-control design rules live in design_rules.py; re-exported ---
 from .design_rules import (  # noqa: E402,F401
-    ResponsiveHTMLParser, check_design_scrollbar_rule, find_design_raw_controls_violations,
+    ResponsiveHTMLParser, check_design_scrollbar_rule,
     find_design_responsive_violations, is_valid_viewport_directive,
 )
 
@@ -178,90 +178,6 @@ def check_g3_compiler_bypass(added_text: str) -> List[str]:
             detected.append(name)
 
     return detected
-
-
-# --- G4: IMPORT MATRIX (BLOCK) ---
-def check_g4_import_matrix(target_file: str, added_text: str) -> Tuple[bool, str]:
-    """
-    Enforces architectural layer boundaries defined in .gravityguard.json.
-    Supports Python relative imports and TypeScript side-effect/dynamic imports.
-    Uses exact path segment matching to prevent false positives.
-    """
-    if not added_text.strip():
-        return False, ""
-
-    cfg = load_gravityguard_config(target_file)
-    if not cfg or "layers" not in cfg:
-        return False, ""
-
-    normalized_path = target_file.replace("\\", "/").lower()
-    layers = cfg.get("layers", {})
-
-    # 1. Python imports (static & dynamic)
-    py_from_imports = re.findall(r"^\s*from\s+([\.\w]+)\s+import", added_text, re.MULTILINE)
-    py_direct_imports = re.findall(r"^\s*import\s+([^\n#;]+)", added_text, re.MULTILINE)
-    py_dynamic_imports = re.findall(r"\b(?:__import__|importlib\.import_module)\s*\(\s*[\"']([^\"']+)[\"']", added_text)
-
-    # 2. TypeScript/JavaScript imports (static, dynamic, side-effects, backticks)
-    ts_from_imports = re.findall(r"^\s*import\s+.*?from\s+[\"']([^\"']+)[\"']", added_text, re.MULTILINE)
-    ts_side_effect_imports = re.findall(r"^\s*import\s+[\"']([^\"']+)[\"']", added_text, re.MULTILINE)
-    ts_dynamic_imports = re.findall(r"\bimport\s*\(\s*[`\"']([^`\"']+)[\"'`]\s*\)", added_text)
-    ts_require_imports = re.findall(r"\brequire\s*\(\s*[`\"']([^`\"']+)[\"'`]\s*\)", added_text)
-
-    # 3. String concatenation evasion detection: e.g. require('../net' + 'work/client')
-    concat_calls = re.findall(r"\b(?:require|import)\s*\(\s*([\"'`][^\"'`]+[\"'`](?:\s*\+\s*[\"'`][^\"'`]+[\"'`])+)\s*\)", added_text)
-    ts_concatenated_imports = []
-    for call_arg in concat_calls:
-        parts = re.findall(r"[\"'`]([^\"'`]+)[\"'`]", call_arg)
-        if parts:
-            ts_concatenated_imports.append("".join(parts))
-
-    imported_modules: Set[str] = set()
-    for imp in py_from_imports + py_dynamic_imports:
-        if imp:
-            imported_modules.add(imp.lower())
-    for imp_line in py_direct_imports:
-        for part in imp_line.split(","):
-            mod = part.strip().split()[0] if part.strip() else ""
-            if mod:
-                imported_modules.add(mod.lower())
-    for imp in ts_from_imports + ts_side_effect_imports + ts_dynamic_imports + ts_require_imports + ts_concatenated_imports:
-        if imp:
-            imported_modules.add(imp.lower())
-
-    if not imported_modules:
-        return False, ""
-
-    for layer_name, layer_cfg in layers.items():
-        layer_marker = f"/{layer_name.lower()}/"
-        if layer_marker in normalized_path or normalized_path.startswith(f"{layer_name.lower()}/"):
-            forbidden_list = layer_cfg.get("forbiddenImports", [])
-            for forbidden in forbidden_list:
-                forbidden_clean = forbidden.lower().strip()
-                forb_segs = [s.strip(".") for s in re.split(r"[\./\\]", forbidden_clean) if s.strip(".")]
-                if not forb_segs:
-                    continue
-
-                for imported in imported_modules:
-                    imp_segs = [s.strip(".") for s in re.split(r"[\./\\]", imported) if s.strip(".")]
-                    if not imp_segs:
-                        continue
-
-                    f_len = len(forb_segs)
-                    matched = False
-                    for i in range(len(imp_segs) - f_len + 1):
-                        if imp_segs[i:i + f_len] == forb_segs:
-                            matched = True
-                            break
-
-                    if matched:
-                        return True, (
-                            f"Katman Mimari İhlali: '{layer_name}' katmanındaki "
-                            f"bir dosya doğrudan '{forbidden}' katmanını import edemez! "
-                            f"(Tespit edilen import: '{imported}'). Araya bir controller/servis katmanı koyun."
-                        )
-
-    return False, ""
 
 
 # --- PMA boundary rules live in pma_rules.py; re-exported for existing importers ---
@@ -359,7 +275,7 @@ def check_arch_file_growth(
         thresholds = DEFAULT_COMPLEXITY_THRESHOLDS
     single_write_loc = thresholds["singleWriteLoc"]
     added_count = len([line for line in added_lines if line.strip() and not line.strip().startswith(("#", "//", "/*", "*"))])
-    grown = max(added_count, cumulative_loc)  # new files are G5_NEW_FILE_BLOAT_DENY's business
+    grown = max(added_count, cumulative_loc)
     if not old_full_content.strip() or grown < single_write_loc or _has_declared_cohesion_marker(projected_content):
         return False, ""
 

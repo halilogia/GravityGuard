@@ -376,7 +376,7 @@ function legacyCards(vm: GuardianViewModel, openByRule: Record<string, number>, 
     : totalBlocked < LOW_DATA_EVENTS ? t('insights.subSample', { recovered: totalRecovered, blocked: totalBlocked })
       : t('insights.subRate', { recovered: totalRecovered, blocked: totalBlocked });
 
-  const known = ['G0_SECRET_LEAK', 'G1_SILENT_EXCEPTION', 'G2_TEST_INTEGRITY', 'G4_IMPORT_MATRIX', 'SRP_BOUNDARY', 'ARCH_FILE_GROWTH', 'G3_COMPILER_BYPASS'];
+  const known = ['G0_SECRET_LEAK', 'G1_SILENT_EXCEPTION', 'G2_TEST_INTEGRITY', 'SRP_BOUNDARY', 'ARCH_FILE_GROWTH', 'G3_COMPILER_BYPASS'];
   // Recovered-only keys (e.g. T1_PENDING) have no blocked operation to score.
   const ids = [...known, ...Object.keys(ruleStats).filter(k => !known.includes(k) && ruleStats[k]?.blocked > 0)];
   const rows: RuleRow[] = ids.map(id => {

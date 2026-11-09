@@ -6,7 +6,6 @@ Two checks, both tuned to avoid blocking legitimate small files:
   `urllib.parse` / `http.HTTPStatus` style imports are not network use.
 - God module: >= 4 independent business classes, where data holders (dataclass / NamedTuple / TypedDict / Enum /
   exceptions / pydantic models) and tiny helper classes do not count.
-The warn-only counterpart for what this check cannot see (procedural monoliths) is srp_signals.py.
 """
 import ast
 import os

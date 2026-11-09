@@ -37,7 +37,7 @@ def _exemption_path(project_root: str, file_path: str) -> str:
 def check_ratchet_growth(project_root: str, target_file: str, old_content: str, projected_content: str, threshold: int) -> str:
     """Denial text when the write adds net lines to an existing source file that ends over `threshold`, else ''.
 
-    A brand-new file is G5_NEW_FILE_BLOAT_DENY's business. Seeding the baseline never raises or fails the write.
+    A brand-new file has no baseline to regress from. Seeding the baseline never raises or fails the write.
     """
     rel = _exemption_path(project_root, target_file)
     if not old_content.strip() or not rel.lower().endswith(SCAN_SOURCE_SUFFIXES) or is_test_or_exempt_file(rel):

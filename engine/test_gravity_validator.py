@@ -45,6 +45,10 @@ def _shadow_ratchet_growth(project_dir: str) -> None:
         json.dump({"rules": {"ARCH_RATCHET_GROWTH_DENY": "shadow"}}, f)
 
 
+REMOVED_G4_ID = "G4_IMPORT_MATRIX"  # removed rules: tests assert these ids never show up again
+REMOVED_G5_ID = "G5_NEW_FILE_BLOAT_DENY"
+
+
 def _warnings_from(res: dict) -> str:
     """Warnings are delivered through `reason` (the only schema-valid, agent-visible
     field). This helper keeps call sites readable."""
@@ -298,7 +302,7 @@ class TestGravityGuardPhase1(unittest.TestCase):
         self.assertEqual(res.get("decision"), "allow")  # Never blocks
 
     # --- G4: IMPORT MATRIX ---
-    def test_g4_block_forbidden_import(self):
+    def test_g4_forbidden_import_no_longer_blocked(self):
         # Create temp .gravityguard.json in test directory
         test_dir = os.path.dirname(__file__)
         cfg_path = os.path.join(test_dir, ".gravityguard.json")
@@ -317,8 +321,8 @@ class TestGravityGuardPhase1(unittest.TestCase):
                 }
             }
             res, ms = run_validator(payload)
-            self.assertEqual(res.get("decision"), "deny")
-            self.assertIn("G4_IMPORT_MATRIX", res.get("reason", ""))
+            self.assertEqual(res.get("decision"), "allow")
+            self.assertNotIn(REMOVED_G4_ID, res.get("reason", ""))
         finally:
             if os.path.exists(cfg_path):
                 os.remove(cfg_path)
@@ -589,8 +593,8 @@ class TestGravityGuardPhase1(unittest.TestCase):
             if os.path.exists(temp_file):
                 os.remove(temp_file)
 
-    def test_g4_relative_import_blocked(self):
-        """Relative Python forbidden import (e.g. from ..network.client import Client) -> BLOCK"""
+    def test_g4_relative_import_no_longer_blocked(self):
+        """Relative Python forbidden import (e.g. from ..network.client import Client) -> ALLOW (G4 removed)"""
         test_dir = os.path.dirname(__file__)
         cfg_path = os.path.join(test_dir, ".gravityguard.json")
         with open(cfg_path, "w", encoding="utf-8") as f:
@@ -608,8 +612,8 @@ class TestGravityGuardPhase1(unittest.TestCase):
                 }
             }
             res, _ = run_validator(payload)
-            self.assertEqual(res.get("decision"), "deny")
-            self.assertIn("G4_IMPORT_MATRIX", res.get("reason", ""))
+            self.assertEqual(res.get("decision"), "allow")
+            self.assertNotIn(REMOVED_G4_ID, res.get("reason", ""))
         finally:
             if os.path.exists(cfg_path):
                 os.remove(cfg_path)
@@ -638,8 +642,8 @@ class TestGravityGuardPhase1(unittest.TestCase):
             if os.path.exists(cfg_path):
                 os.remove(cfg_path)
 
-    def test_g4_ts_side_effect_import_blocked(self):
-        """TypeScript side-effect import `import '../network/client'` -> BLOCK"""
+    def test_g4_ts_side_effect_import_no_longer_blocked(self):
+        """TypeScript side-effect import `import '../network/client'` -> ALLOW (G4 removed)"""
         test_dir = os.path.dirname(__file__)
         cfg_path = os.path.join(test_dir, ".gravityguard.json")
         with open(cfg_path, "w", encoding="utf-8") as f:
@@ -657,16 +661,16 @@ class TestGravityGuardPhase1(unittest.TestCase):
                 }
             }
             res, _ = run_validator(payload)
-            self.assertEqual(res.get("decision"), "deny")
-            self.assertIn("G4_IMPORT_MATRIX", res.get("reason", ""))
+            self.assertEqual(res.get("decision"), "allow")
+            self.assertNotIn(REMOVED_G4_ID, res.get("reason", ""))
         finally:
             if os.path.exists(cfg_path):
                 os.remove(cfg_path)
 
     # --- RED-TEAMING ADVERSARIAL EVASION TESTS ---
 
-    def test_g4_evasion_dynamic_import_blocked(self):
-        """Red Team Evasion: `await import('../network/client')` dynamic import -> BLOCK"""
+    def test_g4_evasion_dynamic_import_no_longer_blocked(self):
+        """Red Team Evasion: `await import('../network/client')` dynamic import -> ALLOW (G4 removed)"""
         test_dir = os.path.dirname(__file__)
         cfg_path = os.path.join(test_dir, ".gravityguard.json")
         with open(cfg_path, "w", encoding="utf-8") as f:
@@ -684,14 +688,14 @@ class TestGravityGuardPhase1(unittest.TestCase):
                 }
             }
             res, _ = run_validator(payload)
-            self.assertEqual(res.get("decision"), "deny")
-            self.assertIn("G4_IMPORT_MATRIX", res.get("reason", ""))
+            self.assertEqual(res.get("decision"), "allow")
+            self.assertNotIn(REMOVED_G4_ID, res.get("reason", ""))
         finally:
             if os.path.exists(cfg_path):
                 os.remove(cfg_path)
 
-    def test_g4_evasion_template_literal_blocked(self):
-        """Red Team Evasion: backtick template literal import(`../network/client`) -> BLOCK"""
+    def test_g4_evasion_template_literal_no_longer_blocked(self):
+        """Red Team Evasion: backtick template literal import(`../network/client`) -> ALLOW (G4 removed)"""
         test_dir = os.path.dirname(__file__)
         cfg_path = os.path.join(test_dir, ".gravityguard.json")
         with open(cfg_path, "w", encoding="utf-8") as f:
@@ -709,14 +713,14 @@ class TestGravityGuardPhase1(unittest.TestCase):
                 }
             }
             res, _ = run_validator(payload)
-            self.assertEqual(res.get("decision"), "deny")
-            self.assertIn("G4_IMPORT_MATRIX", res.get("reason", ""))
+            self.assertEqual(res.get("decision"), "allow")
+            self.assertNotIn(REMOVED_G4_ID, res.get("reason", ""))
         finally:
             if os.path.exists(cfg_path):
                 os.remove(cfg_path)
 
-    def test_g4_evasion_string_concatenation_blocked(self):
-        """Red Team Evasion: require('../net' + 'work/client') string concatenation -> BLOCK"""
+    def test_g4_evasion_string_concatenation_no_longer_blocked(self):
+        """Red Team Evasion: require('../net' + 'work/client') string concatenation -> ALLOW (G4 removed)"""
         test_dir = os.path.dirname(__file__)
         cfg_path = os.path.join(test_dir, ".gravityguard.json")
         with open(cfg_path, "w", encoding="utf-8") as f:
@@ -734,14 +738,14 @@ class TestGravityGuardPhase1(unittest.TestCase):
                 }
             }
             res, _ = run_validator(payload)
-            self.assertEqual(res.get("decision"), "deny")
-            self.assertIn("G4_IMPORT_MATRIX", res.get("reason", ""))
+            self.assertEqual(res.get("decision"), "allow")
+            self.assertNotIn(REMOVED_G4_ID, res.get("reason", ""))
         finally:
             if os.path.exists(cfg_path):
                 os.remove(cfg_path)
 
-    def test_g4_evasion_python_dynamic_import_blocked(self):
-        """Red Team Evasion: __import__('network.client') in Python -> BLOCK"""
+    def test_g4_evasion_python_dynamic_import_no_longer_blocked(self):
+        """Red Team Evasion: __import__('network.client') in Python -> ALLOW (G4 removed)"""
         test_dir = os.path.dirname(__file__)
         cfg_path = os.path.join(test_dir, ".gravityguard.json")
         with open(cfg_path, "w", encoding="utf-8") as f:
@@ -759,8 +763,8 @@ class TestGravityGuardPhase1(unittest.TestCase):
                 }
             }
             res, _ = run_validator(payload)
-            self.assertEqual(res.get("decision"), "deny")
-            self.assertIn("G4_IMPORT_MATRIX", res.get("reason", ""))
+            self.assertEqual(res.get("decision"), "allow")
+            self.assertNotIn(REMOVED_G4_ID, res.get("reason", ""))
         finally:
             if os.path.exists(cfg_path):
                 os.remove(cfg_path)
@@ -1706,7 +1710,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
         v1.2.7 asserted this on a file that did not exist. Calibrated against
         1,636 real file creations, 359 of which add 180+ lines: warning on a
         brand-new module penalises exactly the modularisation the rule asks
-        for; creations are governed by G5_NEW_FILE_BLOAT_DENY alone. See
+        for. See
         test_arch_file_growth_never_warns_for_new_files.
         """
         temp_dir = tempfile.mkdtemp()
@@ -1733,10 +1737,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_arch_file_growth_never_warns_for_new_files(self):
-        """Creation size is not accumulation: neither a 200-line nor a 1100-line NEW file gets ARCH_FILE_GROWTH.
-
-        A file born over `newFileMaxLoc` is G5_NEW_FILE_BLOAT_DENY's business.
-        """
+        """Creation size is not accumulation: neither a 200-line nor a 1100-line NEW file gets ARCH_FILE_GROWTH."""
         moderate = {
             "toolCall": {
                 "name": "write_to_file",
@@ -1750,11 +1751,8 @@ class TestGravityGuardPhase2(unittest.TestCase):
         self.assertEqual(res.get("decision"), "allow")
         self.assertNotIn("ARCH_FILE_GROWTH", _warnings_from(res))
 
-        # G5_NEW_FILE_BLOAT_DENY (newFileMaxLoc) would deny a 1100-line creation outright; shadow it to reach Guard 6.
         temp_dir = tempfile.mkdtemp()  # (Guard 6 stays silent for it)
         try:
-            with open(os.path.join(temp_dir, ".gravityguard.json"), "w", encoding="utf-8") as f:
-                json.dump({"rules": {"G5_NEW_FILE_BLOAT_DENY": "shadow"}}, f)
             monolith = {
                 "toolCall": {
                     "name": "write_to_file",
@@ -1846,7 +1844,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
         )
         self.assertEqual(
             gv.resolve_complexity_thresholds({"complexity": {"monolithLoc": 2000}}),
-            {**gv.DEFAULT_COMPLEXITY_THRESHOLDS, "newFileMaxLoc": 2000},  # legacy monolithLoc is an alias of the new-file cap
+            gv.DEFAULT_COMPLEXITY_THRESHOLDS,  # legacy monolithLoc no longer maps to anything
         )
         for bad in (
             {"complexity": {"monolithLoc": 3}},                 # below the floor: rule would be meaningless
@@ -1862,8 +1860,8 @@ class TestGravityGuardPhase2(unittest.TestCase):
                 f"invalid config must degrade to defaults, got {bad}",
             )
 
-    def test_configured_complexity_threshold_changes_the_new_file_verdict(self):
-        """A project that sets legacy `monolithLoc: 2000` may create a 1,100-line module; the default denies it."""
+    def test_new_file_bloat_rule_is_gone_so_a_1100_line_new_file_is_allowed(self):
+        """G5_NEW_FILE_BLOAT_DENY was removed: a 1,100-line new module is allowed with or without legacy `monolithLoc`."""
         body = "\n".join(f"var_{i} = {i}" for i in range(1100))
 
         def payload_for(path: str) -> dict:
@@ -1879,21 +1877,20 @@ class TestGravityGuardPhase2(unittest.TestCase):
             with open(os.path.join(temp_dir, ".gravityguard.json"), "w", encoding="utf-8") as f:
                 json.dump({}, f)
             res, _ = run_validator(payload_for(os.path.join(temp_dir, "default_module.py")))
-            self.assertEqual(res.get("decision"), "deny", "precondition: default new-file cap denies")
-            self.assertIn("G5_NEW_FILE_BLOAT_DENY", _warnings_from(res))
+            self.assertEqual(res.get("decision"), "allow")
+            self.assertNotIn(REMOVED_G5_ID, _warnings_from(res))
 
-            # monolithLoc is an alias of newFileMaxLoc, so relaxing it relaxes the new-file cap.
             with open(os.path.join(temp_dir, ".gravityguard.json"), "w", encoding="utf-8") as f:
                 json.dump({"complexity": {"monolithLoc": 2000}}, f)
 
             res, _ = run_validator(payload_for(os.path.join(temp_dir, "relaxed_module.py")))
             self.assertEqual(res.get("decision"), "allow")
-            self.assertNotIn("G5_NEW_FILE_BLOAT_DENY", _warnings_from(res))
+            self.assertNotIn(REMOVED_G5_ID, _warnings_from(res))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_removed_complexity_keys_are_ignored_and_the_legacy_keys_still_work(self):
-        """Old `.gravityguard.json` files keep loading: dropped keys are ignored, `monolithLoc` aliases `newFileMaxLoc`."""
+        """Old `.gravityguard.json` files keep loading: dropped keys are ignored, the new-file cap keys are no longer thresholds."""
         import importlib.util
         spec = importlib.util.spec_from_file_location("gravity_validator", VALIDATOR_PATH)
         gv = importlib.util.module_from_spec(spec)
@@ -1905,7 +1902,7 @@ class TestGravityGuardPhase2(unittest.TestCase):
             {**gv.DEFAULT_COMPLEXITY_THRESHOLDS, "singleWriteLoc": 400},
         )
         explicit = {"complexity": {"monolithLoc": 2000, "newFileMaxLoc": 700}}
-        self.assertEqual(gv.resolve_complexity_thresholds(explicit)["newFileMaxLoc"], 700)
+        self.assertNotIn("newFileMaxLoc", gv.resolve_complexity_thresholds(explicit))
         self.assertFalse(hasattr(gv, "check_oe_spike"))
 
     def test_arch_file_growth_creeping_growth_800_plus_300_triggers_warn(self):

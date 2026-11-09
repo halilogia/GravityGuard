@@ -13,7 +13,7 @@ export type EffectiveMode = 'block' | 'warn' | 'shadow' | 'off';
 export type RuleStage = 'write' | 'tool' | 'stop' | 'any';
 /**
  * How the rule's mode can be changed in .gravityguard.json:
- * shadow = the engine honours "mode": "shadow" (is_rule_shadow); select = shadow/warn/off (OE_SINGLE_IMPL);
+ * shadow = the engine honours "mode": "shadow" (is_rule_shadow); select = shadow/warn/off;
  * none = the engine never reads a mode for it.
  */
 export type RuleControl = 'shadow' | 'select' | 'none';
@@ -50,25 +50,18 @@ const ROWS: Row[] = [
   ['FINAL_SECURITY_SCAN', 'security', 'block', 'stop', 'none'],
   ['SEC_UNSAFE_PATTERN', 'security', 'warn', 'write', 'shadow'],
   // Architecture
-  ['G4_IMPORT_MATRIX', 'architecture', 'block', 'write', 'shadow'],
   ['ARCH_PMA_HORIZONTAL_DENY', 'architecture', 'block', 'write', 'shadow'],
   ['ARCH_PMA_DEEP_IMPORT', 'architecture', 'block', 'write', 'shadow'],
-  ['ARCH_PMA_CORE_PURITY', 'architecture', 'block', 'write', 'shadow'],
-  ['ARCH_PMA_SHARED_PURITY', 'architecture', 'block', 'write', 'shadow'],
   ['SRP_BOUNDARY', 'architecture', 'block', 'write', 'shadow'],
   ['WEB_INLINE_JS_BUDGET', 'architecture', 'block', 'write', 'shadow'],
   ['WEB_INLINE_CSS_BUDGET', 'architecture', 'block', 'write', 'shadow'],
   ['WEB_MIXED_RESPONSIBILITIES', 'architecture', 'block', 'write', 'shadow'],
   ['WEB_DOCUMENT_SIZE', 'architecture', 'block', 'write', 'shadow'],
   ['ARCH_FILE_GROWTH', 'architecture', 'warn', 'write', 'shadow'],
-  ['G5_NEW_FILE_BLOAT_DENY', 'architecture', 'block', 'write', 'shadow'],
   ['STOP_CIRCUIT_BREAKER_BLOCKED', 'architecture', 'block', 'stop', 'none'],
-  ['SRP_RESPONSIBILITY_MIX', 'architecture', 'warn', 'write', 'shadow'],
   ['ARCH_RATCHET_GROWTH_DENY', 'architecture', 'block', 'write', 'shadow'],
   ['ARCH_RATCHET_REGRESSION_WARN', 'architecture', 'warn', 'write', 'shadow'],
   ['ARCH_RATCHET_REGRESSION', 'architecture', 'block', 'stop', 'shadow'],
-  ['OE_SPIKE', 'architecture', 'warn', 'write', 'shadow'],
-  ['OE_SINGLE_IMPL', 'architecture', 'shadow', 'write', 'select'],
   // Code quality
   ['G1_SILENT_EXCEPTION', 'quality', 'block', 'write', 'shadow'],
   ['G7_TS_FIRST', 'quality', 'warn', 'write', 'shadow'],
@@ -77,7 +70,6 @@ const ROWS: Row[] = [
   ['STATIC_LINTER_DIAGNOSTIC', 'quality', 'warn', 'write', 'none'],
   ['DESIGN_SCROLLBAR_RULE', 'quality', 'warn', 'write', 'none'],
   ['DESIGN_RESPONSIVE_RULE', 'quality', 'block', 'write', 'none'],
-  ['DESIGN_RAW_CONTROLS_RULE', 'quality', 'block', 'write', 'none'],
   // Tests and documentation
   ['G2_TEST_INTEGRITY', 'evidence', 'block', 'write', 'shadow'],
   ['T1_MISSING_RELATED_TEST', 'evidence', 'warn', 'write', 'none', testEvidenceOn],

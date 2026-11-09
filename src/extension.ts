@@ -3,6 +3,7 @@ import { initI18n, t, setLanguage, getCurrentLanguage } from './i18n';
 import { probeRouter, initializeRouterSecrets } from './router_client';
 import { handleEnhancePrompt, handleFindSkills, handleOpenConfig } from './commands';
 import { GuardianViewProvider } from './webview/provider';
+import { registerPauseUi } from './pause_ui';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   await initializeRouterSecrets(context);
@@ -22,6 +23,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   promptStatusBarItem.show();
   context.subscriptions.push(promptStatusBarItem);
 
+  const pauseUi = registerPauseUi(context);
+
   // 2. Register Webview Provider for GravityGuard Live Monitor
   const provider = new GuardianViewProvider(
     context.extensionUri,
@@ -29,6 +32,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     () => {
       promptStatusBarItem.text = `$(sparkle) ${t('actions.enhancePrompt')}`;
       promptStatusBarItem.tooltip = t('actions.statusBarTooltip');
+      pauseUi.refresh();
     }
   );
   context.subscriptions.push(

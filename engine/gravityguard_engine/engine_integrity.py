@@ -13,10 +13,7 @@ import json
 import os
 import re
 import subprocess
-import symtable
 import sys
-import tempfile
-import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -59,6 +56,7 @@ def undefined_globals(source: str, filename: str = "<engine>") -> List[str]:
     """Names that are read as globals somewhere in ``source`` but never bound at module level (nor builtins)."""
     if _has_star_import(source):
         return []  # cannot know what a wildcard import provides
+    import symtable  # lazy: only engine-file edits need it
     top = symtable.symtable(source, filename, "exec")
     defined = set(_MODULE_DUNDERS) | set(dir(builtins))
     for sym in top.get_symbols():
@@ -142,6 +140,7 @@ def prepare_lkg() -> Optional[Path]:
     validator = target / rel / "gravity-validator.py"
     if validator.is_file():
         return validator
+    import tempfile, zipfile  # lazy: LKG fallback only
     try:
         archive = subprocess.run(["git", "archive", "--format=zip", "HEAD", rel], cwd=top, capture_output=True, timeout=30)
         if archive.returncode != 0:

@@ -141,6 +141,11 @@ def is_exempt_from_test_evidence(target_file: str, cfg: Optional[dict] = None) -
                 return True
             continue
         pat_clean = pat.lstrip("/").rstrip("/*")
+        if not any(ch in pat for ch in "*?[\\"):
+            # Glob-free pattern: every fnmatch form below reduces to equality or substring (compiling ~300 regexes cost ~40 ms per hook run).
+            if pat in basename or pat_clean in normalized or pat == normalized or f"/{pat}/" in normalized or normalized.startswith(f"{pat}/"):
+                return True
+            continue
         if (
             pat in basename or
             f"/{pat}/" in normalized or

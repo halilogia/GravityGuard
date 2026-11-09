@@ -13,14 +13,12 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import re
 import subprocess
 import sys
 import tempfile
 import time
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
-from .refactor_hint import build_refactor_hint
 
 DEFAULT_RATCHET_THRESHOLD: int = 500
 MAX_RATCHET_FILE_BYTES: int = 2_000_000
@@ -459,27 +457,3 @@ def get_project_debt_summary(
         "total_regressions": total_regressions,
         "files": debt_items
     }
-
-
-_ALLOW_MONOLITH_RE = re.compile(r"(?://|/\*|#)\s*srp\s*:\s*(?:allow-monolith|cohesive-monolith|bypass|noqa)\b", re.IGNORECASE)
-
-
-def check_new_file_bloat(project_root: str, file_path: str, old_content: str, projected_content: str, max_loc: int) -> str:
-    """G5_NEW_FILE_BLOAT_DENY: reason text when a brand-new source file is written above `max_loc` lines, else ''.
-
-    The ratchet only sees files the store knows; this stops a monolith at birth, before it touches the disk.
-    A file that already has content is never "new" (the ratchet and ARCH_FILE_GROWTH govern it).
-    """
-    rel = to_project_rel_path(project_root, file_path)
-    if old_content.strip() or is_test_or_exempt_file(rel) or not rel.lower().endswith(SCAN_SOURCE_SUFFIXES):
-        return ""
-    if _ALLOW_MONOLITH_RE.search(projected_content):
-        return ""
-    loc = count_clean_lines(projected_content)
-    if loc <= max_loc:
-        return ""
-    return (
-        f"Yeni Dosya Şişkinliği: '{rel}' sıfırdan {loc} satırla oluşturuluyor (sınır {max_loc}). "
-        f"Tek hamlede monolit yazmak yerine kodu sorumluluğa göre alt modüllere bölüp her birini ayrı dosya olarak oluşturun. "
-        f"{build_refactor_hint(projected_content, rel)}"
-    ).strip()

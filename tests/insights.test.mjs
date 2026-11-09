@@ -72,7 +72,7 @@ function stats() {
     operations: 100, blocked: 14, warned: 3, recovered: 10, evasion: 2, falseAlarms: 1,
     rules: {
       G1_SILENT_EXCEPTION: { blocked: 12, repeated: 0, warned: 0, shadow: 0, recovered: 10, evasion: 2, falseAlarms: 1, agents: {} },
-      OE_SPIKE: { blocked: 2, repeated: 0, warned: 3, shadow: 0, recovered: 0, evasion: 0, falseAlarms: 0, agents: {} }
+      SEC_UNSAFE_PATTERN: { blocked: 2, repeated: 0, warned: 3, shadow: 0, recovered: 0, evasion: 0, falseAlarms: 0, agents: {} }
     },
     agents: {
       'Claude Code': { agent: 'Claude Code', operations: 80, conversations: 4, blocked: 10, warned: 2, recovered: 8, cleanFirstTry: 60 },
@@ -85,7 +85,7 @@ function stats() {
     windows: { '24h': win({ operations: 5 }), '7d': w7, '30d': w7, all: w7 }, daily, sessions: [],
     recentByRule: {
       G1_SILENT_EXCEPTION: [ev(1, { evasionSuspect: true }), ev(2, { falseAlarm: true, eventId: 'evt_fa' }), ev(3, { status: 'RECOVERED', eventId: 'evt_rec' })],
-      OE_SPIKE: []
+      SEC_UNSAFE_PATTERN: []
     }
   };
 }
@@ -116,7 +116,7 @@ test('low-data rules collapse into one closed group', () => {
   assert.ok(html.includes('1 kural az tetiklendi'));
   const item = id => html.indexOf(`<div class="rule-stat-item ins-rule" data-rk="${id}"`);
   assert.ok(item('G1_SILENT_EXCEPTION') < html.indexOf('<div class="ins-low-body">'));
-  assert.ok(html.indexOf('<div class="ins-low-body">') < item('OE_SPIKE'));
+  assert.ok(html.indexOf('<div class="ins-low-body">') < item('SEC_UNSAFE_PATTERN'));
   assert.ok(html.includes('data-group="lowdata" data-value="open"'), 'closed by default, opens via lowdata segment');
 });
 

@@ -60,7 +60,7 @@ class RatchetGrowthRuleTests(unittest.TestCase):
         self.assertNotEqual(self.check("small.py", _src(495), _src(520)), "")
 
     def test_new_files_tests_and_data_are_not_this_rules_business(self):
-        self.assertEqual(self.check("fresh.py", "", _src(700)), "")  # G5_NEW_FILE_BLOAT_DENY governs creation
+        self.assertEqual(self.check("fresh.py", "", _src(700)), "")  # a brand-new file is never a regression
         self.assertEqual(self.check("tests/test_big.py", _src(600), _src(700)), "")
         self.assertEqual(self.check("data.json", _src(600), _src(700)), "")
 

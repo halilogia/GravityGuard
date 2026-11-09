@@ -104,6 +104,14 @@
         "command": "antigravityBridge.findSkills",
         "title": "GravityGuard: Projeye Uygun Skill Bul / Find Skills for Project",
         "icon": "$(sparkle)"
+      },
+      {
+        "command": "gravityguard.pause",
+        "title": "GravityGuard: Duraklat / Pause"
+      },
+      {
+        "command": "gravityguard.resume",
+        "title": "GravityGuard: Devam Et / Resume"
       }
     ],
     "keybindings": [

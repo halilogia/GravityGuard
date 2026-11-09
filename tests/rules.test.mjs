@@ -27,13 +27,13 @@ test('renders every listed catalog rule with its id', () => {
 
 test('summary counts modes and 7-day triggers from the audit stats', () => {
   initI18n('tr');
-  const html = renderRulesTab(vm({}, { G7_TS_FIRST: stat({ blocked: 3, agents: { Codex: 3 }, lastTs: ago(3 * 3600e3) }), OE_SPIKE: stat({ warned: 2, lastTs: ago(10 * 60e3) }) }));
+  const html = renderRulesTab(vm({}, { G7_TS_FIRST: stat({ blocked: 3, agents: { Codex: 3 }, lastTs: ago(3 * 3600e3) }), ARCH_FILE_GROWTH: stat({ warned: 2, lastTs: ago(10 * 60e3) }) }));
   assert.match(html, /2 kural 5 kez tetiklendi|2 kural toplam 5 kez tetiklendi/);
   const g7 = rowOf(html, 'G7_TS_FIRST');
   assert.match(g7, /3 sa önce/);
   assert.match(g7, /En sık: Codex/);
   assert.match(g7, /<span class="rl-count"[^>]*>3<\/span>/);
-  assert.match(rowOf(html, 'OE_SPIKE'), /10 dk önce/);
+  assert.match(rowOf(html, 'ARCH_FILE_GROWTH'), /10 dk önce/);
   // Sorted by 7-day triggers: the busiest rule of a group comes first.
   assert.ok(html.indexOf('>G7_TS_FIRST<') < html.indexOf('>G1_SILENT_EXCEPTION<'));
 });
@@ -47,11 +47,9 @@ test('quiet rules show an em dash instead of an invented number', () => {
 
 test('effective mode comes from the config; shadowed rule is not shown as blocking', () => {
   initI18n('tr');
-  const html = renderRulesTab(vm({ rules: { G1_SILENT_EXCEPTION: { mode: 'shadow' }, OE_SINGLE_IMPL: { mode: 'warn' } } }));
+  const html = renderRulesTab(vm({ rules: { G1_SILENT_EXCEPTION: { mode: 'shadow' } } }));
   assert.match(rowOf(html, 'G1_SILENT_EXCEPTION'), /mode-shadow/);
   assert.match(rowOf(html, 'G1_SILENT_EXCEPTION'), /data-mode="default"/);
-  assert.match(rowOf(html, 'OE_SINGLE_IMPL'), /mode-warn/);
-  assert.match(rowOf(html, 'OE_SINGLE_IMPL'), /data-mode="off"/);
   assert.match(rowOf(html, 'G7_TS_FIRST'), /mode-warn/);
 });
 
@@ -76,7 +74,7 @@ test('ids missing from the catalog get their own group with the raw id', () => {
 test('no parentheses in any rule title or mode pill, in both languages', () => {
   for (const lang of ['tr', 'en']) {
     setLanguage(lang);
-    const html = renderRulesTab(vm({ rules: { G1_SILENT_EXCEPTION: { mode: 'shadow' } } }, { OE_SPIKE: stat({ warned: 1, lastTs: ago(1e3) }) }));
+    const html = renderRulesTab(vm({ rules: { G1_SILENT_EXCEPTION: { mode: 'shadow' } } }, { ARCH_FILE_GROWTH: stat({ warned: 1, lastTs: ago(1e3) }) }));
     const titles = [...html.matchAll(/<span class="rl-title">([^<]*)<\/span>/g)].map(m => m[1]);
     const pills = [...html.matchAll(/<span class="mode-pill [^"]*">([^<]*)<\/span>/g)].map(m => m[1]);
     assert.ok(titles.length > 30 && pills.length > 30);

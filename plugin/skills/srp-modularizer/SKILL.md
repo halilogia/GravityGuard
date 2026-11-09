@@ -1,6 +1,6 @@
 ---
 name: srp-modularizer
-description: Use when a GravityGuard SRP_BOUNDARY deny or ARCH_FILE_GROWTH / OE_SPIKE warning appears, or when writing or refactoring a large page, component or module that mixes several sections, tabs, simulations or comparison matrices. Decides whether the file really has more than one change reason, splits it into focused sub-components if so, and keeps cohesive monoliths whole.
+description: Use when a GravityGuard SRP_BOUNDARY deny or ARCH_FILE_GROWTH warning appears, or when writing or refactoring a large page, component or module that mixes several sections, tabs, simulations or comparison matrices. Decides whether the file really has more than one change reason, splits it into focused sub-components if so, and keeps cohesive monoliths whole.
 ---
 
 # SRP Modularizer
@@ -22,7 +22,6 @@ Kapsam **uzantıya göredir, klasöre göre değil**: `.py`, `.ts`, `.tsx`, `.js
 | `SRP_BOUNDARY` TS/JS | **DENY** | (`activeTab ===` ≥2 **ve** `glass-card` ≥3) **ya da** (`scrollToSection(` ≥3 **ve** `display: 'grid'` ≥3) |
 | `SRP_BOUNDARY` Python | **DENY** | UI kütüphanesi (tkinter, PyQt, PySide, wx, kivy) + ağ kütüphanesi (requests, urllib, http, httpx, aiohttp, websockets, socket) birlikte; ya da ≥4 üst düzey "iş" sınıfı (Exception / Enum / BaseModel / Protocol / ABC tabanlı, `@dataclass`, Blender Panel / Operator sınıfları sayılmaz; `models.py`, `types.py`, `schemas.py`, `constants.py` … dosyaları muaf) |
 | `ARCH_FILE_GROWTH` | uyarı (izin verir) | dosya 1000 dolu satırı geçiyor; ya da mevcut dosyada: 800+ satıra ≥80 satır ekleme, tek yazımda ≥200 satır, 15 dakikada toplam ≥200 satır. Yeni dosyanın 1000 altındaki boyu uyarı vermez |
-| `OE_SPIKE` | uyarı (izin verir) | ≤50 satırlık eklemede ≥2 yeni `class` / `interface` |
 
 - TS/JS dedektörleri bu projeye özgü yüzey sinyalleridir (bir UI kütüphanesinin sınıf ve fonksiyon adları), gerçek karar değildir. Başka projede SRP ihlali olan dosya bu kelimeleri içermeyince hook susar; o durumda yine yukarıdaki "değişim nedeni" kararını sen verirsin.
 - "Cohesive monolith ALLOW" hook'ta bir yargı değildir: sinyaller eşiğin altındaysa geçer. Tek muafiyet, dosyada **zaten bulunan** `// srp: allow-monolith` (ya da `cohesive-monolith`, `bypass`, `noqa`; Python'da `# srp: …` / `# noqa: srp`) işaretidir. Bu işareti ajan yeni eklerse `G2_SECURITY_TAMPERING` ile DENY gelir; işareti yalnız insan ekler.

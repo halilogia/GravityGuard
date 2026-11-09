@@ -38,7 +38,7 @@ class DropRepeatedWarningsTests(unittest.TestCase):
     def test_unreadable_state_starts_fresh(self):
         with open(os.path.join(self.log_dir, "warned_once.json"), "w", encoding="utf-8") as f:
             f.write("{torn")
-        warn = [("OE_SPIKE", "soyutlama")]
+        warn = [("ARCH_FILE_GROWTH", "buyume")]
         self.assertEqual(self.drop(warn), warn)
 
 

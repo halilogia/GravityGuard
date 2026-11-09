@@ -1,0 +1,404 @@
+# -*- coding: utf-8 -*-
+"""Telemetry cikti katmani: terminal paneli, Markdown ve JSON raporlari. telemetry_dashboard.py tarafindan re-export edilir."""
+from __future__ import annotations
+
+from collections import Counter
+from datetime import datetime
+import json
+import os
+from pathlib import Path
+from typing import List, Optional
+
+from telemetry_data import AggregatedMetrics, format_bar
+
+
+def render_period_comparison(curr: AggregatedMetrics, prev: AggregatedMetrics):
+    """Renders a comparative view between the current period and previous period."""
+    print("\n📅 DÖNEMSEL TREND VE GELİŞİM KARŞILAŞTIRMASI (Period-over-Period Delta)")
+    print("-" * 80)
+    print(f"  Dönemler : [Şu An: {curr.label}] vs [Önceki: {prev.label}]")
+    print("  " + "-" * 78)
+
+    def calc_delta(c_val: float, p_val: float) -> str:
+        if p_val == 0:
+            return f"+{c_val:.0f} (Yeni)" if c_val > 0 else "0.0"
+        diff = c_val - p_val
+        pct = (diff / p_val) * 100
+        sign = "+" if pct >= 0 else ""
+        return f"{sign}{pct:.1f}% ({c_val} vs {p_val})"
+
+    print(f"  Toplam İşlem (Total Events)       : {calc_delta(curr.total, prev.total)}")
+    print(f"  Engellenenler (Blocked Violations): {calc_delta(curr.total_blocked, prev.total_blocked)}")
+    print(f"  Uyarılar (Warnings)               : {calc_delta(curr.total_warning, prev.total_warning)}")
+    print(f"  İyileşme Oranı (Recovery Rate)    : %{curr.recovery_rate:.1f} vs %{prev.recovery_rate:.1f} (Delta: {curr.recovery_rate - prev.recovery_rate:+.1f} puan)")
+
+    # Rules with notable changes
+    all_rules = set(curr.rule_counts.keys()) | set(prev.rule_counts.keys())
+    deltas = []
+    for r in all_rules:
+        c_cnt = curr.rule_counts.get(r, 0)
+        p_cnt = prev.rule_counts.get(r, 0)
+        if c_cnt > 0 or p_cnt > 0:
+            deltas.append((r, c_cnt, p_cnt, c_cnt - p_cnt))
+    deltas.sort(key=lambda x: abs(x[3]), reverse=True)
+
+    if deltas:
+        print("\n  🔍 EN ÇOK DEĞİŞİM GÖSTEREN KURALLAR:")
+        print(f"  {'Kural':<26} | {'Mevcut':<7} | {'Önceki':<7} | {'Değişim':<10}")
+        print("  " + "-" * 58)
+        for r, c, p, diff in deltas[:5]:
+            sign = "+" if diff >= 0 else ""
+            print(f"  {r:<26} | {c:>7} | {p:>7} | {sign}{diff:>8}")
+
+
+def render_effectiveness_analytics(m: AggregatedMetrics):
+    print("\n🎯 ETKİNLİK VE AJAN KURTARMA ANALİZİ (EFFECTIVENESS ANALYTICS)")
+    print("-" * 80)
+    print(f"  Toplam Engellenen İlk Müdahale (Blocked Root) : {m.total_blocked}")
+    print(f"  Ajan Tarafından Düzeltilen (Recovered)       : {m.total_recovered} (İyileşme Oranı: %{m.recovery_rate:.1f})")
+    print(f"  Medyan Düzeltme Denemesi (Friction Delta)     : {m.median_attempts} deneme")
+    if m.avg_duration_s > 0:
+        print(f"  Ortalama Çözümleme Süresi (Time-to-Resolve)  : {m.avg_duration_s:.1f} saniye")
+
+    if m.rule_blocked:
+        print("\n  🛡️  KURAL BAZLI ETKİNLİK VE DEĞER TABLOSU:")
+        print("  " + "-" * 82)
+        print(f"  {'Kural':<24} | {'Engelleme':<9} | {'Kurtarma':<8} | {'Oran':<6} | {'Sınıf':<22}")
+        print("  " + "-" * 82)
+
+        for rule, b_cnt in m.rule_blocked.most_common():
+            r_cnt = m.rule_recovered.get(rule, 0)
+            rate = (r_cnt / b_cnt * 100) if b_cnt > 0 else 0.0
+            if b_cnt < 10:
+                classification = f"⚪ YETERSİZ VERİ (n={b_cnt})"
+            elif b_cnt < 30:
+                classification = f"🟡 ÖN SİNYAL (n={b_cnt})"
+            elif rate >= 85.0:
+                classification = f"🏆 YÜKSEK DEĞER (n={b_cnt})"
+            elif rate < 50.0:
+                classification = f"⚡ SÜRTÜNME (n={b_cnt})"
+            else:
+                classification = f"🟢 DENGELİ (n={b_cnt})"
+            print(f"  {rule:<24} | {b_cnt:>9} | {r_cnt:>8} | %{rate:>4.1f} | {classification}")
+
+    # Advisory Follow-up Rate (Temporal Action Proxy)
+    if m.total_warning > 0:
+        print("\n  ⚠️  TAVSİYE KURALLARI VE DÜZENLEME TAKİP ORANI (Advisory Follow-up Rate):")
+        print("  " + "-" * 82)
+        print("  Not: Bu metrik doğrudan nedensellik kanıtı değil, zamansal bir vekildir")
+        print("       (temporal action proxy); uyarının ardından aynı oturumda dosyaya onaylı")
+        print("       bir düzenleme gelip gelmediğini ölçer.")
+        print("  " + "-" * 82)
+        print(f"  {'Kural':<24} | {'Uyarı':<6} | {'Takip Eden Onay':<15} | {'Takip Oranı':<11} | {'Durum':<18}")
+        print("  " + "-" * 82)
+        for w_rule, w_cnt in m.warn_rules.most_common():
+            heeded = m.advisory_heeded.get(w_rule, 0)
+            action_rate = (heeded / w_cnt * 100) if w_cnt > 0 else 0.0
+            if w_cnt < 10:
+                status_desc = f"⚪ Yetersiz Veri (n={w_cnt})"
+            elif w_cnt < 30:
+                status_desc = f"🟡 Ön Sinyal (n={w_cnt})"
+            elif action_rate < 25.0:
+                status_desc = "⚠️ Düşük Takip"
+            elif action_rate >= 75.0:
+                status_desc = "✅ Yüksek Takip"
+            else:
+                status_desc = "🟢 Dengeli"
+            print(f"  {w_rule:<24} | {w_cnt:>6} | {heeded:>15} | %{action_rate:>9.1f} | {status_desc}")
+
+    # Shadow Mode Observations
+    if m.total_shadow > 0:
+        print("\n  🧪 GÖLGE MODU GÖZLEMLERİ (Shadow Observation Mode):")
+        print("  " + "-" * 82)
+        for s_rule, s_cnt in m.shadow_rules.most_common():
+            print(f"  • {s_rule:<24} : {s_cnt} sessiz gözlem (Ajan akışı kesintiye uğramadan ölçüldü)")
+
+
+def render_dashboard(
+    m: AggregatedMetrics,
+    sources: List[Path],
+    corrupt_lines: int = 0,
+    prev_m: Optional[AggregatedMetrics] = None,
+):
+    print("=" * 80)
+    print("           GRAVITYGUARD GÜVENLİK VE MİMARİ TELEMETRİ MERKEZİ            ")
+    print(f"           Rapor Dönemi: {m.label}")
+    print("=" * 80)
+
+    if corrupt_lines > 0:
+        print(f"⚠️  DİKKAT: {corrupt_lines} bozuk/geçersiz JSONL satırı filtrelendi.")
+
+    if m.total == 0:
+        print("\n[!] Seçilen dönem veya filtrelerde telemetri kaydı bulunamadı.\n")
+        print("=" * 80)
+        return
+
+    blocked = m.status_counts.get("BLOCKED", 0)
+    warnings = m.status_counts.get("WARNING", 0)
+    approved = m.status_counts.get("APPROVED", 0)
+
+    print(f"\n📊 GENEL ÖZET (Toplam Denetlenen İşlem: {m.total})")
+    print("-" * 80)
+    print(f"  ✅ ONAYLANAN (APPROVED)  : {approved:<5} %{(approved / m.total * 100):.1f}")
+    print(f"  🛑 ENGELLENEN (BLOCKED)  : {blocked:<5} %{(blocked / m.total * 100):.1f}")
+    print(f"  ⚠️  UYARI ALAN (WARNING)  : {warnings:<5} %{(warnings / m.total * 100):.1f}")
+
+    if prev_m:
+        render_period_comparison(m, prev_m)
+
+    render_effectiveness_analytics(m)
+
+    print("\n🛡️  KURAL BAZLI İHLAL VE GÜVENLİK DAĞILIMI (Top Rules)")
+    print("-" * 80)
+    top_rules = m.rule_counts.most_common(12)
+    max_rule_cnt = top_rules[0][1] if top_rules else 1
+    for rule, cnt in top_rules:
+        pct = (cnt / m.total) * 100
+        bar = format_bar(cnt, max_rule_cnt, width=20)
+        status_tag = "🛑" if "BLOCK" in rule or rule in {"G0_SECRET_LEAK", "G1_SILENT_EXCEPTION", "G2_TEST_INTEGRITY", "G2_SECURITY_TAMPERING", "G4_IMPORT_MATRIX", "SRP_BOUNDARY"} else "⚠️"
+        print(f"  {status_tag} {rule:<25} | {cnt:>4} adet ({pct:>5.1f}%) | {bar}")
+
+    print("\n📁 PROJE DAĞILIMI (Ajanın En Çok Kod Yazdığı Projeler)")
+    print("-" * 80)
+    top_projects = m.project_counts.most_common(8)
+    max_proj_cnt = top_projects[0][1] if top_projects else 1
+    for proj, cnt in top_projects:
+        pct = (cnt / m.total) * 100
+        bar = format_bar(cnt, max_proj_cnt, width=16)
+        print(f"  📦 {proj:<24} | {cnt:>4} işlem (%{pct:>4.1f}) | {bar}")
+
+    print("\n📝 DOSYA TÜRÜ DAĞILIMI")
+    print("-" * 80)
+    for ext, cnt in m.ext_counts.most_common(6):
+        pct = (cnt / m.total) * 100
+        print(f"  📄 {ext:<12} : {cnt:>4} (%{pct:>4.1f})")
+
+    print("\n🚨 SON 5 GÜVENLİK / MİMARİ MÜDAHALESİ (Canlı Hadiseler)")
+    print("-" * 80)
+    blocked_or_warned = list(reversed(m.recent_interventions))[:5]
+    if not blocked_or_warned:
+        print("  [✓] Yakın zamanda engellenen veya uyarılan işlem yok.")
+    else:
+        for idx, ev in enumerate(blocked_or_warned, 1):
+            ts = ev.get("timestamp", "")[:19]
+            st = ev.get("status", "")
+            icon = "🛑" if st == "BLOCKED" else "⚠️"
+            target = os.path.basename(ev.get("target", ""))
+            rule = ev.get("ruleId", "")
+            reason = ev.get("reason", "").replace("\n", " ")
+            if len(reason) > 75:
+                reason = reason[:72] + "..."
+            print(f"  {idx}. [{ts}] {icon} {st:<7} [{rule}] Dosya: {target}")
+            print(f"     Neden: {reason}")
+
+    print("=" * 80)
+    src_display = ", ".join(str(s) for s in sources[:3])
+    if len(sources) > 3:
+        src_display += f" (+{len(sources) - 3} kaynak)"
+    print(f"Log Kaynağı ({len(sources)} adet): {src_display}")
+    print("=" * 80)
+
+
+def render_rule_candidates(m: AggregatedMetrics):
+    print("=" * 80)
+    print("      GRAVITYGUARD KURAL ADAYLARI & ÖĞRENME DEFTERİ (Learning Ledger)    ")
+    print(f"      Dönem: {m.label}")
+    print("=" * 80)
+
+    total_violations = sum(m.candidate_rule_counts.values())
+    if total_violations == 0:
+        print("\n[✓] Telemetri verilerinde bu dönemde ihlal veya uyarı kaydı yok.")
+        print("    Mevcut politikalar sistemle tam uyumlu çalışıyor.\n")
+        print("=" * 80)
+        return
+
+    rule_counter = m.candidate_rule_counts
+    rule_targets = m.candidate_targets
+    rule_sessions = m.candidate_sessions
+
+    MIN_THRESHOLD = 3
+    candidates = []
+
+    # 1. G4 Import Matrix Analysis
+    g4_count = rule_counter.get("G4_IMPORT_MATRIX", 0)
+    if g4_count >= MIN_THRESHOLD:
+        targets = rule_targets["G4_IMPORT_MATRIX"].most_common(3)
+        sessions = rule_sessions["G4_IMPORT_MATRIX"]
+        candidates.append({
+            "id": "CAND-G4-BOUNDARY-REFINEMENT",
+            "rule": "G4_IMPORT_MATRIX",
+            "count": g4_count,
+            "rate": (g4_count / total_violations) * 100 if total_violations else 0,
+            "session_count": len(sessions),
+            "targets": [t[0] for t in targets],
+            "diagnosis": f"Ajanın katmanlar arası sınır ihlali yaptığı gözlemlendi ({len(sessions)} farklı oturumda).",
+            "recommendation": ".gravityguard.json içerisindeki 'layers' matrisini gözden geçirin veya ilgili modülü paylaşılan (shared) katmana taşıyın."
+        })
+
+    # 2. T1 Test Evidence Analysis
+    t1_count = rule_counter.get("T1_MISSING_RELATED_TEST", 0) + rule_counter.get("T1_FINAL_UNRESOLVED", 0)
+    if t1_count >= MIN_THRESHOLD:
+        t1_targets = (rule_targets.get("T1_MISSING_RELATED_TEST", Counter()) + rule_targets.get("T1_FINAL_UNRESOLVED", Counter())).most_common(3)
+        t1_sess = rule_sessions["T1_MISSING_RELATED_TEST"] | rule_sessions["T1_FINAL_UNRESOLVED"]
+        candidates.append({
+            "id": "CAND-T1-EXEMPTION-EXPANSION",
+            "rule": "T1_MISSING_RELATED_TEST",
+            "count": t1_count,
+            "rate": (t1_count / total_violations) * 100 if total_violations else 0,
+            "session_count": len(t1_sess),
+            "targets": [t[0] for t in t1_targets],
+            "diagnosis": f"Üretim dosyaları için test dosyası bulunamadı ({len(t1_sess)} oturumda tekrarlandı).",
+            "recommendation": "Bu dosyalar konfigürasyon/şema niteliğindeyse 'exemptPatterns' listesine ekleyin; iş mantığı içeriyorsa test süitine dahil edin."
+        })
+
+    # 3. Growth / Monolith Analysis
+    growth_count = rule_counter.get("ARCH_FILE_GROWTH", 0)
+    if growth_count >= MIN_THRESHOLD:
+        targets = rule_targets["ARCH_FILE_GROWTH"].most_common(3)
+        g_sess = rule_sessions["ARCH_FILE_GROWTH"]
+        candidates.append({
+            "id": "CAND-SRP-MODULARIZATION",
+            "rule": "ARCH_FILE_GROWTH",
+            "count": growth_count,
+            "rate": (growth_count / total_violations) * 100 if total_violations else 0,
+            "session_count": len(g_sess),
+            "targets": [t[0] for t in targets],
+            "diagnosis": f"Tek seferde 200+ satır ekleme veya kümülatif büyüme uyarıları alındı ({len(g_sess)} oturum).",
+            "recommendation": "Dosyayı srp-modularizer ile alt bileşenlere ayırın ya da bilinçli bir büyüme ise 'srp: allow-monolith' etiketi ekleyin."
+        })
+
+    # 4. G1 Silent Exception Analysis
+    g1_count = rule_counter.get("G1_SILENT_EXCEPTION", 0)
+    if g1_count >= MIN_THRESHOLD:
+        targets = rule_targets["G1_SILENT_EXCEPTION"].most_common(3)
+        g1_sess = rule_sessions["G1_SILENT_EXCEPTION"]
+        candidates.append({
+            "id": "CAND-G1-EXCEPTION-STANDARDS",
+            "rule": "G1_SILENT_EXCEPTION",
+            "count": g1_count,
+            "rate": (g1_count / total_violations) * 100 if total_violations else 0,
+            "session_count": len(g1_sess),
+            "targets": [t[0] for t in targets],
+            "diagnosis": f"Ajanın sessiz hata yutma (except: pass / catch {{}}) teşebbüsleri engellendi ({len(g1_sess)} oturum).",
+            "recommendation": "Ajan promptunda hata yakalama disiplinini vurgulayın veya loglama zorunluluğu getirin."
+        })
+
+    # 5. G2 Tampering Analysis
+    g2_count = rule_counter.get("G2_SECURITY_TAMPERING", 0) + rule_counter.get("G2_TEST_INTEGRITY", 0)
+    if g2_count >= MIN_THRESHOLD:
+        g2_targets = (rule_targets.get("G2_SECURITY_TAMPERING", Counter()) + rule_targets.get("G2_TEST_INTEGRITY", Counter())).most_common(3)
+        g2_sess = rule_sessions["G2_SECURITY_TAMPERING"] | rule_sessions["G2_TEST_INTEGRITY"]
+        candidates.append({
+            "id": "CAND-G2-TAMPERING-ALERT",
+            "rule": "G2_SECURITY_TAMPERING",
+            "count": g2_count,
+            "rate": (g2_count / total_violations) * 100 if total_violations else 0,
+            "session_count": len(g2_sess),
+            "targets": [t[0] for t in g2_targets],
+            "diagnosis": f"Test silme, test atlatma veya escape-hatch enjeksiyon denemesi tespit edildi ({len(g2_sess)} oturum).",
+            "recommendation": "Kural atlatma denemelerine karşı denetimi sıkılaştırın ve prompt kurallarını güncelleyin."
+        })
+
+    print(f"\n📋 BULUNAN KURAL ADAYLARI ({len(candidates)} Öneri - Eşik: >= {MIN_THRESHOLD} ihlal)")
+    print("-" * 80)
+    if not candidates:
+        print(f"   [i] Hiçbir kural ihlali belirlenen eşiği (>={MIN_THRESHOLD}) aşmadı. Sistem stabil.")
+    for c in candidates:
+        print(f"\n🔹 [{c['id']}] (Tetiklenme: {c['count']} kez | İhlal Oranı: %{c['rate']:.1f} | {c['session_count']} oturum)")
+        print(f"   Etkilenen Dosyalar : {', '.join(c['targets'])}")
+        print(f"   Teşhis             : {c['diagnosis']}")
+        print(f"   Önerilen Aksiyon   : {c['recommendation']}")
+
+    print("\n" + "=" * 80)
+    print("Not: Kural adayları insan denetimi (Human-in-the-Loop) içindir; otonom kural gevşetme yapılmaz.")
+    print("=" * 80)
+
+
+def export_markdown_report(m: AggregatedMetrics, out_path: str, prev_m: Optional[AggregatedMetrics] = None):
+    """Exports structured markdown report for documentation and team digests."""
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        f"# 🛡️ GravityGuard Telemetri ve Denetim Raporu",
+        f"",
+        f"- **Rapor Dönemi**: {m.label}",
+        f"- **Oluşturulma Tarihi**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"- **Toplam Denetlenen İşlem**: {m.total}",
+        f"",
+        f"## 📊 Genel Metrikler",
+        f"",
+        f"| Durum | Adet | Oran |",
+        f"| :--- | :--- | :--- |",
+    ]
+    if m.total > 0:
+        app_cnt = m.status_counts.get('APPROVED', 0)
+        blk_cnt = m.status_counts.get('BLOCKED', 0)
+        wrn_cnt = m.status_counts.get('WARNING', 0)
+        lines.append(f"| ✅ Onaylanan (APPROVED) | {app_cnt} | %{(app_cnt / m.total * 100):.1f} |")
+        lines.append(f"| 🛑 Engellenen (BLOCKED) | {blk_cnt} | %{(blk_cnt / m.total * 100):.1f} |")
+        lines.append(f"| ⚠️ Uyarı Alan (WARNING) | {wrn_cnt} | %{(wrn_cnt / m.total * 100):.1f} |")
+
+    lines.extend([
+        f"",
+        f"## 🎯 Etkinlik ve Kurtarma",
+        f"",
+        f"- **Engellenen Kök İhlaller**: {m.total_blocked}",
+        f"- **Ajan Tarafından Düzeltilen**: {m.total_recovered} (İyileşme Oranı: %{m.recovery_rate:.1f})",
+        f"- **Medyan Düzeltme Denemesi**: {m.median_attempts}",
+        f"- **Ortalama Çözüm Süresi**: {m.avg_duration_s:.1f} sn",
+        f"",
+    ])
+
+    if m.rule_blocked:
+        lines.extend([
+            f"### Kural Bazlı Engelleme ve İyileşme",
+            f"",
+            f"| Kural | Engelleme | Kurtarma | Oran |",
+            f"| :--- | :--- | :--- | :--- |",
+        ])
+        for r, b in m.rule_blocked.most_common():
+            rec = m.rule_recovered.get(r, 0)
+            rate = (rec / b * 100) if b > 0 else 0.0
+            lines.append(f"| `{r}` | {b} | {rec} | %{rate:.1f} |")
+        lines.append("")
+
+    if prev_m:
+        lines.extend([
+            f"## 📅 Dönemsel Karşılaştırma",
+            f"",
+            f"- **Önceki Dönem**: {prev_m.label}",
+            f"- **Olay Sayısı Değişimi**: {m.total} vs {prev_m.total}",
+            f"- **Engelleme Oranı Değişimi**: %{m.recovery_rate:.1f} vs %{prev_m.recovery_rate:.1f}",
+            f"",
+        ])
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    print(f"✅ Markdown raporu kaydedildi: {out_path}")
+
+
+def export_json_report(m: AggregatedMetrics, out_path: str):
+    """Exports structured machine-readable JSON metrics."""
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "reportPeriod": m.label,
+        "generatedAt": datetime.now().isoformat(),
+        "totalEvents": m.total,
+        "statusCounts": dict(m.status_counts),
+        "ruleCounts": dict(m.rule_counts),
+        "projectCounts": dict(m.project_counts),
+        "fileExtCounts": dict(m.ext_counts),
+        "effectiveness": {
+            "totalBlocked": m.total_blocked,
+            "totalRecovered": m.total_recovered,
+            "recoveryRate": m.recovery_rate,
+            "medianAttempts": m.median_attempts,
+            "avgDurationSeconds": m.avg_duration_s,
+            "ruleBlocked": dict(m.rule_blocked),
+            "ruleRecovered": dict(m.rule_recovered),
+        },
+        "shadowRules": dict(m.shadow_rules),
+        "warningRules": dict(m.warn_rules),
+    }
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+    print(f"✅ JSON raporu kaydedildi: {out_path}")
