@@ -1,6 +1,7 @@
 import type { TaskFile } from '../tasks';
 import type { MemoryHubData } from '../knowledge';
 import type { HookProposalData } from './hook_proposals';
+import type { ApprovalView } from './approval_tickets';
 import type { AuditStats } from '../audit_stats';
 import type { GateStage } from '../verification_gate';
 
@@ -47,6 +48,7 @@ export interface GuardianViewModel {
   defaultTaskPath?: string; // fallback path to create/append tasks when no file exists or for quick-add
   memory?: MemoryHubData; // Knowledge & ADR & Changelog memory hub data
   hookProposals?: HookProposalData; // agent hook proposals awaiting the user, and installed ones
+  approvals?: ApprovalView[]; // operations a rule blocked, waiting for a one-click decision
   auditStats?: AuditStats; // permanent audit journal aggregated per time window, rule, agent and session
   verificationGate?: GateStage[]; // shield and tests stages for this project
 }

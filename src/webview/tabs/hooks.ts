@@ -1,6 +1,7 @@
 import { t } from '../../i18n';
 import { lucide } from '../../icons';
 import { escapeHtml } from '../html_utils';
+import type { ApprovalView } from '../approval_tickets';
 import type { HookProposalData, HookProposalView } from '../hook_proposals';
 
 function field(label: string, value: unknown, prose = false): string {
@@ -42,7 +43,27 @@ function renderPending(view: HookProposalView): string {
     </div>`;
 }
 
-export function renderHooksTab(data: HookProposalData): string {
+function renderApproval(ticket: ApprovalView): string {
+  const what = ticket.action?.command || ticket.action?.target || '';
+  return `
+    <div class="hook-card">
+      <div class="hook-head">
+        <span class="hook-id">${escapeHtml(ticket.rule)}</span>
+        <span class="mode-pill mode-block">${escapeHtml(ticket.action?.tool || '?')}</span>
+      </div>
+      ${field(t('hooks.blockedAction'), what)}
+      ${field(t('hooks.complaint'), ticket.reason, true)}
+      <div class="hook-actions">
+        <button class="action-btn hook-approve" data-action="allowApproval" data-text="${escapeHtml(ticket.id)}">${lucide('check', { size: 11 })} ${t('hooks.allowOnce')}</button>
+        <button class="action-btn" data-action="denyApproval" data-text="${escapeHtml(ticket.id)}">${lucide('x', { size: 11 })} ${t('hooks.reject')}</button>
+      </div>
+    </div>`;
+}
+
+export function renderHooksTab(data: HookProposalData, approvals: ApprovalView[] = []): string {
+  const blocked = approvals.length
+    ? `<div class="group-title text-cyan"><span class="icon-inline">${lucide('shield', { size: 12 })}</span> ${t('hooks.approvalsTitle')}</div>${approvals.map(renderApproval).join('')}`
+    : '';
   const pending = data.pending.length
     ? data.pending.map(renderPending).join('')
     : `<div class="empty-state">${t('hooks.empty')}</div>`;
@@ -56,6 +77,7 @@ export function renderHooksTab(data: HookProposalData): string {
       </div>`;
   }).join('');
   return `
+    ${blocked}
     <div class="group-title text-cyan"><span class="icon-inline">${lucide('plug', { size: 12 })}</span> ${t('hooks.title')}</div>
     ${pending}
     ${installed ? `<div class="group-title" style="margin-top: 14px;">${t('hooks.installedTitle')}</div>${installed}` : ''}

@@ -130,6 +130,9 @@ export function buildClientScript(nonce: string, activeTab: string): string {
               const filePath = target.getAttribute('data-path');
               const sha = target.getAttribute('data-text') || undefined;
               if (filePath) vscode.postMessage({ command: action, path: filePath, text: sha });
+            } else if (action === 'allowApproval' || action === 'denyApproval') {
+              const ticketId = target.getAttribute('data-text');
+              if (ticketId) vscode.postMessage({ command: action, text: ticketId });
             } else if (action === 'clearAllObligations') {
               vscode.postMessage({ command: 'clearAllObligations' });
             } else if (action === 'toggleDetail') {

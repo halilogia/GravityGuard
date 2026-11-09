@@ -54,8 +54,9 @@ export function buildHtmlDocument(p: LayoutParams): string {
   const knowledgeHtml = renderKnowledgeTab(vm);
   const memoryAdrsCount = vm.memory?.knowledge?.totalAdrs || 0;
   const hookData = vm.hookProposals || { pending: [], installed: [] };
-  const hooksHtml = renderHooksTab(hookData);
-  const pendingHooks = hookData.pending.length;
+  const approvalData = vm.approvals || [];
+  const hooksHtml = renderHooksTab(hookData, approvalData);
+  const pendingHooks = hookData.pending.length + approvalData.length;
 
   // --- RENDER MAIN WEBVIEW HTML ---
   const htmlContent = `

@@ -250,6 +250,12 @@ export const resources = {
         rejected: 'Öneri reddedildi: {{id}}',
         reverted: 'Kanca geri alındı: {{id}}',
         failed: 'Kanca işlemi yapılamadı: {{error}}',
+        approvalsTitle: 'Engellenen işlemler',
+        blockedAction: 'İşlem',
+        allowOnce: 'İzin ver (30 dk, 1 kez)',
+        approvalPrompt: '{{rule}} bir işlemi engelledi: {{what}}',
+        approvalAllowed: 'İzin verildi (30 dk, 1 kullanım).',
+        approvalDenied: 'Reddedildi.',
         cliHint: 'Terminalden: gravityguard hooks list | approve <id> | reject <id> | revert <id>'
       },
       obligations: {
@@ -686,6 +692,12 @@ export const resources = {
         rejected: 'Proposal rejected: {{id}}',
         reverted: 'Hook reverted: {{id}}',
         failed: 'Hook action failed: {{error}}',
+        approvalsTitle: 'Blocked actions',
+        blockedAction: 'Action',
+        allowOnce: 'Allow (30 min, once)',
+        approvalPrompt: '{{rule}} blocked an action: {{what}}',
+        approvalAllowed: 'Allowed (30 min, 1 use).',
+        approvalDenied: 'Denied.',
         cliHint: 'From a terminal: gravityguard hooks list | approve <id> | reject <id> | revert <id>'
       },
       obligations: {

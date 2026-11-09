@@ -17,6 +17,7 @@ import { WebviewLifecycle } from './lifecycle';
 import { MessagePathPolicy } from './message_policy';
 import { waiveAdvisory } from './governance_control';
 import { HookProposalCache, hookFilesSignature, runHookControl, splitHookFile } from './hook_proposals';
+import { APPROVAL_ID, ApprovalCache, type ApprovalView } from './approval_tickets';
 
 export class GuardianViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
@@ -33,6 +34,7 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
   private _hostReloadTried: boolean = false;
   private _messagePaths = new MessagePathPolicy();
   private _hookCache?: HookProposalCache;
+  private _approvalCache?: ApprovalCache;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -100,9 +102,10 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
       const kinds: Record<string, string> = {
         updateTaskStatus: 'tasks', deleteTaskItem: 'tasks', archiveCompletedTasks: 'tasks', addTaskItem: 'tasks',
         addAdr: 'knowledge', addChangelogItem: 'changelog', dismissObligation: 'obligations',
-        approveHookProposal: 'hookProposals', rejectHookProposal: 'hookProposals', revertHookProposal: 'hookReceipts'
+        approveHookProposal: 'hookProposals', rejectHookProposal: 'hookProposals', revertHookProposal: 'hookReceipts',
+        allowApproval: 'approvals', denyApproval: 'approvals'
       };
-      if (kinds[message.command] && !this._messagePaths.permits(kinds[message.command], message.path)) return;
+      if (kinds[message.command] && !this._messagePaths.permits(kinds[message.command], message.command.endsWith('Approval') ? message.text : message.path)) return;
       if (message.line !== undefined && (!Number.isSafeInteger(message.line) || message.line < 1)) return;
       if (message.status !== undefined && !['open', 'in_progress', 'done'].includes(message.status)) return;
       if ([message.text, message.title, message.decision].some(value => value !== undefined && (typeof value !== 'string' || value.length > 100000))) return;
@@ -166,6 +169,8 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
         await this.dismissObligation(message.path);
       } else if (['approveHookProposal', 'rejectHookProposal', 'revertHookProposal'].includes(message.command) && message.path) {
         await this.hookAction(message.command, message.path, message.text);
+      } else if ((message.command === 'allowApproval' || message.command === 'denyApproval') && message.text && APPROVAL_ID.test(message.text)) {
+        await this.decideApproval(message.command === 'allowApproval' ? 'allow' : 'deny', message.text);
       } else if (message.command === 'clearAllObligations') {
         await this.clearAllObligations();
       } else if (message.command === 'updateTaskStatus' && message.path && typeof message.line === 'number' && message.status) {
@@ -350,6 +355,8 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
     this._messagePaths.set('changelog', vm.memory?.changelog ? [vm.memory.changelog.path] : []);
     this._messagePaths.set('obligations', [...Object.keys(vm.pendingTests), ...Object.keys(vm.pendingDocs)]);
     vm.hookProposals = this.hookCache().current(this.hookRoots());
+    vm.approvals = this.approvalCache().current();
+    this._messagePaths.set('approvals', vm.approvals.map(ticket => ticket.id));
     this._messagePaths.set('hookProposals', vm.hookProposals.pending.map(view => view.path));
     this._messagePaths.set('hookReceipts', vm.hookProposals.installed.map(r => path.join(r.root, '.gravityguard', 'runtime', 'hook-receipts', `${r.id}.json`)));
     const { eventsList, govData, stopRetries, resolutionIntents, totalObligations } = vm;
@@ -416,6 +423,49 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
 
   private hookScript(): string {
     return path.join(this._extensionUri.fsPath, 'engine', 'hook_proposal_control.py');
+  }
+
+  private approvalScript(): string {
+    return path.join(this._extensionUri.fsPath, 'engine', 'approval_control.py');
+  }
+
+  private approvalCache(): ApprovalCache {
+    if (!this._approvalCache) {
+      this._approvalCache = new ApprovalCache(this.approvalScript(), fresh => {
+        this._lastDataSig = '';
+        this.updateHtml(true);
+        fresh.forEach(ticket => this.announceApproval(ticket));
+      });
+    }
+    return this._approvalCache;
+  }
+
+  /** A new blocked action: a notification with the two buttons, so the user need not open the panel. */
+  private announceApproval(ticket: ApprovalView): void {
+    const allow = t('hooks.allowOnce');
+    const deny = t('hooks.reject');
+    const what = ticket.action?.command || ticket.action?.target || '';
+    void Promise.resolve(vscode.window.showWarningMessage(
+      t('hooks.approvalPrompt', { rule: ticket.rule, what: what.slice(0, 120) }), allow, deny
+    )).then(choice => {
+      if (choice === allow) return this.decideApproval('allow', ticket.id);
+      if (choice === deny) return this.decideApproval('deny', ticket.id);
+      return undefined;
+    });
+  }
+
+  /** One click, no modal: the button is the user's decision. The trusted engine command records it. */
+  private async decideApproval(action: 'allow' | 'deny', id: string): Promise<void> {
+    try {
+      const answer = await runHookControl(this.approvalScript(), { action, id });
+      if (!answer?.ok) throw new Error(answer?.error || 'unknown error');
+      vscode.window.showInformationMessage(t(action === 'allow' ? 'hooks.approvalAllowed' : 'hooks.approvalDenied'));
+    } catch (error: any) {
+      vscode.window.showErrorMessage(t('hooks.failed', { error: error?.message || String(error) }));
+    }
+    this._approvalCache?.invalidate();
+    this._lastDataSig = '';
+    this.updateHtml(true);
   }
 
   private hookCache(): HookProposalCache {
