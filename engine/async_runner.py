@@ -29,21 +29,12 @@ from typing import Dict, Any, List, Optional
 # ============================================================================
 # UTF-8 STREAM HARDENING (Windows cp1252 defence)
 # ============================================================================
-# Mirrors the hardening in gravity-validator.py. This runner receives a file
-# path from the hook, so a cp1252 default (the Windows behaviour of a bare
-# `python`) would make it operate on a mojibake path — and, because
-# get_runtime_dir() creates its directories with mkdir(parents=True), that
-# failure mode does not merely misread: it CREATES a bogus directory tree
-# inside the user's project. Keeping both entry points on UTF-8 removes the
-# entire class of failure. Reference: see the longer note in gravity-validator.py.
 def _harden_streams_to_utf8() -> None:
     """Forces stdin/stdout/stderr to UTF-8 with replacement (never raises)."""
     for stream_name in ("stdin", "stdout", "stderr"):
         try:
             getattr(sys, stream_name).reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError, OSError, LookupError):
-            # Best-effort by design: a background lint runner must never die
-            # because of its own hardening step, so skip the unusable stream.
             continue
 
 
@@ -52,6 +43,13 @@ _harden_streams_to_utf8()
 
 from gravityguard_engine.async_process import _CREATE_NEW_PROCESS_GROUP, _CREATE_NO_WINDOW, _hidden_popen_kwargs, _hidden_startupinfo, _kill_process_tree, run_hidden  # noqa: F401 (re-export)
 from gravityguard_engine.async_state import _PROJECT_ROOT_MARKERS, _has_project_marker, _is_ancestor_or_self, find_project_root, get_debounce_file_path, get_diagnostics_file_path, get_runtime_dir, is_trusted_project_root, load_debounce_state, load_diagnostics, save_debounce_state, save_diagnostics  # noqa: F401 (re-export)
+from gravityguard_engine.async_linter import (  # noqa: F401 (re-export)
+    parse_tsc_output,
+    run_ruff,
+    run_eslint,
+    run_godot_check,
+    run_batch_tsc,
+)
 
 
 # ============================================================================
@@ -66,13 +64,7 @@ def should_run_after_idle(last_edit_time: float, current_time: float, idle_thres
 
 
 def should_spawn_worker(worker_already_running: bool) -> bool:
-    """Returns True when no batch worker is already claimed in the persisted state.
-
-    This is state-based duplicate suppression, not a mutex: concurrent callers can
-    in principle both observe an unclaimed state. For the sequential tool-call loop
-    GravityGuard serves, that window is not reachable in practice, but the guarantee
-    is best-effort rather than formally atomic.
-    """
+    """Returns True when no batch worker is already claimed in the persisted state."""
     return not worker_already_running
 
 
@@ -82,12 +74,7 @@ def should_spawn_file_worker(active_workers: Dict[str, bool], file_key: str) -> 
 
 
 def async_spawning_disabled() -> bool:
-    """True when background process spawning is disabled via environment.
-
-    Tests and CI set GRAVITYGUARD_DISABLE_ASYNC=1 so the suite never launches real
-    background workers. Without it, tests that create real files in temp dirs spawn
-    live async_runner processes which then get orphaned when the temp dir is removed.
-    """
+    """True when background process spawning is disabled via environment."""
     return os.environ.get("GRAVITYGUARD_DISABLE_ASYNC", "").strip() == "1"
 
 
@@ -106,144 +93,10 @@ def clean_file_state(state: Dict[str, Any], file_key: str) -> None:
 
 def should_wait_for_target_file(target_exists: bool, waited_seconds: float,
                                grace_period: float = 2.0) -> bool:
-    """Returns True while the target file is still missing and grace remains.
-
-    GravityGuard runs as a PreToolUse hook, so this worker is spawned *before* the AI
-    writes the file and the target may legitimately not exist yet. The wait is bounded
-    by grace_period so the worker can never outlive its purpose; once the file lands
-    the worker stops waiting immediately.
-    """
+    """Returns True while the target file is still missing and grace remains."""
     if target_exists:
         return False
     return waited_seconds < (grace_period - 1e-6)
-
-
-# ============================================================================
-# PARSERS & ADAPTERS
-# ============================================================================
-
-def parse_tsc_output(stdout_text: str, project_root: Path) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Parses tsc --noEmit compiler output into per-file error lists.
-    Format: <filepath>(<line>,<col>): error <codeId>: <message>
-    Returns: { normalized_file_path: [ {line, rule, message} ] }
-    """
-    file_errors: Dict[str, List[Dict[str, Any]]] = {}
-    pattern = re.compile(r"^(.+?)\((\d+),\d+\):\s+error\s+(TS\d+):\s+(.*)$")
-
-    for line in stdout_text.splitlines():
-        line = line.strip()
-        m = pattern.match(line)
-        if m:
-            rel_or_abs_path = m.group(1).strip()
-            line_no = int(m.group(2))
-            code_id = m.group(3).strip()
-            msg = m.group(4).strip()
-
-            p = Path(rel_or_abs_path)
-            if not p.is_absolute():
-                p = (project_root / p).resolve()
-            norm_key = str(p).replace("\\", "/")
-
-            file_errors.setdefault(norm_key, []).append({
-                "line": line_no,
-                "rule": code_id,
-                "message": msg
-            })
-
-    return file_errors
-
-
-def run_ruff(target_file: str) -> Optional[List[Dict[str, Any]]]:
-    """Runs ruff check on a single python file."""
-    if not shutil.which("ruff"):
-        return None
-    try:
-        res = run_hidden(["ruff", "check", "--output-format=json", target_file], timeout=10)
-        if res is None:
-            return None
-        output = res.stdout.strip()
-        if not output:
-            return []
-        items = json.loads(output)
-        errors = []
-        for item in items:
-            errors.append({
-                "line": item.get("location", {}).get("row", 1),
-                "rule": item.get("code", "Ruff"),
-                "message": item.get("message", "Lint warning")
-            })
-        return errors
-    except (subprocess.SubprocessError, json.JSONDecodeError, OSError, AttributeError):
-        return None
-
-
-def run_eslint(target_file: str, project_root: Path) -> Optional[List[Dict[str, Any]]]:
-    """Runs eslint on a single TS/JS file."""
-    cmd = None
-    if shutil.which("npx"):
-        cmd = ["npx", "--no-install", "eslint", "--format", "json", target_file]
-    elif shutil.which("eslint"):
-        cmd = ["eslint", "--format", "json", target_file]
-
-    if not cmd:
-        return None
-
-    try:
-        res = run_hidden(cmd, cwd=project_root, timeout=15)
-        if res is None:
-            return None
-        output = res.stdout.strip()
-        if not output:
-            return []
-        data = json.loads(output)
-        errors = []
-        for file_entry in data:
-            for msg in file_entry.get("messages", []):
-                errors.append({
-                    "line": msg.get("line", 1),
-                    "rule": msg.get("ruleId", "ESLint"),
-                    "message": msg.get("message", "Lint error")
-                })
-        return errors
-    except (subprocess.SubprocessError, json.JSONDecodeError, OSError, AttributeError):
-        return None
-
-
-def run_godot_check(target_file: str) -> Optional[List[Dict[str, Any]]]:
-    """Runs headless Godot script syntax check."""
-    if not shutil.which("godot"):
-        return None
-    try:
-        res = run_hidden(["godot", "--headless", "--check-only", "-s", target_file], timeout=10)
-        if res is None:
-            return None
-        if res.returncode != 0:
-            err_line = (res.stderr or "").strip() or (res.stdout or "").strip()
-            return [{
-                "line": 1,
-                "rule": "GDScriptSyntax",
-                "message": err_line[:200]
-            }]
-        return []
-    except (subprocess.SubprocessError, OSError, AttributeError):
-        return None
-
-
-def run_batch_tsc(project_root: Path) -> Optional[Dict[str, List[Dict[str, Any]]]]:
-    """Runs tsc --noEmit across the project and returns per-file errors."""
-    if not shutil.which("npx") and not shutil.which("tsc"):
-        return None
-    cmd = ["npx", "tsc", "--noEmit"] if shutil.which("npx") else ["tsc", "--noEmit"]
-    try:
-        res = run_hidden(cmd, cwd=project_root, timeout=30)
-        if res is None:
-            return None
-        if res.returncode == 0:
-            return {}
-        return parse_tsc_output(res.stdout, project_root)
-    except (subprocess.SubprocessError, OSError, AttributeError):
-        return None
 
 
 # ============================================================================
@@ -301,11 +154,6 @@ def run_coalesced_file_lint_worker(target_file: str, project_root: Path,
     Coalesces rapid successive edits on the same file.
     Waits until no edits have occurred on target_file for coalesce_window (300ms),
     then executes the linter once on the final file state and cleans up state.
-
-    GravityGuard is a PreToolUse hook, so this worker is spawned *before* the AI
-    writes the file and the target may legitimately not exist yet. After the quiet
-    window the worker therefore spends a bounded grace_period waiting for the file
-    to land; if it never appears the worker cleans up and exits quietly.
     """
     debounce_path = get_debounce_file_path(project_root)
     diag_path = get_diagnostics_file_path(project_root)
@@ -319,23 +167,16 @@ def run_coalesced_file_lint_worker(target_file: str, project_root: Path,
         now = time.time()
 
         if should_run_file_lint(last_edit, now, coalesce_window):
-            # Quiet window reached. The write may not have landed yet (pre-tool hook),
-            # so allow a bounded grace period for the file to appear.
             if not _await_target_file(target_file, coalesce_window, grace_period):
-                # File never materialised: release the claim and exit silently.
                 clean_file_state(state, norm_key)
                 save_debounce_state(debounce_path, state)
                 return
 
-            # Execute linter once on the final file state
             execute_single_file_lint(target_file, project_root, diag_path)
-
-            # Cleanup worker state so future modifications start fresh
             clean_file_state(state, norm_key)
             save_debounce_state(debounce_path, state)
             break
         else:
-            # More edits arrived during sleep; continue waiting for calm
             continue
 
 
@@ -344,16 +185,6 @@ def run_debounce_worker(project_root: Path, idle_threshold: float = 3.0,
     """
     Background worker loop that waits for a quiet window (e.g. 3.0s idle)
     before triggering project-wide tsc --noEmit and writing per-file entries.
-
-    Termination guarantees (a worker must never outlive its purpose):
-      1. Quiet window reached     -> run batch tsc once, then exit.
-      2. Project root disappeared -> exit (nothing left to validate).
-      3. Debounce state file gone -> exit (no pending edit to debounce).
-      4. max_lifetime exceeded    -> release the worker claim, then exit.
-
-    Every exit path that leaves a persisted state file behind must clear
-    worker_running. Otherwise the stale True blocks all future spawns in
-    trigger_debounce_worker_if_needed() and the TSC debounce silently deadlocks.
     """
     debounce_path = get_debounce_file_path(project_root)
     diag_path = get_diagnostics_file_path(project_root)
@@ -362,11 +193,6 @@ def run_debounce_worker(project_root: Path, idle_threshold: float = 3.0,
     while True:
         time.sleep(idle_threshold)
 
-        # Guard: hard upper bound on total worker lifetime. The claim must be
-        # released first, otherwise the persisted worker_running=True would block
-        # every future spawn (a lifecycle deadlock). If the state file is already
-        # gone we exit directly and deliberately avoid re-creating the runtime
-        # directory tree.
         if (time.time() - started_at) > max_lifetime:
             if debounce_path.exists():
                 expired_state = load_debounce_state(debounce_path)
@@ -374,14 +200,9 @@ def run_debounce_worker(project_root: Path, idle_threshold: float = 3.0,
                 save_debounce_state(debounce_path, expired_state)
             return
 
-        # Guard: project root disappeared (e.g. temp workspace cleaned up).
         if not project_root.exists():
             return
 
-        # Guard: state file removed -> no pending edit to debounce. Without this,
-        # load_debounce_state() yields last_edit_time == 0.0, should_run_after_idle()
-        # stays permanently False, and the loop spins forever while re-creating the
-        # deleted .gravityguard/runtime directory tree on every iteration.
         if not debounce_path.exists():
             return
 
@@ -390,13 +211,11 @@ def run_debounce_worker(project_root: Path, idle_threshold: float = 3.0,
         now = time.time()
 
         if last_edit <= 0.0:
-            # No recorded edit activity: nothing to coalesce.
             state["worker_running"] = False
             save_debounce_state(debounce_path, state)
             return
 
         if should_run_after_idle(last_edit, now, idle_threshold):
-            # Burst is over! Run batch tsc once
             file_errors_map = run_batch_tsc(project_root)
             state["worker_running"] = False
             save_debounce_state(debounce_path, state)
@@ -405,12 +224,10 @@ def run_debounce_worker(project_root: Path, idle_threshold: float = 3.0,
                 diag = load_diagnostics(diag_path)
                 entries = diag.setdefault("entries", {})
 
-                # Remove existing tsc entries that may have been resolved
                 tsc_keys_to_clear = [k for k, v in entries.items() if v.get("tool") == "tsc"]
                 for k in tsc_keys_to_clear:
                     entries.pop(k, None)
 
-                # Store per-file tsc entries so read_recent_diagnostics(target_file) can match them
                 for f_path, errs in file_errors_map.items():
                     if errs:
                         entries[f_path] = {
@@ -419,7 +236,6 @@ def run_debounce_worker(project_root: Path, idle_threshold: float = 3.0,
                             "errors": errs[:5]
                         }
 
-                # Also keep summary entry
                 total_err_count = sum(len(errs) for errs in file_errors_map.values())
                 if total_err_count > 0:
                     entries["[project-tsc]"] = {
@@ -500,13 +316,6 @@ def main():
             save_diagnostics(diag_path, diag)
         sys.exit(0)
 
-    # Per-file burst coalescing logic.
-    #
-    # NOTE: the target file intentionally does NOT have to exist here. GravityGuard
-    # runs as a PreToolUse hook, so this runner is spawned *before* the AI writes the
-    # file. Bailing out early on a missing file would mean every newly created file
-    # is never linted. Existence is handled inside run_coalesced_file_lint_worker(),
-    # which waits a bounded grace period and no-ops cleanly if the file never lands.
     norm_key = str(Path(target_file).resolve()).replace("\\", "/")
     debounce_state = load_debounce_state(debounce_path)
     file_edits = debounce_state.setdefault("file_edits", {})
@@ -516,14 +325,10 @@ def main():
     file_edits[norm_key] = now
 
     if should_spawn_file_worker(active_workers, norm_key):
-        # Claim file lint worker
         active_workers[norm_key] = True
         save_debounce_state(debounce_path, debounce_state)
-        # Execute coalesced worker (waits 300ms quiet window, then lints once)
         run_coalesced_file_lint_worker(target_file, project_root, coalesce_window=0.3)
     else:
-        # A worker is already running for this file; updating file_edits[norm_key] = now
-        # successfully resets its timer window. Exit immediately without spawning extra processes!
         save_debounce_state(debounce_path, debounce_state)
         sys.exit(0)
 

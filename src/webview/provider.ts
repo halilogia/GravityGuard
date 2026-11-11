@@ -16,8 +16,9 @@ import { addAdrItem, addChangelogItem } from '../knowledge';
 import { WebviewLifecycle } from './lifecycle';
 import { MessagePathPolicy } from './message_policy';
 import { waiveAdvisory } from './governance_control';
-import { HookProposalCache, hookFilesSignature, runHookControl, splitHookFile } from './hook_proposals';
-import { APPROVAL_ID, ApprovalCache, type ApprovalView } from './approval_tickets';
+import { HookProposalCache, hookFilesSignature } from './hook_proposals';
+import { APPROVAL_ID, ApprovalCache } from './approval_tickets';
+import { announceApprovalTicket, executeApprovalDecision, executeHookProposalAction } from './provider_actions';
 
 export class GuardianViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
@@ -73,7 +74,6 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
     webviewView.onDidDispose(() => {
       lifecycle.dispose();
       if (this._view !== webviewView) {
-        // The host already re-resolved a newer view: its watcher / poller / lifecycle must stay untouched
         return;
       }
       this._lifecycle = undefined;
@@ -208,10 +208,8 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
       }
     });
 
-    // First render: the lifecycle waits for the iframe document to settle, then assigns html exactly once
     lifecycle.resolve();
 
-    // 1. Live File Watcher (Stored in _logWatcher to prevent leak)
     try {
       this._logWatcher?.close();
     } catch (err) {
@@ -229,7 +227,6 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
       }
     }
 
-    // 2. Delayed Polling (3s heartbeat) only after webview is stable (prevents Service Worker registration race)
     if (this._pollInterval) {
       clearInterval(this._pollInterval);
       this._pollInterval = undefined;
@@ -244,17 +241,12 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
     }, 2500);
   }
 
-  /**
-   * Public reset (antigravityBridge.resetWebview): tears the webview document down and rebuilds it
-   * with a fresh nonce. Safe to call at any time, also after an InvalidStateError black screen.
-   */
   public resetWebview(): void {
     this._lastHtml = '';
     this._lastDataSig = '';
     this._lifecycle?.reset('manual reset');
   }
 
-  /** Extension deactivation / disable: stop every timer, watcher and lifecycle so nothing touches a dead view. */
   public dispose(): void {
     this._lifecycle?.dispose();
     this._lifecycle = undefined;
@@ -281,11 +273,6 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /**
-   * Recovery budget exhausted (stale / corrupt webview service worker or iframe state in the host).
-   * Stage 1 (automatic, once per session): reload every webview iframe through the host's own command,
-   * which re-registers the service worker from a clean document. Stage 2: ask the user.
-   */
   private escalate(reason: string): void {
     console.warn(`[GravityGuard] Webview recovery gave up (${reason}).`);
     if (!this._hostReloadTried) {
@@ -335,8 +322,6 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
     if (!view || !lifecycle) {
       return;
     }
-    // Only a ready, visible document is rebuilt eagerly; every other phase just records "dirty" in the
-    // lifecycle, which renders the freshest state once the document is safe to touch.
     if (lifecycle.isReady && view.visible && !force && this.currentSignature() === this._lastDataSig) {
       return;
     }
@@ -379,7 +364,6 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
     }
     this._nonce = nonce;
     const { html } = this.buildDocument(view, nonce);
-    // Per-render marker busts any html cache so the document is always re-created
     view.webview.html = `${html}
 <!-- gg-render:${nonce}:${Date.now()} -->`;
   }
@@ -434,40 +418,18 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
       this._approvalCache = new ApprovalCache(this.approvalScript(), fresh => {
         this._lastDataSig = '';
         this.updateHtml(true);
-        fresh.forEach(ticket => this.announceApproval(ticket));
+        fresh.forEach(ticket => announceApprovalTicket(ticket, (a, id) => this.decideApproval(a, id)));
       });
     }
     return this._approvalCache;
   }
 
-  /** Called on a timer by the extension: the ticket cache otherwise refreshes only while the panel renders. */
   watchApprovals(): void {
     this.approvalCache().current();
   }
 
-  /** A new blocked action: a notification with the two buttons, so the user need not open the panel. */
-  private announceApproval(ticket: ApprovalView): void {
-    const allow = t('hooks.allowOnce');
-    const deny = t('hooks.reject');
-    const what = ticket.action?.command || ticket.action?.target || '';
-    void Promise.resolve(vscode.window.showWarningMessage(
-      t('hooks.approvalPrompt', { rule: ticket.rule, what: what.slice(0, 120) }), allow, deny
-    )).then(choice => {
-      if (choice === allow) return this.decideApproval('allow', ticket.id);
-      if (choice === deny) return this.decideApproval('deny', ticket.id);
-      return undefined;
-    });
-  }
-
-  /** One click, no modal: the button is the user's decision. The trusted engine command records it. */
   private async decideApproval(action: 'allow' | 'deny', id: string): Promise<void> {
-    try {
-      const answer = await runHookControl(this.approvalScript(), { action, id });
-      if (!answer?.ok) throw new Error(answer?.error || 'unknown error');
-      vscode.window.showInformationMessage(t(action === 'allow' ? 'hooks.approvalAllowed' : 'hooks.approvalDenied'));
-    } catch (error: any) {
-      vscode.window.showErrorMessage(t('hooks.failed', { error: error?.message || String(error) }));
-    }
+    await executeApprovalDecision(this.approvalScript(), action, id);
     this._approvalCache?.invalidate();
     this._lastDataSig = '';
     this.updateHtml(true);
@@ -483,35 +445,11 @@ export class GuardianViewProvider implements vscode.WebviewViewProvider {
     return this._hookCache;
   }
 
-  /** User clicked Approve / Reject / Revert: confirm in a modal, then run the trusted engine command. */
   private async hookAction(command: string, file: string, sha?: string): Promise<void> {
-    const where = splitHookFile(file);
-    const roots = this.hookRoots();
-    if (!where) return;
-    const data = this.hookCache().current(roots);
-    const pending = data.pending.find(view => view.id === where.id && view.root === where.root);
-    const installed = data.installed.find(receipt => receipt.id === where.id && receipt.root === where.root);
-    const action = command === 'approveHookProposal' ? 'approve' : command === 'rejectHookProposal' ? 'reject' : 'revert';
-    if (action !== 'reject') {
-      const targetFile = action === 'approve' ? pending?.target_file : installed?.target_file;
-      const yes = t('hooks.confirmButton');
-      const choice = await vscode.window.showWarningMessage(
-        t(action === 'approve' ? 'hooks.confirmApprove' : 'hooks.confirmRevert', { id: where.id, file: targetFile || '?' }),
-        { modal: true, detail: action === 'approve' ? pending?.diff : undefined }, yes);
-      if (choice !== yes) return;
-    }
-    try {
-      const answer = await runHookControl(this.hookScript(), { action, roots, root: where.root, id: where.id, sha256: sha || '' });
-      if (!answer?.ok) throw new Error(answer?.error || 'unknown error');
-      const notice = action === 'approve' ? t('hooks.installed', { file: answer.target_file })
-        : action === 'reject' ? t('hooks.rejected', { id: where.id }) : t('hooks.reverted', { id: where.id });
-      vscode.window.showInformationMessage(notice);
-    } catch (error: any) {
-      vscode.window.showErrorMessage(t('hooks.failed', { error: error?.message || String(error) }));
-    }
+    const changed = await executeHookProposalAction(this.hookScript(), this.hookCache(), this.hookRoots(), command, file, sha);
+    if (!changed) return;
     this._hookCache?.invalidate();
     this._lastDataSig = '';
     this.updateHtml(true);
   }
-
 }

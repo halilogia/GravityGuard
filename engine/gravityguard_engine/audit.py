@@ -21,10 +21,31 @@ from typing import Optional, Dict, Any, List, Tuple, Set
 from .project_context import extract_project_info
 from .state_lock import StateLock
 
-
 from .audit_redaction import _SECRET_PATTERNS, _SENSITIVE_DICT_KEYS, redact_record, redact_secrets
-from .audit_journal import _commit_fallback_spool, _find_committed_event_ids, _generate_event_id, _get_journal_last_seq, _is_durable_mode, _prepare_fallback_spool, _read_last_journal_entry, _repair_journal_tail, _resolve_log_dir
-from .audit_state import _apply_event_to_live_state, _recompute_effectiveness_rates, _rebuild_live_state_from_permanent_audit, _replay_missing_journal_events, NON_RECOVERING_RULES, DETERRENCE_RULES
+from .audit_journal import (
+    _commit_fallback_spool,
+    _find_committed_event_ids,
+    _generate_event_id,
+    _get_journal_last_seq,
+    _is_durable_mode,
+    _prepare_fallback_spool,
+    _read_last_journal_entry,
+    _repair_journal_tail,
+    _resolve_log_dir,
+)
+from .audit_state import (
+    _apply_event_to_live_state,
+    _recompute_effectiveness_rates,
+    _rebuild_live_state_from_permanent_audit,
+    _replay_missing_journal_events,
+    NON_RECOVERING_RULES,
+    DETERRENCE_RULES,
+)
+from .audit_spool import (
+    _load_and_reconcile_live_state,
+    _replay_spool_events,
+    _write_fallback_spool_event,
+)
 
 
 def detect_agent_name(conv_id: Any = None) -> str:
@@ -88,26 +109,12 @@ def log_event(
         fallback_spool_path = os.path.join(log_dir, "gravityguard_audit_fallback.jsonl")
         audit_lock_path = Path(log_dir) / ".audit.lock"
 
-        current_data: Dict[str, Any] = {
-            "activeGuard": "GravityGuard",
-            "status": "ONLINE",
-            "events": [],
-            "activeViolations": {},
-            "effectiveness": {
-                "totalBlocked": 0,
-                "totalRecovered": 0,
-                "recoveryRate": 100.0,
-                "ruleStats": {}
-            }
-        }
-
         outcome = outcome_override
         parent_violation_id: Optional[str] = None
         resolved_rule_id: Optional[str] = None
         recovery_attempts: Optional[int] = None
         resolution_ms: Optional[float] = None
 
-        # Lock acquisition for concurrency safety across hook processes
         lock = StateLock(audit_lock_path, timeout=2.0)
         lock_acquired = False
         try:
@@ -117,81 +124,16 @@ def log_event(
 
         if not lock_acquired:
             sys.stderr.write(f"[GravityGuard Audit Lock Timeout] Could not acquire audit lock for {log_path}; buffering event in fallback spool to prevent data loss\n")
-            try:
-                proj_name, proj_root = extract_project_info(target_file)
-                ext = os.path.splitext(target_file)[1].lower() if target_file else ""
-                model_id = os.environ.get("ANTIGRAVITY_MODEL", os.environ.get("MODEL_NAME", "unknown"))
-                spool_event = {
-                    "auditSeq": -1,
-                    "eventId": event_id,
-                    "timestamp": now_iso,
-                    "action": action,
-                    "status": status,
-                    "ruleId": rule_id,
-                    "resolvedRuleId": resolved_rule_id,
-                    "target": target_file,
-                    "project": proj_name,
-                    "projectRoot": proj_root,
-                    "fileExt": ext,
-                    "conversationId": conv_id,
-                    "agent": agent_name,
-                    "model": model_id,
-                    "reason": reason,
-                    "outcome": outcome or status,
-                    "parentViolationId": None,
-                    "recoveryAttempts": 1,
-                    "resolutionMs": None
-                }
-                spool_event = redact_record(spool_event)
-                with open(fallback_spool_path, "a", encoding="utf-8") as sf:
-                    sf.write(json.dumps(spool_event, ensure_ascii=False) + "\n")
-                    sf.flush()
-            except Exception as spool_err:
-                sys.stderr.write(f"[GravityGuard Audit Spool Error] {spool_err}\n")
+            _write_fallback_spool_event(
+                fallback_spool_path, event_id, now_iso, action, status,
+                rule_id, resolved_rule_id, target_file, conv_id, agent_name, reason, outcome
+            )
             return event_id
 
         try:
-            # Repair torn tail if prior process crashed during WAL write
             _repair_journal_tail(permanent_log_path)
-            # Two-phase crash-safe fallback spool recovery
             spool_processing_files, spooled_events = _prepare_fallback_spool(log_dir)
-
-            current_data = None
-            if os.path.exists(log_path):
-                try:
-                    with open(log_path, "r", encoding="utf-8") as f:
-                        loaded = json.load(f)
-                        if isinstance(loaded, dict):
-                            current_data = loaded
-                except (json.JSONDecodeError, OSError) as read_err:
-                    sys.stderr.write(f"[GravityGuard State Corrupt Warning] {read_err}; attempting rebuild from permanent log\n")
-                    current_data = None
-
-            if current_data is None:
-                current_data = _rebuild_live_state_from_permanent_audit(permanent_log_path)
-            else:
-                live_seq = current_data.get("lastAuditSeq")
-                journal_last_seq = _get_journal_last_seq(permanent_log_path)
-                last_record = _read_last_journal_entry(permanent_log_path)
-                if (last_record and last_record.get("recordType") == "audit_checkpoint"
-                        and current_data.get("maintenanceId") != last_record.get("eventId")):
-                    current_data = _rebuild_live_state_from_permanent_audit(permanent_log_path)
-                    live_seq = current_data.get("lastAuditSeq")
-                if live_seq is None:
-                    if journal_last_seq > 0:
-                        sys.stderr.write(
-                            f"[GravityGuard Uninitialized Projection] Missing lastAuditSeq with non-empty journal ({journal_last_seq}); rebuilding projection from canonical journal\n"
-                        )
-                        current_data = _rebuild_live_state_from_permanent_audit(permanent_log_path)
-                    else:
-                        current_data["lastAuditSeq"] = 0
-                elif live_seq < journal_last_seq:
-                    _replay_missing_journal_events(current_data, permanent_log_path, from_seq=live_seq)
-                elif live_seq > journal_last_seq:
-                    sys.stderr.write(
-                        f"[GravityGuard Projection Ahead Of Journal] live ({live_seq}) > journal ({journal_last_seq}); reconciling projection from canonical journal\n"
-                    )
-                    current_data = _rebuild_live_state_from_permanent_audit(permanent_log_path)
+            current_data = _load_and_reconcile_live_state(log_path, permanent_log_path)
 
             active_violations = current_data.setdefault("activeViolations", {})
             if not isinstance(active_violations, dict):
@@ -246,7 +188,6 @@ def log_event(
                                 "status": "BLOCKED"
                             }
                 elif status == "APPROVED":
-                    # Reads and bookkeeping notes fix nothing; only an approved write may clear an open violation.
                     can_recover = bool(norm_target) and rule_id not in NON_RECOVERING_RULES
                     matching_keys = [k for k in list(active_violations.keys()) if k.startswith(target_prefix)] if can_recover else []
                     if matching_keys:
@@ -274,11 +215,9 @@ def log_event(
                             p_st["recovered"] = p_st.get("recovered", 0) + 1
                             if recovery_attempts is not None:
                                 p_st.setdefault("attempts", []).append(recovery_attempts)
-                            # A "fix" that only adds suppression markers is counted, not trusted.
                             if evasion_markers:
                                 p_st["evasionSuspect"] = p_st.get("evasionSuspect", 0) + 1
 
-                            # Create linked recovery events and update ruleStats for each additional resolved rule
                             for additional in resolved_items[1:]:
                                 add_r_id = additional.get("ruleId")
                                 add_e_id = _generate_event_id()
@@ -325,72 +264,12 @@ def log_event(
                 else:
                     outcome = status
 
-            # Monotonic sequence numbering for Write-Ahead Journaling
             journal_seq = current_data.get("lastAuditSeq", 0)
             is_durable = _is_durable_mode()
-
-            # Replay any fallback spool events that were buffered during previous lock timeouts
-            spool_writes_succeeded = True
-            candidate_spool_ids = {sp.get("eventId") for sp in spooled_events if sp.get("eventId")}
-            committed_spool_ids = _find_committed_event_ids(permanent_log_path, candidate_spool_ids)
-
-            for sp_ev in spooled_events:
-                sp_eid = sp_ev.get("eventId")
-                if sp_eid and sp_eid in committed_spool_ids:
-                    # Idempotency guard: event was already committed to canonical journal
-                    continue
-
-                sp_seq = journal_seq + 1
-                sp_ev["auditSeq"] = sp_seq
-                sp_redacted = redact_record(sp_ev)
-                write_ok = False
-                try:
-                    with open(permanent_log_path, "a", encoding="utf-8") as af:
-                        af.write(json.dumps(sp_redacted, ensure_ascii=False) + "\n")
-                        af.flush()
-                        if is_durable:
-                            try:
-                                os.fsync(af.fileno())
-                            except (OSError, AttributeError) as sync_err:
-                                sys.stderr.write(f"[GravityGuard Durability Sync Warning] {sync_err}\n")
-                    write_ok = True
-                except Exception as spool_write_err:
-                    spool_writes_succeeded = False
-                    sys.stderr.write(f"[GravityGuard Spool Replay Write Error] {spool_write_err}\n")
-
-                if write_ok:
-                    journal_seq = sp_seq
-                    if sp_eid:
-                        committed_spool_ids.add(sp_eid)
-
-                    # Reconcile causal effectiveness and live violations for spooled events ONLY on write success
-                    _apply_event_to_live_state(current_data, sp_redacted)
-
-                    sp_live = {
-                        "eventId": sp_ev.get("eventId"),
-                        "auditSeq": journal_seq,
-                        "timestamp": sp_ev.get("timestamp"),
-                        "action": sp_ev.get("action"),
-                        "status": sp_ev.get("status"),
-                        "ruleId": sp_ev.get("ruleId"),
-                        "resolvedRuleId": sp_ev.get("resolvedRuleId"),
-                        "target": sp_ev.get("target"),
-                        "reason": sp_ev.get("reason"),
-                        "outcome": sp_ev.get("outcome"),
-                        "parentViolationId": sp_ev.get("parentViolationId"),
-                        "recoveryAttempts": sp_ev.get("recoveryAttempts"),
-                        "resolutionMs": sp_ev.get("resolutionMs"),
-                    }
-                    ev_list = current_data.get("events", [])
-                    if not isinstance(ev_list, list):
-                        ev_list = []
-                        current_data["events"] = ev_list
-                    ev_list.insert(0, redact_record(sp_live))
-                    if len(ev_list) > 50:
-                        ev_list.pop()
-
-            if spool_processing_files and spool_writes_succeeded:
-                _commit_fallback_spool(spool_processing_files)
+            journal_seq = _replay_spool_events(
+                current_data, spooled_events, spool_processing_files,
+                permanent_log_path, journal_seq, is_durable
+            )
 
             current_data["lastAuditSeq"] = journal_seq
             next_seq = journal_seq + 1
@@ -417,7 +296,6 @@ def log_event(
                 event["evasionSuspect"] = True
                 event["evasionMarkers"] = list(evasion_markers or [])
 
-            # Permanent Audit & Telemetry Archive (JSONL for product R&D and effectiveness analysis)
             proj_name, proj_root = extract_project_info(target_file)
             ext = os.path.splitext(target_file)[1].lower() if target_file else ""
             model_id = os.environ.get("ANTIGRAVITY_MODEL", os.environ.get("MODEL_NAME", "unknown"))
@@ -476,18 +354,12 @@ def log_event(
                 extra_telemetry_events.append(add_telemetry)
 
             final_audit_seq = curr_extra_seq
-            is_durable = _is_durable_mode()
 
-            # Centralized Secret Redaction: scrub all records before writing
             event = redact_record(event)
             telemetry_event = redact_record(telemetry_event)
             extra_recovery_events = [redact_record(x) for x in extra_recovery_events]
             extra_telemetry_events = [redact_record(x) for x in extra_telemetry_events]
 
-            # ---------------------------------------------------------
-            # 1. WRITE-AHEAD LOGGING (JOURNAL FIRST)
-            # Permanent audit stream is canonical source of truth.
-            # ---------------------------------------------------------
             try:
                 with open(permanent_log_path, "a", encoding="utf-8") as af:
                     af.write(json.dumps(telemetry_event, ensure_ascii=False) + "\n")
@@ -510,9 +382,6 @@ def log_event(
                 except Exception as spool_err:
                     sys.stderr.write(f"[GravityGuard Emergency Spool Write Error] {spool_err}\n")
 
-            # ---------------------------------------------------------
-            # 2. UPDATE LIVE PROJECTION STATE
-            # ---------------------------------------------------------
             current_data["lastAuditSeq"] = final_audit_seq
             events = current_data.get("events", [])
             if not isinstance(events, list):
@@ -520,14 +389,11 @@ def log_event(
             events.insert(0, event)
             for add_ev in extra_recovery_events:
                 events.insert(1, add_ev)
-            current_data["events"] = events[:50]  # keep last 50 for UI feed
+            current_data["events"] = events[:50]
             current_data["lastCheck"] = now_str
 
             _recompute_effectiveness_rates(current_data)
 
-            # ---------------------------------------------------------
-            # 3. ATOMIC CRASH-CONSISTENT REPLACE (.tmp -> rename)
-            # ---------------------------------------------------------
             tmp_log_path = Path(log_path).with_suffix(".tmp")
             with open(tmp_log_path, "w", encoding="utf-8") as f:
                 f.write(json.dumps(current_data, ensure_ascii=False, separators=(",", ":")))
@@ -548,4 +414,3 @@ def log_event(
         sys.stderr.write(f"[GravityGuard Event Error] {exc}\n")
 
     return event_id
-

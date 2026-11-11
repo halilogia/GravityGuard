@@ -196,13 +196,13 @@ export const INSIGHTS_STYLES = `\
           .circuit-box { margin-top: 8px; padding: 6px 8px; background: rgba(0,0,0,0.2); border-radius: 4px; display: flex; justify-content: space-between; font-size: 9px; color: var(--text-muted); }
           .clean-state-box { text-align: center; padding: 20px 8px; border: 1px dashed rgba(16, 185, 129, 0.25); border-radius: 8px; background: rgba(16, 185, 129, 0.04); }
           .clean-state-title { font-weight: 700; font-size: 10px; color: var(--color-green); margin-top: 6px; }
-          .hook-card { border: 1px solid var(--border-color, rgba(148,163,184,0.25)); border-radius: 6px; padding: 8px; margin: 8px 0; }
+          .hook-card { background: rgba(15, 23, 42, 0.72); border: 1px solid rgba(148, 163, 184, 0.18); border-top: 2px solid var(--color-amber); border-radius: 8px; padding: 11px 12px; margin: 8px 0; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28); }
           .hook-card.hook-invalid { border-color: rgba(239, 68, 68, 0.5); }
           .hook-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
           .hook-id { font-weight: 600; font-size: 11px; }
           .hook-field { display: flex; gap: 6px; font-size: 10px; margin: 3px 0; align-items: baseline; }
           .hook-label { color: var(--text-muted); min-width: 56px; flex-shrink: 0; }
-          .hook-value { font-size: 10px; word-break: break-all; white-space: pre-wrap; }
+          .hook-value { font-size: 9.5px; word-break: break-all; white-space: pre-wrap; background: rgba(6, 9, 17, 0.78); border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 5px; padding: 4px 7px; color: #e2e8f0; }
           .hook-text { font-size: 10.5px; line-height: 1.4; }
           .hook-error { color: #ef4444; font-size: 10px; margin: 6px 0; }
           .hook-diff { font-size: 9.5px; line-height: 1.45; margin: 6px 0; padding: 6px; border-radius: 4px; background: rgba(0,0,0,0.25); overflow-x: auto; white-space: pre; }
@@ -211,7 +211,8 @@ export const INSIGHTS_STYLES = `\
           .hook-diff .diff-hunk { color: #38bdf8; }
           .hook-diff .diff-ctx { color: var(--text-muted); }
           .hook-actions { display: flex; gap: 6px; margin-top: 6px; }
-          .hook-approve { border-color: rgba(16, 185, 129, 0.6); color: #10b981; }
+          .hook-approve { background: rgba(16, 185, 129, 0.16); border-color: rgba(16, 185, 129, 0.55); color: #34d399; font-weight: 700; }
+          .hook-approve:hover { background: #10b981; color: #042f2e; }
           .hook-installed { display: flex; gap: 6px; align-items: center; font-size: 10px; margin: 4px 0; }
           .hook-installed .hook-value { flex: 1; }
           .hook-hint { color: var(--text-muted); font-size: 9.5px; margin-top: 12px; }

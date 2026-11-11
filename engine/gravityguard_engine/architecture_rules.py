@@ -79,7 +79,8 @@ def check_design_icon_rule(target_file: str, added_text: str) -> List[str]:
     name = parts[-1]
     if not name.endswith((".ts", ".tsx", ".js", ".jsx", ".html", ".vue", ".svelte", ".css", ".py", ".gd", ".gdshader")):
         return []
-    if any(part in {"doc", "docs", "documentation", "test", "tests", "__tests__"} for part in parts[:-1]):
+    from .icon_exemptions import is_icon_exempt_path
+    if is_icon_exempt_path(parts):
         return []
     if any(marker in name for marker in ("test_", "_test.", ".test.", "spec.")):
         return []

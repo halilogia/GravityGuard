@@ -129,7 +129,7 @@ def _resolve_log_dir() -> str:
         override = os.environ.get(var, "").strip()
         if override:
             return os.path.expanduser(override)
-    return os.path.expanduser(r"~/.gemini/logs")
+    return os.path.expanduser(r"~/.gemini/logs/gravityguard")
 
 
 def _generate_event_id() -> str:

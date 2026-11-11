@@ -2,7 +2,10 @@
 import re
 from typing import Sequence
 
-_EXEMPT_DIRS = frozenset({"doc", "docs", "documentation", "test", "tests", "__tests__", "scratch", "scratchpad"})
+_EXEMPT_DIRS = frozenset({
+    "doc", "docs", "documentation", "test", "tests", "__tests__",
+    "scratch", "scratchpad", "scripts", "bin", "cli", "hooks",
+})
 
 # A regex call or a raw string literal on the line: the emoji is something to match or strip.
 _PATTERN_CONTEXT = re.compile(

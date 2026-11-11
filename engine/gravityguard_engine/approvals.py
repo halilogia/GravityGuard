@@ -41,12 +41,38 @@ def _root() -> Path:
     return Path.home() / ".gravityguard" / "approvals"
 
 
+def _roots() -> list[Path]:
+    """Primary store first, then the other well-known stores. Hooks, CLI and the notifier can run with
+    different GRAVITYGUARD_LOG_DIR values; reading all of them keeps a ticket visible to every one."""
+    roots = [_root()]
+    if os.environ.get("GRAVITYGUARD_APPROVAL_DIR"):
+        return roots  # explicit override (tests, embedded hosts): isolated on purpose
+    for extra in (Path.home() / ".gravityguard" / "approvals",
+                  Path.home() / ".gemini" / "logs" / "gravityguard" / "approvals"):
+        if extra not in roots and not os.environ.get("GRAVITYGUARD_LOG_DIR"):
+            roots.append(extra)
+    return roots
+
+
+def _locate(folder: str, key: str) -> Path:
+    for root in _roots():
+        candidate = root / folder / f"{key}.json"
+        if candidate.is_file():
+            return candidate
+    return _root() / folder / f"{key}.json"
+
+
+def _decision_path(key: str) -> Path:
+    """Where a new decision is stored: beside the ticket, so whoever wrote the ticket also finds it."""
+    return pending_path(key).parent.parent / "receipts" / f"{key}.json"
+
+
 def pending_path(key: str) -> Path:
-    return _root() / "pending" / f"{key}.json"
+    return _locate("pending", key)
 
 
 def receipt_path(key: str) -> Path:
-    return _root() / "receipts" / f"{key}.json"
+    return _locate("receipts", key)
 
 
 def rule_of(reason: str) -> str:
@@ -193,8 +219,8 @@ def list_pending() -> list[dict]:
     """Unapproved tickets, newest first; expired ones are dropped from the list."""
     out = []
     now = _now()
-    folder = _root() / "pending"
-    for path in sorted(folder.glob("*.json")) if folder.is_dir() else []:
+    paths = [p for r in _roots() if (r / "pending").is_dir() for p in sorted((r / "pending").glob("*.json"))]
+    for path in paths:
         ticket = _read(path)
         if not ticket or ticket.get("status") != "pending":
             continue
@@ -204,8 +230,8 @@ def list_pending() -> list[dict]:
 
 
 def list_receipts() -> list[dict]:
-    folder = _root() / "receipts"
-    return [r for r in (_read(p) for p in sorted(folder.glob("*.json"))) if r] if folder.is_dir() else []
+    paths = [p for r in _roots() if (r / "receipts").is_dir() for p in sorted((r / "receipts").glob("*.json"))]
+    return [rec for rec in (_read(p) for p in paths) if rec]
 
 
 def preview(key: str) -> dict:
@@ -237,7 +263,7 @@ def approve(key: str, actor: str = "user", minutes: int = DEFAULT_TTL_MINUTES, u
         "expires_at": now + minutes * 60,
         "actor": actor,
     }
-    _write(receipt_path(key), receipt)
+    _write(_decision_path(key), receipt)
     ticket["status"] = "approved"
     ticket["decided_at"] = now
     _write(pending_path(key), ticket)
@@ -259,7 +285,7 @@ def reject(key: str, reason: str = "", actor: str = "user") -> dict:
         "decided_at": now,
         "actor": actor,
     }
-    _write(receipt_path(key), receipt)
+    _write(_decision_path(key), receipt)
     ticket["status"] = "rejected"
     ticket["decided_at"] = now
     _write(pending_path(key), ticket)

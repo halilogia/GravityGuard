@@ -75,7 +75,7 @@ def normalize_operation(tool_name: str, args: dict) -> Optional[FileOperation]:
         for chunk in lists[0]:
             if not isinstance(chunk, dict) or any(key in chunk for key in PATH_KEYS):
                 raise UnsupportedOperation("Unsupported multi-file or malformed edit chunk")
-            op = normalize_operation("edit_file", {**chunk, "TargetFile": path})
+            op = normalize_operation("edit", {**chunk, "TargetFile": path})
             if op.kind != "EDIT":
                 raise UnsupportedOperation("Edit list contains a non-edit operation")
             chunks.append({key: value for key, value in op.args.items() if key != "TargetFile"})
@@ -83,7 +83,8 @@ def normalize_operation(tool_name: str, args: dict) -> Optional[FileOperation]:
     if old is not None or new is not None:
         if old is None or new is None:
             raise UnsupportedOperation("Both search and replacement text are required")
-        multiple = args.get("AllowMultiple", args.get("replace_all", False))
+        default_multiple = name == "edit_file" and "Path" in args and "Target" in args
+        multiple = args.get("AllowMultiple", args.get("replace_all", default_multiple))
         if not isinstance(multiple, bool):
             raise UnsupportedOperation("replace_all must be boolean")
         bounds = {}

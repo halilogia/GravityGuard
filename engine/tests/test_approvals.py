@@ -105,3 +105,24 @@ class ApprovalTicketTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ApprovalStoreVisibilityTest(unittest.TestCase):
+    """A ticket written under GRAVITYGUARD_LOG_DIR must be visible and decidable without that variable."""
+
+    def test_ticket_in_log_dir_is_found_and_decided_in_place(self):
+        with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as logs:
+            saved = {k: os.environ.pop(k, None) for k in ("GRAVITYGUARD_APPROVAL_DIR", "GRAVITYGUARD_LOG_DIR")}
+            self.addCleanup(lambda: [os.environ.__setitem__(k, v) for k, v in saved.items() if v])
+            os.environ["GRAVITYGUARD_LOG_DIR"] = logs
+            ticket = apr.record_block(RULE, f"[{RULE}]: x", ACTION)
+            del os.environ["GRAVITYGUARD_LOG_DIR"]
+            real_home = Path.home
+            Path.home = classmethod(lambda cls: Path(home))
+            self.addCleanup(setattr, Path, "home", real_home)
+            gem = Path(home) / ".gemini" / "logs" / "gravityguard" / "approvals" / "pending"
+            gem.mkdir(parents=True)
+            (gem / f"{ticket['id']}.json").write_text((Path(logs) / "approvals" / "pending" / f"{ticket['id']}.json").read_text("utf-8"), "utf-8")
+            self.assertIn(ticket["id"], [t["id"] for t in apr.list_pending()])
+            apr.approve(ticket["id"])
+            self.assertTrue((gem.parent / "receipts" / f"{ticket['id']}.json").is_file())

@@ -41,7 +41,7 @@ def denied_targets(conversation_id: str, log_dir: str | None = None) -> list[str
 def session_logger(log_event, tool_name: str, conversation_id: str):
     """The dispatcher's `_log`: audit every event and remember file targets denied in this conversation."""
     def _log(status: str, target: str, reason: str, rule_id: str = "", evasion_markers=None) -> None:
-        if status == "BLOCKED":
+        if status == "BLOCKED" and rule_id not in ("PROJECTION_UNSUPPORTED", "TOOL_SCHEMA_UNSUPPORTED", "STATE_LOCK_TIMEOUT"):
             record_denied_target(conversation_id, target)
         elif status == "APPROVED" and rule_id != "READ_ALLOW":
             forget_denied_target(conversation_id, target)  # the file tool accepted the corrected write: the denial is resolved

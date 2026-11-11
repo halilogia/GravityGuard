@@ -316,7 +316,10 @@ class TestPmaBoundaryDetector(unittest.TestCase):
         self.assertTrue(is_pma_exempt(""))
 
     def test_dispatcher_wires_pma_guard(self):
-        src = Path(_ENGINE_DIR, "gravityguard_engine", "dispatcher.py").read_text(encoding="utf-8")
+        src = (
+            Path(_ENGINE_DIR, "gravityguard_engine", "dispatcher.py").read_text(encoding="utf-8")
+            + Path(_ENGINE_DIR, "gravityguard_engine", "code_guards.py").read_text(encoding="utf-8")
+        )
         self.assertIn("check_pma_horizontal(target_file)", src)
         self.assertIn("check_pma_imports(target_file, added_text)", src)
         self.assertIn("ARCH_PMA_HORIZONTAL_DENY", src)

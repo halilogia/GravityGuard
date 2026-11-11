@@ -31,7 +31,7 @@ _INLINE_FLAG = re.compile(r"(?<!\S)-(?:c|e|command|encodedcommand)(?!\S)|<<|(?<!
 
 def _is_throwaway(path: str) -> bool:
     stem = os.path.basename(path).lower().rsplit(".", 1)[0]
-    return bool(set(re.split(r"[_\-.\s]+", stem)) & _THROWAWAY_TOKENS)
+    return bool(set(re.split(r"[_\-.\s]+", stem)) & _THROWAWAY_TOKENS) or "/scratch/" in _norm(path)
 
 
 def _writes_source(text: str) -> bool:

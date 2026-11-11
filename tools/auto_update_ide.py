@@ -111,6 +111,10 @@ for ext_dir in targets:
         except Exception as e:
             print(f"⚠️ extensions.json güncellenemedi: {e}")
 
+plugin_scripts_eng = home / '.gemini' / 'config' / 'plugins' / 'gravityguard' / 'scripts' / 'gravityguard_engine'
+if plugin_scripts_eng.parent.exists():
+    shutil.copytree(repo_root / 'engine' / 'gravityguard_engine', plugin_scripts_eng, dirs_exist_ok=True)
+    print("✔ Plugin scripts/gravityguard_engine senkronize edildi.")
 print("✔ 2/4 Uzantı dosyaları başarıyla IDE dizinine kopyalandı.")
 
 # 3. Clean Corrupted Chromium Service Worker Cache (ONLY while no IDE process is running)

@@ -34,6 +34,7 @@ This document serves as the persistent engineering knowledge repository for **Gr
 - Deploy checkpoint-aware readers and writers before maintenance. Detailed reports and archives belong outside Git repositories. Never clear governance obligations, self-review records or fallback spools as log cleanup.
 
 ### Tool schema compatibility invariant
+- Antigravity IDE's native `edit_file` tool (`Path`, `Target`, `Replacement`) replaces all occurrences by default (`AllowMultiple=True`), whereas `MultiEdit` chunks normalize via `"edit"` (`AllowMultiple=False` unless `replace_all=True`). `diffing.py` falls back to stripping trailing horizontal whitespace per line when exact match fails, and `session_quarantine.py` never records `PROJECTION_UNSUPPORTED`, `TOOL_SCHEMA_UNSUPPORTED`, or `STATE_LOCK_TIMEOUT` as policy-evasion targets.
 - G0 protection is a mandatory floor: project/user shadow preferences cannot disable it. Structured tool operations cannot mutate installed control files or runtime receipt/state files.
 - Projection failures are explicit denials. `GRAVITYGUARD_TEST_VIRTUAL_FILES=1` exists only for synthetic legacy fixtures and must not be configured in production hooks.
 - Review governance is opt-in and uses unsigned self-review records under `.gravityguard/self-review/<id>.json`, bound to the candidate fingerprint. No review key (`GRAVITYGUARD_REVIEW_KEY_FILE`) or `receipt_auth` module exists any more; the check catches omission, not forgery.

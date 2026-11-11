@@ -3,189 +3,66 @@
 GravityGuard Engine — Main Dispatcher & Rule Orchestration Subsystem.
 Zero external dependencies.
 """
-import contextlib
-import io
+import contextlib  # noqa: F401
+import io  # noqa: F401
 import json
 import os
-import re
+import re  # noqa: F401
 import sys
 import time
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict
-
+from typing import List, Tuple, Optional, Dict  # noqa: F401
 
 from .quality_signals import find_evasion_markers
-from .architecture_rules import (
-    analyze_python_srp,
-    check_arch_file_growth,
-    check_design_icon_rule,
-    check_g3_compiler_bypass,
-    check_g7_ts_first,
-    check_pma_horizontal,
-    check_pma_imports,
-    find_design_responsive_violations,
-    is_ts_cohesive_monolith,
-    record_and_check_cumulative_growth,
+from .architecture_rules import (  # noqa: F401
+    analyze_python_srp, check_arch_file_growth, check_design_icon_rule, check_g3_compiler_bypass,
+    check_g7_ts_first, check_pma_horizontal, check_pma_imports, find_design_responsive_violations,
+    is_ts_cohesive_monolith, record_and_check_cumulative_growth,
 )
 from .audit import log_event
-from .plugin_rules import apply_plugin_rules  # drop-in rules: engine/gravityguard_engine/rules/*.py
-from .doc_automation import doc_obligation_auto, is_knowledge_governed_path, resolve_knowledge_doc
+from .plugin_rules import apply_plugin_rules
+from .doc_automation import doc_obligation_auto, is_knowledge_governed_path, resolve_knowledge_doc  # noqa: F401
 from .state_lock import StateLockTimeout
 from .diagnostics import read_recent_diagnostics, trigger_background_validation
 from .diffing import get_diff_analysis, get_projected_and_old_content, ProjectionError
-from .engine_integrity import engine_source_defect, repair_reason, run_lkg
-from .policy_integrity import MANDATORY_RULES, check_policy_change, is_runtime_control_file
-from .session_quarantine import session_logger
+from .engine_integrity import engine_source_defect, repair_reason, run_lkg  # noqa: F401
+from .policy_integrity import MANDATORY_RULES, check_policy_change, is_runtime_control_file  # noqa: F401
+from .session_quarantine import forget_denied_target, session_logger
 from .shell_rules import check_shell_command
 from .token_guard import evaluate_token_guard
-from .publication_guard import scan_git_secrets
-from .removal_observer import observe_removals
+from .publication_guard import scan_git_secrets  # noqa: F401
+from .removal_observer import observe_removals  # noqa: F401
 from .operations import normalize_operation, UnsupportedOperation
-from .governance import (
-    get_session_stop_retries,
-    get_unresolved_doc_obligations,
-    get_unresolved_test_evidence,
-    increment_session_stop_retries,
-    reconcile_obligations_on_disk,
-    record_pending_doc_obligation,
-    record_pending_test_evidence,
-    record_resolution_intent,
-    reset_session_stop_retries,
-    resolve_pending_doc_obligations,
-    resolve_pending_test_evidence,
+from .governance import (  # noqa: F401
+    get_session_stop_retries, get_unresolved_doc_obligations, get_unresolved_test_evidence,
+    increment_session_stop_retries, reconcile_obligations_on_disk, record_pending_doc_obligation,
+    record_pending_test_evidence, record_resolution_intent, reset_session_stop_retries,
+    resolve_pending_doc_obligations, resolve_pending_test_evidence,
 )
-
-from .write_signals import collect_write_signals
-from .stop_gate import critical_blockers, note_touched_file, other_stop_roots, ratchet_findings
-from .ratchet_gate import RULE_ID as RATCHET_GROWTH_RULE_ID, check_ratchet_growth
+from .write_signals import collect_write_signals  # noqa: F401
+from .stop_gate import critical_blockers, note_touched_file, other_stop_roots, ratchet_findings  # noqa: F401
+from .ratchet_gate import RULE_ID as RATCHET_GROWTH_RULE_ID, check_ratchet_growth  # noqa: F401
 from .project_context import (
-    harden_streams_to_utf8,
-    is_doc_governed_target,
-    load_gravityguard_config,
-    resolve_complexity_thresholds,
-    resolve_project_root,
-    should_enforce_doc_obligations,
+    harden_streams_to_utf8, is_doc_governed_target, load_gravityguard_config,
+    resolve_complexity_thresholds, resolve_project_root, should_enforce_doc_obligations,
 )
-from .security_rules import (
-    check_blind_doc_overwrite,
-    check_escape_hatch_tampering,
-    check_g0_secret_leak,
-    check_g1_silent_exception,
-    check_g2_test_integrity,
-    check_unsafe_code_patterns,
-    is_protected_env_file,
+from .security_rules import (  # noqa: F401
+    check_blind_doc_overwrite, check_escape_hatch_tampering, check_g0_secret_leak,
+    check_g1_silent_exception, check_g2_test_integrity, check_unsafe_code_patterns, is_protected_env_file,
 )
-from .test_evidence import (
-    evaluate_t0_gate,
-    evaluate_test_evidence,
-    final_test_evidence_warnings,
-    resolve_candidate_test_file,
+from .test_evidence import (  # noqa: F401
+    evaluate_t0_gate, evaluate_test_evidence, final_test_evidence_warnings, resolve_candidate_test_file,
 )
-from .delivery_gate import evaluate_ebdg_ui_gate
-from .hook_output import drop_repeated_warnings, finalize
-# Review governance removed
-
-def _project_relative(path: str, root: Path) -> str:
-    """Project-relative, forward-slash form of a recorded path (the absolute path when it lies outside the root)."""
-    try:
-        return Path(path).resolve().relative_to(root.resolve()).as_posix()
-    except (ValueError, OSError):
-        return str(path).replace("\\", "/")
-
-
-def is_rule_shadow(rule_id: str, cfg: Optional[dict]) -> bool:
-    """Checks if a rule is configured in shadow mode (observes without blocking/warning)."""
-    if rule_id in MANDATORY_RULES or not isinstance(cfg, dict):
-        return False
-    rules_cfg = cfg.get("rules", {})
-    if isinstance(rules_cfg, dict):
-        r_entry = rules_cfg.get(rule_id)
-        if isinstance(r_entry, dict) and r_entry.get("mode") == "shadow":
-            return True
-        if r_entry == "shadow":
-            return True
-    return False
-
-
-# A conversation id becomes a directory name below the user's brain folder: only plain identifiers are accepted,
-# never separators or `..` (otherwise a crafted id would make the archiver rewrite an arbitrary `tasks.md`).
-_SAFE_CONVERSATION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
-
-
-def _perform_task_archiving(project_root: Path, conversation_id: str) -> None:
-    try:
-        from .task_archiver import archive_completed_tasks
-        candidates = [project_root / "tasks.md", project_root / "task.md"]
-        if conversation_id and conversation_id != "default" and _SAFE_CONVERSATION_ID.fullmatch(conversation_id):
-            candidates.append(Path.home() / ".gemini" / "antigravity" / "brain" / conversation_id / "tasks.md")
-        for t_path in candidates:
-            if t_path.is_file():
-                res = archive_completed_tasks(t_path)
-                if res.get("performed") and int(res.get("archived_count", 0)) > 0:
-                    log_event(
-                        "stop", "APPROVED", str(t_path),
-                        f"Archived {res['archived_count']} completed tasks into taskslog.md",
-                        rule_id="TASK_ARCHIVE_AUTO",
-                        conversation_id=conversation_id
-                    )
-    except Exception as arch_err:
-        log_event(
-            "stop", "WARNING", "tasks.md",
-            f"Non-fatal error during automatic task archiving: {arch_err}",
-            rule_id="TASK_ARCHIVE_ERROR",
-            conversation_id=conversation_id
-        )
-
-
-def _perform_architecture_sync(project_root: Path, conversation_id: str) -> None:
-    """Refresh the managed architecture block when source files change. Never breaks the session."""
-    try:
-        from .doc_automation import sync_architecture
-        res = sync_architecture(project_root)
-        if res and res["status"] != "unchanged":
-            log_event(
-                "stop", "APPROVED", res["path"], f"ARCHITECTURE.md auto-sync ({res['status']})",
-                rule_id="ARCHITECTURE_SYNC_AUTO", conversation_id=conversation_id
-            )
-    except Exception as sync_err:
-        log_event(
-            "stop", "WARNING", "ARCHITECTURE.md", f"Non-fatal error during architecture sync: {sync_err}",
-            rule_id="ARCHITECTURE_SYNC_ERROR", conversation_id=conversation_id
-        )
-
-
-def _auto_resolve_changelog(project_root: Path, conversation_id: str, unresolved_docs: dict) -> list:
-    """Inject fallback CHANGELOG/KNOWLEDGE entries and close only completed obligations."""
-    try:
-        from .doc_automation import inject_changelog_entry, inject_knowledge_entry, summarize_changes
-        resolved = []
-        for doc in ("CHANGELOG.md", "KNOWLEDGE.md", "docs/KNOWLEDGE.md"):
-            mine = []
-            for p, info in unresolved_docs.items():
-                candidate = Path(p)
-                try:
-                    (candidate if candidate.is_absolute() else project_root / candidate).resolve().relative_to(project_root.resolve())
-                except ValueError:
-                    continue
-                if doc in info.get("required_docs", ["CHANGELOG.md"]):
-                    mine.append(p)
-            if not mine:
-                continue
-            path = project_root / doc
-            inject = inject_changelog_entry if doc == "CHANGELOG.md" else inject_knowledge_entry
-            if not inject(path, summarize_changes(project_root, sorted(mine))):
-                continue
-            resolved.extend(resolve_pending_doc_obligations(str(path), project_root, conversation_id))
-            log_event("stop", "APPROVED", str(path), f"Documentation entry auto-injected for {len(mine)} file(s)",
-                      rule_id="CHANGELOG_AUTO_INJECT" if doc == "CHANGELOG.md" else "KNOWLEDGE_AUTO_INJECT",
-                      conversation_id=conversation_id)
-        return list(dict.fromkeys(resolved))
-    except Exception as inj_err:
-        log_event(
-            "stop", "WARNING", "CHANGELOG.md", f"Non-fatal error during changelog auto-injection: {inj_err}",
-            rule_id="CHANGELOG_AUTO_INJECT_ERROR", conversation_id=conversation_id
-        )
-        return []
+from .delivery_gate import evaluate_ebdg_ui_gate  # noqa: F401
+from .hook_output import drop_repeated_warnings, finalize  # noqa: F401
+from .stop_dispatcher import (  # noqa: F401
+    _SAFE_CONVERSATION_ID, _auto_resolve_changelog, _perform_architecture_sync,
+    _perform_task_archiving, _project_relative, handle_stop_hook, is_rule_shadow,
+)
+from .code_guards import evaluate_code_guards
+from .crash_recovery import (  # noqa: F401
+    _CRASH_CONTEXT, _audit_guard_unavailable, _audit_recovery, _log_cli_error, _recover_from_crash, run_cli,
+)
 
 
 def validate_gravityguard() -> None:
@@ -193,7 +70,7 @@ def validate_gravityguard() -> None:
     start_time = time.perf_counter()
 
     raw_input = sys.stdin.read() if not sys.stdin.isatty() else ""
-    _CRASH_CONTEXT["raw"] = raw_input  # kept only so a crash can be re-validated by the last-known-good engine (never logged)
+    _CRASH_CONTEXT["raw"] = raw_input
     if not raw_input.strip():
         print(json.dumps({"decision": "allow"}))
         sys.exit(0)
@@ -208,7 +85,6 @@ def validate_gravityguard() -> None:
         print(json.dumps({"decision": "deny", "reason": "[TOOL_SCHEMA_UNSUPPORTED]: Expected a JSON object"}))
         sys.exit(0)
 
-    # Minimal, non-sensitive call identity for crash telemetry (never the arguments or file contents).
     _call = payload.get("toolCall")
     _CRASH_CONTEXT.update(
         stop=bool(payload.get("terminationReason") or "--stop" in sys.argv),
@@ -216,165 +92,9 @@ def validate_gravityguard() -> None:
         conversation_id=str(payload.get("conversationId", "default")),
     )
 
-    # ========================================================================
-    # 0. Lifecycle Hook Check: Stop / PostInvocation or CLI --stop flag
-    # ========================================================================
     if payload.get("terminationReason") or "--stop" in sys.argv:
-        term_reason = payload.get("terminationReason", "")
-        if term_reason in ("user_cancel", "cancelled", "user_abort"):
-            print(json.dumps({"decision": "allow"}))
-            sys.exit(0)
+        handle_stop_hook(payload)
 
-        try:
-            project_root = resolve_project_root(payload)
-            conversation_id = payload.get("conversationId", "default")
-            cfg = load_gravityguard_config("", project_root)
-
-            # Mandatory security scans run before the advisory circuit breaker.
-            security_findings = []
-            for scan_root in [project_root, *other_stop_roots(payload, project_root)]:
-                security_findings.extend(scan_git_secrets(scan_root))
-            if security_findings:
-                reason = " | ".join(security_findings)
-                log_event("stop", "BLOCKED", "workspace", reason, rule_id="FINAL_SECURITY_SCAN", conversation_id=conversation_id)
-                print(json.dumps({"decision": "continue", "reason": reason}))
-                sys.exit(0)
-
-            # Deterministic doc automation: refresh ARCHITECTURE.md when engine/ or src/ code changed.
-            _perform_architecture_sync(project_root, conversation_id)
-
-            # Defect A fix: Circuit breaker strictly governed by session continuation retries
-            session_retries = get_session_stop_retries(project_root, conversation_id)
-            if session_retries >= 5:
-                critical = critical_blockers(project_root, cfg)
-                if critical:
-                    reason = (
-                        f"Devre kesici: {session_retries} deneme aşıldı ancak kritik mimari/test regresyonu mevcut; "
-                        "manuel müdahale veya refactoring zorunlu. | " + " | ".join(f"[{rule}] {msg}" for rule, msg in critical)
-                    )
-                    log_event("stop", "BLOCKED", "workspace", reason, rule_id="STOP_CIRCUIT_BREAKER_BLOCKED", conversation_id=conversation_id)
-                    print(json.dumps({"decision": "continue", "reason": reason}))
-                    sys.exit(0)
-                log_event(
-                    "stop", "WARNING", "workspace",
-                    f"Circuit breaker triggered (retries={session_retries}): allowing stop despite obligations",
-                    rule_id="STOP_CIRCUIT_BREAKER",
-                    conversation_id=conversation_id
-                )
-                reset_session_stop_retries(project_root, conversation_id)
-                _perform_task_archiving(project_root, conversation_id)
-                print(json.dumps({"decision": "allow", "reason": f"Devre kesici: {session_retries} deneme sonrası Stop serbest bırakıldı; açık yükümlülükler için insana bildir."}))
-                sys.exit(0)
-
-            # Defect B fix: Reconcile obligations with physical filesystem verification
-            reconcile_obligations_on_disk(project_root, conversation_id, cfg)
-
-            unresolved_tests = dict(get_unresolved_test_evidence(project_root, conversation_id))
-            unresolved_docs = dict(get_unresolved_doc_obligations(project_root, conversation_id))
-            for other_root in other_stop_roots(payload, project_root):
-                other_cfg = load_gravityguard_config("", other_root)
-                reconcile_obligations_on_disk(other_root, conversation_id, other_cfg)
-                unresolved_tests.update(get_unresolved_test_evidence(other_root, conversation_id))
-                unresolved_docs.update(get_unresolved_doc_obligations(other_root, conversation_id))
-
-            warn_reasons = []
-            try:
-                removals = observe_removals(project_root)
-            except OSError as removal_err:
-                removals = {"deleted": [], "suspicious_tests": []}
-                log_event("stop", "WARNING", "workspace", f"Removal observer state error: {removal_err}", rule_id="REMOVAL_OBSERVER_ERROR", conversation_id=conversation_id)
-            if removals["deleted"]:
-                names = removals["deleted"]
-                shown = ", ".join(names[:8]) + (f" (+{len(names) - 8} more)" if len(names) > 8 else "")
-                log_event("stop", "APPROVED", "workspace", f"{len(names)} file(s) deleted outside the hook path: {shown}", rule_id="DELETE_OBSERVED", conversation_id=conversation_id)
-            if removals["suspicious_tests"]:
-                tests = removals["suspicious_tests"]
-                shown = ", ".join(tests[:5]) + (f" (+{len(tests) - 5} more)" if len(tests) > 5 else "")
-                removal_warn = (
-                    f"Test Silme Uyarısı: Test dosyası silindi ama test ettiği kod hâlâ duruyor: {shown}. "
-                    "Özellik gerçekten kaldırılıyorsa kodunu da sil; değilse testi geri getir. Emin değilsen kullanıcıya sor."
-                )
-                log_event("stop", "WARNING", "workspace", removal_warn, rule_id="TEST_DELETED_SUBJECT_REMAINS", conversation_id=conversation_id)
-                warn_reasons.append(f"[TEST_DELETED_SUBJECT_REMAINS] {removal_warn}")
-            for t_rule, t_msg in final_test_evidence_warnings(unresolved_tests):
-                log_event("stop", "WARNING", "workspace", t_msg, rule_id=t_rule, conversation_id=conversation_id)
-                warn_reasons += [f"[{t_rule}] {t_msg}"] if session_retries < 1 else []  # one-shot: told once, never holds Stop
-
-            # T0: dynamic test run + LCOV gate (opt-in via testEvidence.dynamicExecution)
-            t0_findings = evaluate_t0_gate(str(project_root), cfg)
-            for t0_rule, t0_msg in t0_findings:
-                log_event("stop", "WARNING", "workspace", t0_msg, rule_id=t0_rule, conversation_id=conversation_id)
-                warn_reasons.append(f"[{t0_rule}] {t0_msg}")
-
-            # EBDG Phase 0: UI Visual Screenshot Evidence Gate
-            ui_allowed, ui_warn, _ = evaluate_ebdg_ui_gate(
-                project_root=project_root,
-                conversation_id=conversation_id,
-                session_retries=session_retries,
-                cfg=cfg
-            )
-            if not ui_allowed and ui_warn:
-                log_event("stop", "WARNING", "workspace", ui_warn, rule_id="EBDG_UI_SCREENSHOT_PENDING", conversation_id=conversation_id)
-                warn_reasons.append(f"[EBDG_UI_SCREENSHOT_PENDING] {ui_warn}")
-
-            if unresolved_docs and (session_retries >= 4 or doc_obligation_auto(cfg)):
-                for closed in _auto_resolve_changelog(project_root, conversation_id, unresolved_docs):
-                    unresolved_docs.pop(closed, None)
-
-            if unresolved_docs:
-                changed = ", ".join(f"'{_project_relative(p, project_root)}'" for p in unresolved_docs)
-                needed = sorted({d for info in unresolved_docs.values() for d in info.get("required_docs", ["CHANGELOG.md"])})
-                if needed == ["CHANGELOG.md"]:
-                    todo = (
-                        "CHANGELOG.md [Unreleased] bölümüne bu değişikliği anlatan bir girdi ekle. "
-                        "(`## [Unreleased]` başlığı birden fazla geçebilir: edit_file Target'ı olarak yalnız başlığı değil, "
-                        "ilk başlık satırını ve ardındaki benzersiz satırı birlikte ver; önce dosyanın ilk 15 satırını oku. "
-                        "Son denemede yapılmamışsa GravityGuard tek satırlık özeti otomatik ekler.)"
-                    )
-                else:
-                    todo = f"Şu dokümanları güncelle: {', '.join(needed)}."
-                policy_ref = " (docs/KNOWLEDGE.md §6)" if (project_root / "docs" / "KNOWLEDGE.md").is_file() else ""
-                retries_left = max(0, 5 - (session_retries + 1))
-                doc_warn = (
-                    f"Dokümantasyon Yükümlülüğü{policy_ref}: Kod değişti ({changed}) ama doküman güncellenmedi. {todo} "
-                    f"(Kalan deneme: {retries_left}; sonra devre kesici durdurmaya izin verir.)"
-                )
-                log_event("stop", "WARNING", "workspace", doc_warn, rule_id="DOC_OBLIGATION_UNRESOLVED", conversation_id=conversation_id)
-                warn_reasons.append(f"[DOC_OBLIGATION_UNRESOLVED] {doc_warn}")
-
-            # Technical Debt Ratchet Gate: working-tree files that grew past their accepted ceiling (stop_gate.py)
-            ratchet_regressions = ratchet_findings(
-                project_root, cfg, conversation_id, is_rule_shadow("ARCH_RATCHET_REGRESSION", cfg), list(unresolved_docs))
-            warn_reasons += [f"[ARCH_RATCHET_REGRESSION] {msg}" for _rel, msg in ratchet_regressions]
-
-            if warn_reasons:
-                increment_session_stop_retries(project_root, conversation_id)
-                _mark = lambda ok: chr(0x2713) if ok else chr(0x2717)
-                status_summary = (
-                    f"Aşama Durumu: [Kod: {_mark(True)}] "
-                    f"[Test: {_mark(not (unresolved_tests or t0_findings))}] "
-                    f"[Görsel: {_mark(ui_allowed)}] "
-                    f"[Doküman: {_mark(not unresolved_docs)}] "
-                    f"[Mimari Ratchet: {_mark(not ratchet_regressions)}]"
-                )
-                full_reason = f"{status_summary} | " + " | ".join(warn_reasons)
-                print(json.dumps({"decision": "continue", "reason": full_reason}))
-            else:
-                reset_session_stop_retries(project_root, conversation_id)
-                _perform_task_archiving(project_root, conversation_id)
-                print(json.dumps({"decision": "allow"}))
-            sys.exit(0)
-        except StateLockTimeout as lock_err:
-            log_event("stop", "WARNING", "workspace", f"State lock timeout during Stop hook: {lock_err}", rule_id="STATE_LOCK_TIMEOUT", conversation_id=conversation_id)
-            print(json.dumps({
-                "decision": "continue",
-                "reason": f"Durum kilidi zaman aşımı (StateLockTimeout): Oturum durumu güvenli şekilde doğrulanamadığı için henüz sonlandırılamaz ({lock_err})."
-            }))
-            sys.exit(0)
-
-    # ========================================================================
-    # PreToolUse Lifecycle Hook Dispatcher
-    # ========================================================================
     tool_call = payload.get("toolCall", {})
     if not isinstance(tool_call, dict):
         print(json.dumps({"decision": "deny", "reason": "[TOOL_SCHEMA_UNSUPPORTED]: Invalid toolCall"}))
@@ -392,13 +112,13 @@ def validate_gravityguard() -> None:
         print(json.dumps({"decision": "deny", "reason": shell_reason}))
         sys.exit(0)
 
-    # 1.5 TOKEN OUTPUT GUARD: stop context-bloating reads and unbounded commands
     token_warning = ""
     _guard_cwd = payload.get("cwd")
     token_finding = evaluate_token_guard(
         tool_name,
         raw_args,
-        cwd=_guard_cwd if isinstance(_guard_cwd, str) else os.getcwd(), conversation_id=c_id,
+        cwd=_guard_cwd if isinstance(_guard_cwd, str) else os.getcwd(),
+        conversation_id=c_id,
     )
     if token_finding:
         _guard_target = str(
@@ -417,7 +137,6 @@ def validate_gravityguard() -> None:
             sys.exit(0)
         _log("WARNING", _guard_target, token_finding.reason, rule_id=token_finding.rule_id)
         token_warning = token_finding.reason
-
 
     try:
         operation = normalize_operation(tool_name, args)
@@ -440,7 +159,6 @@ def validate_gravityguard() -> None:
     target_file = os.path.realpath(target_file)
     args = {**operation.args, "TargetFile": target_file}
 
-    # 1. Normalize path
     normalized_path = target_file.replace("\\\\", "/").replace("\\", "/")
     file_lower = normalized_path.lower()
 
@@ -467,7 +185,6 @@ def validate_gravityguard() -> None:
         ".so", ".bin", ".wasm", ".zip", ".tar", ".gz"
     ))
 
-    # 1.1 Protect live .env files from being read, created, overwritten, or modified by AI agents
     if is_protected_env_file(operation.path) or is_protected_env_file(target_file):
         p_root = resolve_project_root(payload, target_file)
         cfg = load_gravityguard_config(target_file, p_root)
@@ -484,7 +201,6 @@ def validate_gravityguard() -> None:
             }))
             sys.exit(0)
 
-    # Fast-pass for view/read tools once protected env files are checked
     if operation.kind == "READ":
         if target_file:
             _log("APPROVED", target_file, "Read tool allowed for non-sensitive file", rule_id="READ_ALLOW")
@@ -499,19 +215,14 @@ def validate_gravityguard() -> None:
         print(json.dumps({"decision": "deny", "reason": reason}))
         sys.exit(0)
 
-    # 1.2 Prevent blind overwriting of existing documentation, architecture, rule, and skill files
     p_root = resolve_project_root(payload, target_file)
     cfg = load_gravityguard_config(target_file, p_root)
     is_blocked, doc_reason = check_blind_doc_overwrite(target_file, tool_name, args, p_root)
     if is_blocked and not is_rule_shadow("G4_NO_BLIND_OVERWRITE", cfg):
         _log("BLOCKED", target_file, "Blind overwrite of existing documentation/rule file forbidden", rule_id="G4_NO_BLIND_OVERWRITE")
-        print(json.dumps({
-            "decision": "deny",
-            "reason": doc_reason
-        }))
+        print(json.dumps({"decision": "deny", "reason": doc_reason}))
         sys.exit(0)
 
-    # Reconcile disk state for any obligations satisfied by prior tool writes
     try:
         reconcile_obligations_on_disk(p_root, c_id, cfg)
     except StateLockTimeout as lock_err:
@@ -522,7 +233,6 @@ def validate_gravityguard() -> None:
         }))
         sys.exit(0)
 
-    # 2. Extract projected and old content, compute exact diff
     try:
         old_full_content, projected_content = get_projected_and_old_content(
             target_file, tool_name, args,
@@ -549,17 +259,12 @@ def validate_gravityguard() -> None:
     all_warnings: List[Tuple[str, str]] = []
     complexity_thresholds = resolve_complexity_thresholds(cfg)
 
-    # Check if a documentation file is being edited/written -> defer doc resolution until G0 passes
     should_resolve_doc = False
     if target_file and is_data_or_doc:
         norm_target = target_file.replace("\\", "/").lower()
         if norm_target.endswith(("changelog.md", "knowledge.md", "architecture.md", "readme.md")):
             should_resolve_doc = True
 
-    # ========================================================================
-    # GUARD 0: G0 — SECRET LEAK GUARD (BLOCK / WARN)
-    # Executed for ALL text files (code, config, docs, vendor, cache)
-    # ========================================================================
     g0_violated, g0_reason, g0_warn = check_g0_secret_leak(added_text)
     if g0_warn:
         if is_rule_shadow("G0_SECRET_LEAK", cfg):
@@ -572,22 +277,19 @@ def validate_gravityguard() -> None:
             _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {g0_reason}", rule_id="G0_SECRET_LEAK")
         else:
             _log("BLOCKED", target_file, g0_reason, rule_id="G0_SECRET_LEAK")
-            print(json.dumps({
-                "decision": "deny",
-                "reason": f"🛑 [G0_SECRET_LEAK]: '{target_file}' - {g0_reason}"
-            }))
+            print(json.dumps({"decision": "deny", "reason": f"🛑 [G0_SECRET_LEAK]: '{target_file}' - {g0_reason}"}))
             sys.exit(0)
 
-    # A filename suffix cannot exempt incoming text from G0.
     if is_binary_asset:
+        if target_file:
+            forget_denied_target(c_id, target_file)
         if os.environ.get("GRAVITYGUARD_LOG_EXEMPTS", "").lower() in ("1", "true", "yes"):
             _log("APPROVED", target_file, "Exempt file (Binary Asset)", rule_id="EXEMPT")
         print(json.dumps({"decision": "allow"}))
         sys.exit(0)
 
-
-    # DESIGN_RESPONSIVE_RULE: Mobile / Phone Viewport (DENY) & Fluid Layout (WARN)
-    responsive_violations = find_design_responsive_violations(target_file, projected_content, added_line_numbers)
+    is_prose_doc = file_lower.endswith((".md", ".markdown", ".mdx", ".txt"))
+    responsive_violations = [] if is_prose_doc else find_design_responsive_violations(target_file, projected_content, added_line_numbers)
     for viol in responsive_violations:
         if viol.get("severity") == "DENY":
             deny_msg = (
@@ -596,19 +298,16 @@ def validate_gravityguard() -> None:
                 f"\u00d6neri: {viol['suggestion']}"
             )
             _log('BLOCKED', target_file, deny_msg, rule_id='DESIGN_RESPONSIVE_RULE')
-            print(json.dumps({
-                "decision": "deny",
-                "reason": f"\U0001f6d1 [DESIGN_RESPONSIVE_RULE]: '{target_file}:{viol['line']}' - {deny_msg}"
-            }))
+            print(json.dumps({"decision": "deny", "reason": f"\U0001f6d1 [DESIGN_RESPONSIVE_RULE]: '{target_file}:{viol['line']}' - {deny_msg}"}))
             sys.exit(0)
         elif viol.get("severity") == "WARN":
             warn_msg = f"Sat\u0131r {viol['line']}: {viol['message']} \u00d6neri: {viol['suggestion']}"
             _log('WARNING', target_file, warn_msg, rule_id='DESIGN_RESPONSIVE_RULE')
             all_warnings.append(('DESIGN_RESPONSIVE_RULE', warn_msg))
 
-    apply_plugin_rules(target_file, projected_content, added_line_numbers, cfg, _log, all_warnings)
+    if not is_prose_doc:
+        apply_plugin_rules(target_file, projected_content, added_line_numbers, cfg, _log, all_warnings)
 
-    # Fast-pass for vendor, cache, and non-code text assets (ONLY AFTER G0 IS CLEAN)
     knowledge_governed = is_knowledge_governed_path(target_file, p_root)
     if is_vendor_or_cache or (is_data_or_doc and not knowledge_governed and not file_lower.endswith((".py", ".ts", ".tsx", ".js", ".jsx"))):
         if should_resolve_doc:
@@ -621,8 +320,8 @@ def validate_gravityguard() -> None:
                     "reason": f"🛑 [STATE_LOCK_TIMEOUT]: Durum dosyası kilit zaman aşımı ({lock_err}). Kayıp güncelleme riskini önlemek için işlem güvenli kilit alınana kadar reddedildi."
                 }))
                 sys.exit(0)
-        # Benign exempt files (Vendor/Cache/Asset/Docs) are silent by default (like read tools)
-        # to prevent log pollution and keep the Live Monitor focused on actual guards, warnings, and code changes.
+        if target_file:
+            forget_denied_target(c_id, target_file)
         if target_file and (all_warnings or os.environ.get("GRAVITYGUARD_LOG_EXEMPTS", "").strip().lower() in ("1", "true", "yes")):
             _log("APPROVED", target_file, "Exempt file (Vendor/Cache/Asset)", rule_id="EXEMPT")
         if all_warnings:
@@ -632,217 +331,27 @@ def validate_gravityguard() -> None:
             print(json.dumps({"decision": "allow"}))
         sys.exit(0)
 
-
     is_python = file_lower.endswith(".py")
     is_ts = file_lower.endswith((".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"))
 
-    # ========================================================================
-    # GUARD 1: G1 — SILENT EXCEPTION (BLOCK)
-    # ========================================================================
-    if not is_test_file:
-        g1_violated, g1_reason = check_g1_silent_exception(
-            added_lines, added_text, added_line_numbers, projected_content, is_python, is_ts
-        )
-        if g1_violated:
-            if is_rule_shadow("G1_SILENT_EXCEPTION", cfg):
-                _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {g1_reason}", rule_id="G1_SILENT_EXCEPTION")
-            else:
-                _log("BLOCKED", target_file, g1_reason, rule_id="G1_SILENT_EXCEPTION")
-                print(json.dumps({
-                    "decision": "deny",
-                    "reason": f"🛑 [G1_SILENT_EXCEPTION]: '{target_file}' - {g1_reason}"
-                }))
-                sys.exit(0)
-
-    # ========================================================================
-    # GUARD 2: G2 — TEST INTEGRITY (BLOCK / WARN)
-    # ========================================================================
-    if is_test_file:
-        g2_violated, g2_reason, g2_warn = check_g2_test_integrity(
-            added_text, old_full_content, projected_content, is_test_file
-        )
-        if g2_warn:
-            if is_rule_shadow("G2_TEST_INTEGRITY", cfg):
-                _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {g2_warn}", rule_id="G2_TEST_INTEGRITY")
-            else:
-                _log("WARNING", target_file, g2_warn, rule_id="G2_TEST_INTEGRITY")
-                all_warnings.append(("G2_TEST_INTEGRITY", g2_warn))
-        if g2_violated:
-            if is_rule_shadow("G2_TEST_INTEGRITY", cfg):
-                _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {g2_reason}", rule_id="G2_TEST_INTEGRITY")
-            else:
-                _log("BLOCKED", target_file, g2_reason, rule_id="G2_TEST_INTEGRITY")
-                print(json.dumps({
-                    "decision": "deny",
-                    "reason": f"🛑 [G2_TEST_INTEGRITY]: '{target_file}' - {g2_reason}"
-                }))
-                sys.exit(0)
-
-    # ========================================================================
-    # GUARD 2B: G2_SECURITY_TAMPERING — ESCAPE HATCH INJECTION (BLOCK)
-    # ========================================================================
-    tamper_violated, tamper_reason = check_escape_hatch_tampering(added_text, old_full_content)
-    if tamper_violated:
-        if is_rule_shadow("G2_SECURITY_TAMPERING", cfg):
-            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {tamper_reason}", rule_id="G2_SECURITY_TAMPERING")
-        else:
-            _log("BLOCKED", target_file, tamper_reason, rule_id="G2_SECURITY_TAMPERING")
-            print(json.dumps({
-                "decision": "deny",
-                "reason": f"🛑 [G2_SECURITY_TAMPERING]: '{target_file}' - {tamper_reason}"
-            }))
-            sys.exit(0)
-
-    # ========================================================================
-    # GUARD 3: G3 — COMPILER & LINTER BYPASS (WARN ONLY)
-    # ========================================================================
-    g3_matches = check_g3_compiler_bypass(added_text)
-    if g3_matches:
-        warn_msg = f"Yeni linter/derleyici susturması eklendi ({', '.join(g3_matches)}). Hatanın kök nedenini çözmeyi değerlendirin."
-        if is_rule_shadow("G3_COMPILER_BYPASS", cfg):
-            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {warn_msg}", rule_id="G3_COMPILER_BYPASS")
-        else:
-            _log("WARNING", target_file, warn_msg, rule_id="G3_COMPILER_BYPASS")
-            all_warnings.append(("G3_COMPILER_BYPASS", warn_msg))
-
-    # ========================================================================
-    # SEC_UNSAFE_PATTERN — risky constructs in new code: TLS off, shell=True, SQL string-building, innerHTML, pickle (WARN ONLY)
-    # ========================================================================
-    _lower_target = target_file.replace("\\", "/").lower()
-    if not _lower_target.endswith((".md", ".txt", ".rst")) and "/tests/" not in _lower_target and not _lower_target.rsplit("/", 1)[-1].startswith("test_"):
-        unsafe_hits = check_unsafe_code_patterns(added_text)
-        if unsafe_hits:
-            unsafe_msg = f"Yeni kodda riskli yapı tespit edildi: {'; '.join(unsafe_hits)}. Gerekçesiz bırakmayın veya güvenli alternatifi kullanın."
-            if is_rule_shadow("SEC_UNSAFE_PATTERN", cfg):
-                _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {unsafe_msg}", rule_id="SEC_UNSAFE_PATTERN")
-            else:
-                _log("WARNING", target_file, unsafe_msg, rule_id="SEC_UNSAFE_PATTERN")
-                all_warnings.append(("SEC_UNSAFE_PATTERN", unsafe_msg))
-
-    # ========================================================================
-    # GUARD 4B: ARCH_PMA_* — PRAGMATIC MODULAR ARCHITECTURE BOUNDARIES (BLOCK)
-    # ========================================================================
-    pma_hits = []
-    pma_h_violated, pma_h_reason = check_pma_horizontal(target_file)
-    if pma_h_violated:
-        pma_hits.append(("ARCH_PMA_HORIZONTAL_DENY", pma_h_reason))
-    pma_i_violated, pma_i_rule, pma_i_reason = check_pma_imports(target_file, added_text)
-    if pma_i_violated:
-        pma_hits.append((pma_i_rule, pma_i_reason))
-    for pma_rule, pma_reason in pma_hits:
-        if is_rule_shadow(pma_rule, cfg):
-            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {pma_reason}", rule_id=pma_rule)
-        else:
-            _log("BLOCKED", target_file, pma_reason, rule_id=pma_rule)
-            print(json.dumps({
-                "decision": "deny",
-                "reason": f"🛑 [{pma_rule}]: '{target_file}' - {pma_reason}"
-            }))
-            sys.exit(0)
-
-    # GUARD 5D: ARCH_RATCHET_GROWTH_DENY — a file over ratchetLoc takes no net new lines (shrinking is always allowed)
-    growth_msg = check_ratchet_growth(str(p_root), target_file, old_full_content, projected_content, complexity_thresholds["ratchetLoc"])
-    if growth_msg:
-        if is_rule_shadow(RATCHET_GROWTH_RULE_ID, cfg):
-            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {growth_msg}", rule_id=RATCHET_GROWTH_RULE_ID)
-        else:
-            _log("BLOCKED", target_file, growth_msg, rule_id=RATCHET_GROWTH_RULE_ID)
-            print(json.dumps({"decision": "deny", "reason": f"[{RATCHET_GROWTH_RULE_ID}]: '{target_file}' - {growth_msg}"}))
-            sys.exit(0)
-
-    # ========================================================================
-    # GUARD 6: ARCH_FILE_GROWTH — LARGE FILE & RAPID GROWTH (WARN ONLY)
-    # ========================================================================
-    added_clean_lines = [l for l in added_lines if l.strip() and not l.strip().startswith(("#", "//", "/*", "*"))]
-    single_write_thresh = complexity_thresholds.get("singleWriteLoc", 200) if complexity_thresholds else 200
-    is_cumul, cum_loc = record_and_check_cumulative_growth(target_file, len(added_clean_lines), threshold=single_write_thresh)
-
-    arch_triggered, arch_msg = check_arch_file_growth(
+    evaluate_code_guards(
         target_file=target_file,
+        file_lower=file_lower,
+        is_test_file=is_test_file,
+        is_python=is_python,
+        is_ts=is_ts,
         old_full_content=old_full_content,
         projected_content=projected_content,
         added_lines=added_lines,
-        is_test_file=is_test_file,
-        thresholds=complexity_thresholds,
-        cumulative_loc=cum_loc if is_cumul else 0
+        added_text=added_text,
+        added_line_numbers=added_line_numbers,
+        p_root=p_root,
+        cfg=cfg,
+        complexity_thresholds=complexity_thresholds,
+        log_fn=_log,
+        all_warnings=all_warnings,
     )
-    if arch_triggered:
-        if is_rule_shadow("ARCH_FILE_GROWTH", cfg):
-            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {arch_msg}", rule_id="ARCH_FILE_GROWTH")
-        else:
-            _log("WARNING", target_file, arch_msg, rule_id="ARCH_FILE_GROWTH")
-            all_warnings.append(("ARCH_FILE_GROWTH", arch_msg))
 
-    # Warn-only signals independent of the growth heuristic (ratchet ceiling, mixed responsibilities); see write_signals.py
-    for signal_id, signal_msg in collect_write_signals(str(p_root), target_file, projected_content, complexity_thresholds, is_python, is_ts):
-        if is_rule_shadow(signal_id, cfg):
-            _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {signal_msg}", rule_id=signal_id)
-        else:
-            _log("WARNING", target_file, signal_msg, rule_id=signal_id)
-            all_warnings.append((signal_id, signal_msg))
-
-    # ========================================================================
-    # GUARD 7: EXISTING SRP (Single Responsibility Principle & Web SRP)
-    # ========================================================================
-    if not is_test_file:
-        if file_lower.endswith((".html", ".htm")):
-            from .web_srp_analyzer import analyze_html_srp
-            is_violation, rule_id, reason_msg, web_warnings = analyze_html_srp(projected_content, file_path=target_file)
-            for wid, wmsg in web_warnings:
-                if is_rule_shadow(wid, cfg):
-                    _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {wmsg}", rule_id=wid)
-                else:
-                    _log("WARNING", target_file, wmsg, rule_id=wid)
-                    all_warnings.append((wid, wmsg))
-            if is_violation:
-                if is_rule_shadow(rule_id, cfg):
-                    _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {reason_msg}", rule_id=rule_id)
-                else:
-                    _log("BLOCKED", target_file, reason_msg, rule_id=rule_id)
-                    print(json.dumps({
-                        "decision": "deny",
-                        "reason": f"🛑 [{rule_id}]: '{target_file}' - {reason_msg}"
-                    }))
-                    sys.exit(0)
-
-        elif is_python:
-            is_violation, reason = analyze_python_srp(projected_content, file_path=target_file, thresholds=complexity_thresholds)
-            if is_violation:
-                if is_rule_shadow("SRP_BOUNDARY", cfg):
-                    _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {reason}", rule_id="SRP_BOUNDARY")
-                else:
-                    _log("BLOCKED", target_file, reason, rule_id="SRP_BOUNDARY")
-                    print(json.dumps({
-                        "decision": "deny",
-                        "reason": f"🛑 [SRP_BOUNDARY]: '{target_file}' - {reason}"
-                    }))
-                    sys.exit(0)
-
-        elif is_ts:
-            tab_matches = len(re.findall(r"activeTab\s*===", projected_content))
-            card_matches = len(re.findall(r"glass-card", projected_content))
-            grid_blocks = len(re.findall(r"display:\s*'grid'", projected_content))
-            scroll_ids = len(re.findall(r"scrollToSection\s*\(", projected_content))
-            multi_job = (tab_matches >= 2 and card_matches >= 3) or (scroll_ids >= 3 and grid_blocks >= 3)
-
-            if multi_job and not is_ts_cohesive_monolith(projected_content):
-                reason_msg = (
-                    f"SRP İhlali: Dosya {tab_matches} sekme, {card_matches} kart ve {grid_blocks} grid bloğu içeriyor. "
-                    f"Her sekmeyi / kartı ayrı bir bileşen dosyasına bölün."
-                )
-                if is_rule_shadow("SRP_BOUNDARY", cfg):
-                    _log("SHADOW_TRIGGER", target_file, f"[SHADOW] {reason_msg}", rule_id="SRP_BOUNDARY")
-                else:
-                    _log("BLOCKED", target_file, reason_msg, rule_id="SRP_BOUNDARY")
-                    print(json.dumps({
-                        "decision": "deny",
-                        "reason": f"🛑 [SRP_BOUNDARY]: '{target_file}' - {reason_msg}"
-                    }))
-                    sys.exit(0)
-
-    # ========================================================================
-    # GUARD 8: PHASE 2 TEST EVIDENCE AIRBAG (T1, T2, T3) — WARN ONLY
-    # ========================================================================
     test_evidence_warnings, test_actions = evaluate_test_evidence(
         target_file=target_file,
         is_test_file=is_test_file,
@@ -852,42 +361,30 @@ def validate_gravityguard() -> None:
         added_line_numbers=added_line_numbers,
         cfg=cfg,
         is_python=is_python,
-        is_ts=is_ts
+        is_ts=is_ts,
     )
     for rule_id, warn_msg in test_evidence_warnings:
         _log("WARNING", target_file, warn_msg, rule_id=rule_id)
         all_warnings.append((rule_id, warn_msg))
 
-    # Stage doc obligation if production/engine code is changed and doc governance is enabled
     pending_doc_record = None
     if should_enforce_doc_obligations(target_file, cfg=cfg, project_root=p_root) and (is_doc_governed_target(target_file, cfg, p_root) or knowledge_governed):
         pending_doc_record = target_file
 
-    # ========================================================================
-    # GUARD 9: STATIC LINTER & COMPILER DIAGNOSTIC FEEDBACK (WARN ONLY)
-    # ========================================================================
     diag_warnings = read_recent_diagnostics(target_file)
     for d_rule, d_msg in diag_warnings:
         _log("WARNING", target_file, d_msg, rule_id=d_rule)
         all_warnings.append((d_rule, d_msg))
 
-    # ========================================================================
-    # PASS / APPROVED
-    # Two-phase commit: All guards passed. Record resolution intents!
-    # Physical reconciliation commits resolutions once written to disk.
-    # ========================================================================
     try:
         if should_resolve_doc:
             record_resolution_intent("doc", target_file, p_root, c_id)
-
         if test_actions.get("resolve_test"):
             record_resolution_intent("test", target_file, p_root, c_id)
-
         if test_actions.get("record_test"):
             tf, cp, en, msg = test_actions["record_test"]
             record_pending_test_evidence(tf, cp, en, msg, p_root, c_id)
             _log("APPROVED", tf, f"Pending test evidence recorded ({en})", rule_id="T1_PENDING")
-
         if pending_doc_record:
             required_docs = ["CHANGELOG.md"]
             k_doc = resolve_knowledge_doc(p_root) if knowledge_governed else None
@@ -895,8 +392,7 @@ def validate_gravityguard() -> None:
                 required_docs.append(k_doc)
             record_pending_doc_obligation(pending_doc_record, required_docs=required_docs, project_root=p_root, conversation_id=c_id)
             _log("APPROVED", pending_doc_record, f"Pending doc obligation recorded ({', '.join(required_docs)})", rule_id="DOC_OBLIGATION_PENDING")
-
-        note_touched_file(p_root, c_id, target_file)  # the Stop ratchet check must still see it after a `git commit`
+        note_touched_file(p_root, c_id, target_file)
     except StateLockTimeout as lock_err:
         _log("BLOCKED", target_file, f"State lock timeout: {lock_err}", rule_id="STATE_LOCK_TIMEOUT")
         print(json.dumps({
@@ -905,124 +401,16 @@ def validate_gravityguard() -> None:
         }))
         sys.exit(0)
 
-
     elapsed_ms = (time.perf_counter() - start_time) * 1000
     _log("APPROVED", target_file, f"All Guards Passed ({elapsed_ms:.1f}ms)", rule_id="PASS",
          evasion_markers=find_evasion_markers(added_text))
     res_payload = {"decision": "allow"}
-    try:  # each warning is said once per conversation and file; the audit log above keeps every occurrence
+    try:
         all_warnings = drop_repeated_warnings(all_warnings, c_id, target_file)
     except Exception as dedupe_err:
         print(f"[GravityGuard] warning dedupe failed: {dedupe_err}", file=sys.stderr)
     if all_warnings:
-        res_payload["reason"] = " ⚠ ".join(
-            f"[{rule_id}] {msg}" for rule_id, msg in all_warnings
-        )
+        res_payload["reason"] = " ⚠ ".join(f"[{rule_id}] {msg}" for rule_id, msg in all_warnings)
     print(json.dumps(res_payload))
     trigger_background_validation(target_file)
     sys.exit(0)
-
-
-_CRASH_CONTEXT: dict = {}
-
-
-def _log_cli_error(tb_text: str) -> None:
-    """Persist a crash traceback to the global and project-local error logs (best effort)."""
-    from datetime import datetime
-    event = next((a for a in sys.argv[1:] if a.startswith("--")), "stop" if _CRASH_CONTEXT.get("stop") else "pre-tool" if _CRASH_CONTEXT else "unknown")
-    who = f" tool={_CRASH_CONTEXT.get('tool', '')!r} conversation={_CRASH_CONTEXT.get('conversation_id', '')!r}" if _CRASH_CONTEXT else ""
-    entry = f"[{datetime.now().isoformat()}] hook_event={event}{who} argv={sys.argv!r}\n{tb_text}\n"
-    for path in (
-        os.path.expanduser("~/.gemini/config/plugins/gravityguard/logs/gravityguard_errors.log"),
-        os.path.join(".gravityguard", "runtime", "gravityguard_errors.log"),
-    ):
-        try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "a", encoding="utf-8") as fh:
-                fh.write(entry)
-        except Exception:
-            pass
-
-
-def _audit_guard_unavailable(exc: BaseException) -> None:
-    """Record the fail-closed denial in the permanent audit stream so engine outages are not blind spots in telemetry.
-
-    Only the exception type/message and the tool name are stored (no payload, arguments or file contents).
-    """
-    try:
-        log_event(
-            "stop" if _CRASH_CONTEXT.get("stop") else (_CRASH_CONTEXT.get("tool") or "unknown"),
-            "BLOCKED",
-            "engine",
-            f"[GUARD_UNAVAILABLE]: {type(exc).__name__}: {str(exc)[:200]}",
-            rule_id="GUARD_UNAVAILABLE",
-            conversation_id=_CRASH_CONTEXT.get("conversation_id") or None,
-        )
-    except Exception as audit_err:  # telemetry must never turn an outage into a second failure
-        sys.stderr.write(f"[GravityGuard] could not audit GUARD_UNAVAILABLE: {type(audit_err).__name__}\n")
-
-
-def _recover_from_crash() -> Optional[dict]:
-    """Keep the guard useful after an engine defect without failing open.
-
-    1. Re-validate the same payload with the last committed engine (full protection, so a half-edited working tree
-       cannot wedge the agent). 2. If that is unavailable too, allow only writes to engine source files so the
-       defect can be repaired (`engine_integrity.repair_reason`). Anything else stays denied by the caller.
-    """
-    raw = _CRASH_CONTEXT.get("raw") or ""
-    if not raw.strip():
-        return None
-    answer = run_lkg(raw, sys.argv)
-    if answer is not None:
-        return {**answer, "_recovery": "GUARD_FALLBACK_LKG"}
-    reason = repair_reason(raw)
-    return {"decision": "allow", "reason": reason, "_recovery": "GUARD_REPAIR_MODE"} if reason else None
-
-
-def _audit_recovery(recovery: str, exc: BaseException) -> None:
-    try:
-        log_event(
-            "stop" if _CRASH_CONTEXT.get("stop") else (_CRASH_CONTEXT.get("tool") or "unknown"),
-            "WARNING",
-            "engine",
-            f"[{recovery}]: engine defect {type(exc).__name__}: {str(exc)[:160]}",
-            rule_id=recovery,
-            conversation_id=_CRASH_CONTEXT.get("conversation_id") or None,
-        )
-    except Exception as audit_err:  # telemetry must never turn a recovery into a failure
-        sys.stderr.write(f"[GravityGuard] could not audit {recovery}: {type(audit_err).__name__}\n")
-
-
-def run_cli() -> None:
-    # Buffer the decision so every rejection can carry its "do this instead" lesson (rule_tips).
-    real_stdout = sys.stdout
-    buf = io.StringIO()
-    exit_code = None
-    try:
-        with contextlib.redirect_stdout(buf):
-            try:
-                validate_gravityguard()
-            except SystemExit as done:
-                exit_code = done.code
-    except Exception as crash:
-        real_stdout.write(buf.getvalue())
-        import traceback
-        _log_cli_error(traceback.format_exc())
-        recovered = _recover_from_crash()
-        if recovered is not None:
-            recovery = recovered.pop("_recovery")
-            _audit_recovery(recovery, crash)
-            print(json.dumps(recovered))
-            return
-        _audit_guard_unavailable(crash)
-        # Native hosts must receive an explicit result even when persistence or
-        # another subsystem fails. Do not echo payloads or exception contents.
-        print("[GravityGuard] validation failed; operation was not validated", file=sys.stderr)
-        print(json.dumps({"decision": "continue" if "--stop" in sys.argv else "deny",
-                          "reason": "[GUARD_UNAVAILABLE]: Validation could not complete"}))
-        return
-    out = finalize(buf.getvalue(), bool(_CRASH_CONTEXT.get("stop")), str(_CRASH_CONTEXT.get("conversation_id") or ""), _CRASH_CONTEXT)
-    real_stdout.write(out)
-    real_stdout.flush()
-    if exit_code is not None:  # callers and tests rely on the engine's own sys.exit, code 0 included
-        sys.exit(exit_code)

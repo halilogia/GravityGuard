@@ -12,14 +12,18 @@ import ast
 import os
 import re
 from collections import Counter
-from pathlib import Path
 from typing import List, Optional, Set, Tuple
-from .operations import normalize_operation, UnsupportedOperation
+from .doc_overwrite_guard import (  # noqa: F401
+    _FREE_DOC_NAMES,
+    check_blind_doc_overwrite,
+    is_doc_or_rule_file,
+    is_free_doc,
+)
 
 PLACEHOLDER_KEYWORDS = (
     "example", "your_api_key", "your_token", "your-api-key", "your-key",
     "placeholder", "dummy", "mock", "test_token", "changeme",
-    "insert_key", "sample", "replace_me", "xxxxxxxx", "00000000"
+    "insert_key", "sample", "replace_me", "xxxxxxxx", "00000000", "redacted"
 )
 
 
@@ -39,111 +43,6 @@ def is_protected_env_file(file_path: str) -> bool:
         return False
 
     return base_name == ".env" or base_name.startswith(".env.")
-
-
-def is_doc_or_rule_file(file_path: str) -> bool:
-    """True when file is documentation, rule, specification, architecture, or skill file."""
-    if not file_path:
-        return False
-    clean = str(file_path).replace("\\\\", "/").replace("\\", "/").lower()
-    base_name = os.path.basename(clean)
-    return clean.endswith(".md") or base_name in ("license", "gemini.md", "agents.md")
-
-
-_FREE_DOC_NAMES = ("readme", "changelog", "index.md", "contributing", "license")
-
-
-def is_free_doc(file_path: str) -> bool:
-    """Plain prose docs (README, CHANGELOG, INDEX, docs/**): rewriting them whole is normal and git-recoverable."""
-    clean = str(file_path).replace("\\", "/").lower()
-    base = os.path.basename(clean)
-    return base.startswith(_FREE_DOC_NAMES) or "/docs/" in clean
-
-
-def _git_clean_tracked(path: Path) -> bool:
-    """True when the file is tracked by git with no uncommitted change, so HEAD still holds every byte."""
-    import subprocess
-    try:
-        run = lambda *a: subprocess.run(["git", *a], cwd=path.parent, capture_output=True, timeout=5).returncode
-        return run("ls-files", "--error-unmatch", path.name) == 0 and run("diff", "--quiet", "HEAD", "--", path.name) == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
-
-
-def _is_safe_free_rewrite(path: Path, args: dict) -> bool:
-    """Whole rewrite of a prose doc is fine when it is git-recoverable and the new text is not a wipe."""
-    new_text = next((args[k] for k in ("content", "CodeContent", "file_text", "text") if isinstance(args.get(k), str)), "")
-    try:
-        old_len = len(path.read_text(encoding="utf-8", errors="replace").strip())
-    except OSError:
-        return False
-    substantial = sum(1 for ln in new_text.splitlines() if ln.strip()) >= 5 and len(new_text.strip()) >= 0.15 * old_len
-    return substantial and _git_clean_tracked(path)
-
-
-def _keeps_most_of_file(path: Path, args: dict) -> bool:
-    new_text = next((args[k] for k in ("content", "CodeContent", "file_text", "text") if isinstance(args.get(k), str)), None)
-    if not new_text:
-        return False
-    try:
-        old_lines = [ln.strip() for ln in path.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()]
-    except OSError:
-        return False
-    if not old_lines:
-        return True
-    new_lines = {ln.strip() for ln in new_text.splitlines()}
-    return sum(1 for ln in old_lines if ln in new_lines) / len(old_lines) >= 0.8
-
-
-def check_blind_doc_overwrite(
-    target_file: str,
-    tool_name: str,
-    args: dict,
-    project_root: Optional[os.PathLike] = None
-) -> Tuple[bool, str]:
-    """
-    Mechanically prevents AI agents from blindly overwriting existing documentation,
-    architecture, rule, and skill files with write_to_file(Overwrite=True).
-    Forces surgical updates via `replace_file_content` to prevent truncation and invariant loss.
-    Brand new files that do not exist on disk are permitted.
-    """
-    try:
-        operation = normalize_operation(tool_name, {**args, "TargetFile": target_file})
-    except UnsupportedOperation:
-        # Incomplete legacy direct calls still receive the conservative G4 check.
-        operation = None
-    if (operation is None or operation.kind != "WRITE") and tool_name.lower() not in ("write_to_file", "write_file", "write"):
-        return False, ""
-
-    if True:
-        # G4_NO_BLIND_OVERWRITE rule permanently disabled
-        return False, ""
-        return False, ""
-
-    # Check physical existence on disk
-    target_p = Path(target_file)
-    if not target_p.is_absolute() and project_root:
-        target_p = Path(project_root) / target_p
-
-    if target_p.is_file():
-        if _keeps_most_of_file(target_p, args):
-            return False, ""  # exit path: a rewrite keeping at least 80% of the existing lines destroys nothing
-        if is_free_doc(target_file):
-            if _is_safe_free_rewrite(target_p, args):
-                return False, ""  # exit path: prose doc, committed and unchanged, new text is substantial
-            return True, (
-                f"[G4_NO_BLIND_OVERWRITE]: '{target_file}' tümden yeniden yazılabilir, ama yalnızca git'te kayıtlı ve "
-                f"değişmemişse (önce commit/stash edin) ve yeni içerik boş/çok kısa değilse (en az 5 dolu satır, eski boyutun %15'i)."
-            )
-        return True, (
-            f"🛑 [G4_NO_BLIND_OVERWRITE]: Mevcut dokümantasyon, mimari veya kural dosyasının "
-            f"('{target_file}') tümünü yazma aracıyla ('Write' / 'write_to_file') ezmek (Overwrite) yasaklanmıştır! "
-            f"Otonom protokollerin, kural maddelerinin ve kalıcı hafızanın silinmesini önlemek için "
-            f"lütfen cerrahi düzenleme aracını kullanın (Claude Code: Edit; Antigravity: 'replace_file_content'); "
-            f"ya da yeni içerik mevcut satırların en az %80'ini koruyorsa Write izinlidir."
-        )
-
-    return False, ""
 
 
 def is_placeholder(val: str) -> bool:
@@ -167,8 +66,6 @@ _PEM_BODY_RE = re.compile(
     re.DOTALL,
 )
 
-
-
 _VENDOR_TOKEN_PATTERNS = [
     (re.compile(r"\bsk_live_[0-9a-zA-Z]{24,}\b"), "Stripe Canlı Gizli Anahtarı (sk_live_...)"),
     (re.compile(r"\brk_live_[0-9a-zA-Z]{24,}\b"), "Stripe Kısıtlı Anahtarı (rk_live_...)"),
@@ -179,6 +76,7 @@ _VENDOR_TOKEN_PATTERNS = [
     (re.compile(r"https://hooks\.slack\.com/services/T[a-zA-Z0-9_]+/B[a-zA-Z0-9_]+/[a-zA-Z0-9_]+"), "Slack Webhook URL"),
     (re.compile(r"https://discord(?:app)?\.com/api/webhooks/\d+/[a-zA-Z0-9_\-]+"), "Discord Webhook URL"),
 ]
+
 
 def is_elided_pem_fixture(added_text: str, start: int, span: int = 400) -> bool:
     """Determine if a PEM key block is a test/doc placeholder rather than a real key."""
@@ -232,16 +130,13 @@ def check_g0_secret_leak(added_text: str) -> Tuple[bool, str, Optional[str]]:
             return True, f"OpenAI API anahtarı tespit edildi: {redact_token(raw_token)}. Ortam değişkeni kullanın.", None
 
     # D2) OpenAI legacy keys: sk- + 48 letters/digits (no hyphens), or the older sk-<20>T3BlbkFJ<20> form.
-    # `\b` before "sk-" keeps words such as "task-report-..." or "risk-..." out; the fixed hyphen-free length keeps
-    # kebab-case slugs that merely start with "sk-" out.
     legacy_match = re.search(r"\bsk-(?:[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}|[A-Za-z0-9]{48})\b", added_text)
     if legacy_match:
         raw_token = legacy_match.group(0)
         if not is_placeholder(raw_token):
             return True, f"OpenAI API anahtarı (eski biçim) tespit edildi: {redact_token(raw_token)}. Ortam değişkeni kullanın.", None
 
-    # D3) Any other hyphenated sk-* secret (sk-FAKE-do-not-use-0000 style): 20+ key characters that mix a digit and an
-    # uppercase letter. Lowercase kebab slugs and short placeholders (sk-xxxx, sk-your-key-here) stay out.
+    # D3) Any other hyphenated sk-* secret: 20+ key characters that mix a digit and an uppercase letter.
     for generic_match in re.finditer(r"\bsk-[A-Za-z0-9_\-]{20,}", added_text):
         raw_token = generic_match.group(0)
         if re.search(r"\d", raw_token) and re.search(r"[A-Z]", raw_token) and not is_placeholder(raw_token):
@@ -277,13 +172,10 @@ def check_g0_secret_leak(added_text: str) -> Tuple[bool, str, Optional[str]]:
     # 2. MEDIUM-CONFIDENCE WARNING RULES (WARN ONLY, Never Blocks)
     warn_reason: Optional[str] = None
 
-    # JWT (header.payload.signature, both JSON parts base64url) and hard-coded credential assignments
     jwt_match = re.search(r"\beyJ[A-Za-z0-9_\-]{8,}\.eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}", added_text)
     if jwt_match and not is_placeholder(jwt_match.group(0)):
         warn_reason = f"JWT belirteci tespit edildi ({redact_token(jwt_match.group(0))}). Sabit token yerine oturum yönetimi kullanın."
     assign_match = re.search(
-        # Unanchored search already finds `password` inside `db_password`; unbounded `\w*` around the keyword was a ReDoS
-        # (cubic time on one long word), so only a short identifier tail is allowed.
         r"(?i)(?:password|passwd|pwd|secret|api_?key|access_?token|auth_?token|client_?secret)\w{0,40}['\"]?\s*[:=]\s*['\"]([^'\"\s]{12,})['\"]",
         added_text,
     )
@@ -307,8 +199,6 @@ def check_g0_secret_leak(added_text: str) -> Tuple[bool, str, Optional[str]]:
     return False, "", warn_reason
 
 
-# Warn-only code patterns drawn from agent-skill security scanners (AST/tool-misuse classes) and hardening checklists.
-# They never block: each one has legitimate uses, so the writer is asked to justify or fix it.
 _STR_BUILD = r"(?:f[\"']|[\"'][^\"'\n]*[\"']\s*(?:%|\+|\.format\b))"
 _UNSAFE_PATTERNS = (
     (re.compile(r"\bverify\s*=\s*False\b|\brejectUnauthorized\s*:\s*false\b|NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*[\"']?0|InsecureSkipVerify\s*:\s*true"),
@@ -353,7 +243,6 @@ def check_g1_silent_exception(
         return False, ""
 
     if is_python:
-        # 1. Regex check on newly added text lines
         py_empty_pattern = re.compile(
             r"except(?:\s+[^:]+)?:\s*(?:\r?\n\s*)+(?:pass|\.\.\.)(?!\w)",
             re.MULTILINE
@@ -365,7 +254,6 @@ def check_g1_silent_exception(
             line_num = base_txt[:m_found.start()].count("\n") + 1 if m_found else 1
             return True, f"Yeni eklenen boş exception handler tespit edildi (Satır {line_num}: 'except: pass' / 'except: ...'). Hatalar sessizce yutulamaz; hata loglanmalı, anlamlı bir kurtarma/fallback davranışı tanımlanmalı veya yeniden fırlatılmalıdır."
 
-        # 2. AST inspection on projected content: verify line numbers intersect with added_line_numbers
         try:
             tree = ast.parse(projected_content)
             for node in ast.walk(tree):
@@ -385,15 +273,12 @@ def check_g1_silent_exception(
                         start_line = node.lineno
                         end_line = getattr(node, "end_lineno", node.lineno)
                         handler_lines = set(range(start_line, end_line + 1))
-                        # Trigger only if this handler is part of newly added/modified lines
                         if handler_lines.intersection(added_line_numbers):
                             return True, f"Yeni eklenen boş exception handler (Satır {start_line}: except pass/ellipsis). Hatalar sessizce yutulamaz; hata loglanmalı, anlamlı bir kurtarma/fallback davranışı tanımlanmalı veya yeniden fırlatılmalıdır."
         except (SyntaxError, ValueError):
             tree = None
 
     if is_ts:
-        # Regex for TypeScript/JavaScript empty catch blocks:
-        # catch { } OR catch (e) { } OR catch (err) { \n }
         ts_empty_pattern = re.compile(
             r"catch\s*(?:\([^)]*\))?\s*\{\s*\}",
             re.MULTILINE
@@ -416,17 +301,13 @@ def check_g2_test_integrity(
     """
     Guards test suite integrity:
     G2-A: Newly added .skip, pytest.mark.skip, xit, xdescribe -> BLOCK
-          .only -> WARN (not high confidence sabotage)
-          pytest.mark.xfail -> ALLOW (valid intentional test annotation)
     G2-C: Outright deletion of an existing test case -> BLOCK
-    Returns: (is_blocked, block_reason, warn_reason_or_None)
     """
     if not is_test_file:
         return False, "", None
 
     warn_reason: Optional[str] = None
 
-    # G2-A: Newly added disabling mechanisms (BLOCK)
     disablers = [
         (r"\.skip\s*\(", ".skip()"),
         (r"\bxit\s*\(", "xit()"),
@@ -439,11 +320,9 @@ def check_g2_test_integrity(
         if re.search(pattern, added_text):
             return True, f"Test devre dışı bırakma hilesi tespit edildi ({name}). Testleri susturmak yerine hatayı düzeltin.", None
 
-    # .only is treated as warning rather than block
     if re.search(r"\.only\s*\(", added_text):
         warn_reason = "Test dosyasında '.only()' kullanımı tespit edildi (Tüm diğer testleri göz ardı eder). Geçici debug sonrası kaldırmayı unutmayın."
 
-    # Always-true assertions and commented-out assertions prove nothing (WARN: low confidence, filler is common).
     literal = r"(?:\d+(?:\.\d+)?|'[^'\n]*'|\"[^\"\n]*\")"
     tautology = (
         r"^\s*assert\s+True\s*(?:,.*)?$"
@@ -458,7 +337,6 @@ def check_g2_test_integrity(
     elif re.search(commented_assert, added_text, re.MULTILINE):
         warn_reason = "Bir assert yorum satırına alınmış. Testi zayıflatmak yerine hatayı düzeltin; assert gereksizse tümüyle silmek için kullanıcıya sorun."
 
-    # G2-C: Test case deletion verification across full file
     if old_full_content.strip():
         py_tests_old = re.findall(r"^\s*def\s+(test_\w+)\s*\(", old_full_content, re.MULTILINE)
         js_tests_old = re.findall(r"^\s*(?:it|test)(?:\.\w+)*\s*\(\s*[\"']([^\"']+)[\"']", old_full_content, re.MULTILINE)
@@ -475,7 +353,6 @@ def check_g2_test_integrity(
                 if proj_qty < old_qty:
                     deleted.append(test_name)
 
-            # A pure rename removes a name and adds a new one in the same edit: not a deletion.
             added_names = [n for n, q in proj_counts.items() if q > old_counts.get(n, 0)]
             if deleted and len(added_names) >= len(deleted):
                 deleted = []
@@ -494,7 +371,6 @@ def check_escape_hatch_tampering(added_text: str, old_full_content: str) -> Tupl
     """
     Blocks AI attempts to inject escape hatch comments (e.g. `srp: allow-monolith`, `srp: bypass`)
     to silence architectural / SRP guards.
-    Only human developers can add these markers; newly added markers in AI tool calls are blocked.
     """
     marker_pattern = r"(?://|/\*|#)\s*(?:srp\s*:\s*(?:allow-monolith|cohesive-monolith|bypass|noqa)|noqa\s*:\s*srp)\b"
     if re.search(marker_pattern, added_text, re.IGNORECASE):

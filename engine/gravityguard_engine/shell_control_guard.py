@@ -4,6 +4,7 @@ File tools are checked by the dispatcher, so the detour is the shell: `python sc
 `open(<protected file>, "w")`, `Set-Content`, `> file`, `mv`, `rm`. Everything here reads command text (and the body of a
 script the command runs); like the rest of the shell rules it is not a shell interpreter and not an OS sandbox.
 """
+import base64
 import os
 import re
 from collections.abc import Callable, Sequence
@@ -14,8 +15,9 @@ from .shell_tokens import split_command
 
 _SEGMENTS = re.compile(r"[;&|\n(`]+")
 _WORD = re.compile(r"[a-z][a-z0-9_.-]*")
-_REDIRECT = re.compile(r"""\d?>>?\|?[ \t]*("[^"\n]*"|'[^'\n]*'|[^\s;&|<>"']+)""")
+_REDIRECT = re.compile(r"""(?<![=-])\d?>>?(?![=>])\|?[ \t]*("[^"\n]*"|'[^'\n]*'|[^\s;&|<>"'=]+)""")
 _SED_INPLACE = re.compile(r"(?<!\S)(?:-[a-z]*i[a-z]*|--in-place)(?!\S)")
+_ENCODED_CMD = re.compile(r"(?<!\S)-(?:encodedcommand|enc|ec)\s+([A-Za-z0-9+/=]{8,4096})", re.IGNORECASE)
 _WRITE_API = re.compile(
     r"open\s*\([^)\n]{0,300}?,\s*(?:mode\s*=\s*)?[\"'][rbt]*[wax+]|mode\s*=\s*[\"'][rbt]*[wax+]"
     r"|write|unlink|rmtree|truncate|shutil|os\.(?:remove|rename|replace)|fs\.(?:rm|rename|copy|append)"
@@ -47,7 +49,7 @@ class _Target(NamedTuple):
 
 
 def _norm(text: str) -> str:
-    return text.lower().replace("\\\\", "/").replace("\\", "/")
+    return re.sub(r"""['"]\s*\+\s*['"]""", "", text.lower()).replace("\\\\", "/").replace("\\", "/")
 
 
 def _control_text(norm: str) -> bool:
@@ -67,7 +69,7 @@ def _control_target(cwd: str) -> _Target:
         value = raw.strip("\"'")
         if _control_text(_norm(value)):
             return True
-        if not value or len(value) > 500 or value.lower() in _NULL_DEVICES or any(c in value for c in "*?<>|\n"):
+        if not value or len(value) > 500 or value.startswith("-") or value.lower() in (_NULL_DEVICES | _DESTROY | _WRITE | _COPY | _INTERPRETERS) or any(c in value for c in "*?<>|\n="):
             return False
         budget[0] -= 1
         if budget[0] < 0:
@@ -90,7 +92,7 @@ def _denied_target(cwd: str, denied: Sequence[str]) -> _Target:
         parts = path.split("/")
         needles.add(path)
         needles.add("/".join(parts[-2:]))
-        if len(parts[-1]) >= 4:  # "a.c" would match half the commands
+        if len(parts[-1]) >= 4 and parts[-1] not in {"readme.md", "skill.md", "tasks.md", "task.md", "changelog.md", "knowledge.md", "architecture.md", "package.json", "tsconfig.json", "index.ts", "index.js", "main.py", "__init__.py", "server.py"}:  # "a.c" or generic names would match unrelated commands
             needles.add(parts[-1])
 
     pattern = re.compile("|".join(re.escape(n) for n in sorted(needles, key=len, reverse=True)))
@@ -175,11 +177,16 @@ def _segment_writes(segment: str, target: _Target, cwd: str, depth: int) -> bool
 
 def _writes(command: str, target: _Target, cwd: str, depth: int = 0) -> bool:
     text = command[:_MAX_TEXT]
+    for m in _ENCODED_CMD.finditer(text):
+        try:
+            text += " ; " + base64.b64decode(m.group(1) + "=" * (-len(m.group(1)) % 4)).decode("utf-16le", errors="ignore")
+        except ValueError:
+            text += ""
     if any(target.token(m.group(1)) for m in _REDIRECT.finditer(text)):
         return True
     if depth == 0:  # inline code and heredocs are split across segments, so judge them as one text
         norm = _norm(text)
-        if set(_WORD.findall(norm)) & _INTERPRETERS and _WRITE_API.search(norm) and target.text(norm):
+        if set(_WORD.findall(norm)) & (_INTERPRETERS | _DESTROY | _WRITE) and _WRITE_API.search(norm) and target.text(norm):
             return True
     return any(_segment_writes(segment, target, cwd, depth) for segment in _SEGMENTS.split(text))
 
@@ -188,7 +195,7 @@ def _base_dir(command: str, cwd: str | None) -> str:
     """Directory relative names resolve against, '' when the command moves elsewhere first (`cd x && echo > a`)."""
     if set(_WORD.findall(_norm(command[:_MAX_TEXT]))) & _CHANGE_DIR:
         return ""
-    return cwd if isinstance(cwd, str) and cwd else os.getcwd()
+    return cwd if isinstance(cwd, str) and cwd else ("" if is_runtime_control_file(os.getcwd()) else os.getcwd())
 
 
 def writes_control_file(command: str, cwd: str | None = None) -> bool:

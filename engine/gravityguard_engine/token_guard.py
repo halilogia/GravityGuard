@@ -170,7 +170,7 @@ def evaluate_read_guard(
 _RECURSIVE_LIST = re.compile(r"(dir\s+/s\b)|(Get-ChildItem[^\n|]*-Recurse)|(\bfind\s+/\s)|(grep\s+-r\s+/)", re.IGNORECASE)
 # Output already narrowed: a depth limit, a count flag, or a pipe into a filter/reducer.
 _LIMITED = re.compile(
-    r"(-Depth\b)|(-TotalCount)|(-(First|Last|Take|Tail|Head)\s+\d+)"
+    r"(-Depth\b)|(-MaxDepth\b)|(-TotalCount)|(-(First|Last|Take|Tail|Head)\s+\d+)|(\)\s*\.\s*(?:Count|Length)\b)"
     r"|(\|\s*(Select-Object|Select|Measure-Object|Measure|Where-Object|Where|Select-String|findstr|grep|rg|head|tail|wc|more|less)\b)",
     re.IGNORECASE)
 _GIT_LOG_UNBOUNDED = re.compile(r"\bgit\s+log\b(?!.*(-n\s*\d+|(?<![\w-])-\d+\b|--max-count|--oneline\s+-n|\|\s*head|\|\s*Select-Object))", re.IGNORECASE)

@@ -78,6 +78,9 @@ class TestProtectedControlFiles(_Workspace):
             "python -c \"open('.claude/settings.json', 'w').write('{}')\"",
             "python - <<EOF\nimport pathlib\npathlib.Path('.agents/hooks.json').write_text('{}')\nEOF",
             "git checkout -- x && rm .agents/hooks.json",
+            "del skills\\..\\.claude\\settings.json",
+            "rm .CLAUDE\\settings.json",
+            "& { $d='.cl'+'aude'; Set-Content -LiteralPath \"$d\\settings.json\" -Value TEST }",
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.check(command).startswith("[POLICY_INTEGRITY]"), self.check(command))
@@ -101,7 +104,7 @@ class TestProtectedControlFiles(_Workspace):
             "cp .claude/settings.json backup.json",
             "python -c \"print(open('.claude/settings.json').read())\"",
             "git commit -m 'document hooks.json handling'",
-            "rm -rf node_modules",
+            "rm -rf node_modules", "python -c \"print([x for x in [1, 4] if x >= 3])\"", "Rename-Item -Path 'C:\\proj\\old_dir' -NewName 'new_dir'", "rg -n \"POLICY_INTEGRITY\" .claude/rules", "Get-ChildItem -LiteralPath .claude -Recurse -File",
         ):
             with self.subTest(command=command):
                 self.assertEqual(self.check(command), "")
@@ -113,6 +116,7 @@ class TestRelativePathResolution(_Workspace):
     def test_relative_write_inside_the_installed_plugin_is_blocked(self):
         reason = check_shell_command({"command": "echo a > notes.txt"}, self.PLUGIN_DIR)
         self.assertTrue(reason.startswith("[POLICY_INTEGRITY]"))
+        self.assertEqual(check_shell_command({"command": 'node -e "Promise.resolve(1).then(p => console.log(p))"'}, self.PLUGIN_DIR), "")
 
     def test_directory_change_stops_relative_resolution(self):
         for command in (f'cd "{self.root}" && git init -q . && echo a > a', f'Set-Location "{self.root}"; "a" | Out-File a'):
@@ -183,7 +187,7 @@ class TestScratchPatchDeny(_Workspace):
     PATCHER = "from pathlib import Path\np = Path('src/app.py')\np.write_text(p.read_text().replace('a', 'b'))\n"
 
     def test_throwaway_script_rewriting_source_is_denied(self):
-        for name in ("patch_app.py", "temp_fix.py", "scratch/scratch_edit.py", "fix.py", "tmp-apply.py"):
+        for name in ("patch_app.py", "temp_fix.py", "scratch/scratch_edit.py", "scratch/sync_custom.py", "fix.py", "tmp-apply.py"):
             with self.subTest(name=name):
                 self.script(name, self.PATCHER)
                 self.assertTrue(self.check(f"python {name}").startswith("[SCRATCH_PATCH_DENY]"))

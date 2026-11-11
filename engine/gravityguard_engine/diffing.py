@@ -32,6 +32,11 @@ def _replace(content: str, args: dict) -> str:
     window = "".join(lines[start:end])
     count = window.count(target)
     if count == 0:
+        norm_window = "\n".join(line.rstrip(" \t") for line in window.splitlines())
+        norm_target = "\n".join(line.rstrip(" \t") for line in target.splitlines())
+        if norm_target and norm_window.count(norm_target) > 0:
+            window, target, count = norm_window, norm_target, norm_window.count(norm_target)
+    if count == 0:
         head = target[:120].replace("\n", "\\n")
         raise ProjectionError(f"Search text was not found in the requested range (lines {start + 1}-{end}; searched: '{head}')")
     multiple = args.get("AllowMultiple", False)
